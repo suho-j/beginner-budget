@@ -19,21 +19,40 @@
     return { field, message };
   }
 
+  function parseMoneyInput(value) {
+    if (typeof value === 'number') {
+      return window.BudgetStorage.isPositiveInteger(value) ? value : null;
+    }
+    if (typeof value !== 'string') return null;
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    if (!/^\d{1,3}(,\d{3})*$|^\d+$/.test(trimmed)) return null;
+    const amount = Number(trimmed.replaceAll(',', ''));
+    return window.BudgetStorage.isPositiveInteger(amount) ? amount : null;
+  }
+
+  function canonicalizeTransactionInput(input = {}) {
+    const type = input.type;
+    return {
+      date: String(input.date || '').trim(),
+      type,
+      category: String(input.category || '').trim(),
+      amount: parseMoneyInput(input.amount),
+      memo: String(input.memo || '').trim()
+    };
+  }
+
   function validateTransaction(input) {
     const errors = [];
-    const type = input.type;
-    const amount = Number(input.amount);
-    const category = String(input.category || '').trim();
-    const date = String(input.date || '').trim();
-    const memo = String(input.memo || '').trim();
+    const normalized = canonicalizeTransactionInput(input || {});
 
-    if (!window.BudgetStorage.isValidDateString(date)) errors.push(error('date', '날짜를 올바르게 선택해 주세요.'));
-    if (!TYPES.includes(type)) errors.push(error('type', '유형은 수입 또는 지출만 선택할 수 있어요.'));
-    if (!category || !categoriesFor(type).includes(category)) errors.push(error('category', '선택한 유형에 맞는 카테고리를 골라 주세요.'));
-    if (!window.BudgetStorage.isPositiveInteger(amount)) errors.push(error('amount', '금액은 쉼표 없이 1원 이상의 양의 정수로 입력해 주세요.'));
-    if (memo.length > window.BudgetStorage.MAX_MEMO_LENGTH) errors.push(error('memo', '메모는 80자 이내로 입력해 주세요.'));
+    if (!window.BudgetStorage.isValidDateString(normalized.date)) errors.push(error('date', '날짜를 올바르게 선택해 주세요.'));
+    if (!TYPES.includes(normalized.type)) errors.push(error('type', '유형은 수입 또는 지출만 선택할 수 있어요.'));
+    if (!normalized.category || !categoriesFor(normalized.type).includes(normalized.category)) errors.push(error('category', '선택한 유형에 맞는 카테고리를 골라 주세요.'));
+    if (!window.BudgetStorage.isPositiveInteger(normalized.amount)) errors.push(error('amount', '금액은 1원 이상의 숫자로 입력해 주세요. 쉼표(예: 12,000)는 사용할 수 있어요.'));
+    if (normalized.memo.length > window.BudgetStorage.MAX_MEMO_LENGTH) errors.push(error('memo', '메모는 80자 이내로 입력해 주세요.'));
 
-    return { valid: errors.length === 0, errors };
+    return { valid: errors.length === 0, errors, value: normalized };
   }
 
   function addTransaction(state, input) {
@@ -41,14 +60,15 @@
     if (!validation.valid) {
       return { state, ok: false, errors: validation.errors };
     }
+    const value = validation.value;
 
     const transaction = {
       id: window.BudgetStorage.createId(),
-      date: input.date,
-      type: input.type,
-      category: input.category,
-      amount: Number(input.amount),
-      memo: String(input.memo || '').trim(),
+      date: value.date,
+      type: value.type,
+      category: value.category,
+      amount: value.amount,
+      memo: value.memo,
       source: 'user'
     };
 
@@ -77,13 +97,46 @@
   function filterTransactions(transactions, filters) {
     const month = filters.month || '';
     const type = filters.type || 'all';
+    const query = String(filters.query || '').trim().toLocaleLowerCase('ko-KR');
     return transactions
       .filter((tx) => !month || monthFromDate(tx.date) === month)
       .filter((tx) => type === 'all' || tx.type === type)
+      .filter((tx) => {
+        if (!query) return true;
+        return [tx.date, typeLabelsForSearch(tx.type), tx.category, tx.memo]
+          .join(' ')
+          .toLocaleLowerCase('ko-KR')
+          .includes(query);
+      })
       .sort((a, b) => (b.date + b.id).localeCompare(a.date + a.id));
   }
 
-  function summarize(transactions, monthlyBudget, month) {
+  function typeLabelsForSearch(type) {
+    return type === 'income' ? '수입 income' : type === 'expense' ? '지출 expense' : '';
+  }
+
+  function categoryBreakdownFor(transactions, expenseTotal) {
+    const totals = new Map();
+    transactions
+      .filter((tx) => tx.type === 'expense')
+      .forEach((tx) => totals.set(tx.category, (totals.get(tx.category) || 0) + tx.amount));
+    return Array.from(totals, ([category, amount]) => ({
+      category,
+      amount,
+      rate: expenseTotal > 0 ? Math.round((amount / expenseTotal) * 100) : 0
+    })).sort((a, b) => b.amount - a.amount || a.category.localeCompare(b.category, 'ko-KR'));
+  }
+
+  function daysRemainingInMonth(month, today = new Date()) {
+    if (!/^\d{4}-\d{2}$/.test(month)) return 0;
+    const [year, monthNumber] = month.split('-').map(Number);
+    const lastDay = new Date(year, monthNumber, 0).getDate();
+    const sameMonth = today.getFullYear() === year && today.getMonth() === monthNumber - 1;
+    const startDay = sameMonth ? today.getDate() : 1;
+    return Math.max(1, lastDay - startDay + 1);
+  }
+
+  function summarize(transactions, monthlyBudget, month, today = new Date()) {
     const target = filterTransactions(transactions, { month, type: 'all' });
     const income = target.filter((tx) => tx.type === 'income').reduce((sum, tx) => sum + tx.amount, 0);
     const expense = target.filter((tx) => tx.type === 'expense').reduce((sum, tx) => sum + tx.amount, 0);
@@ -91,7 +144,21 @@
     const budgetUsed = expense;
     const budgetRemaining = Number(monthlyBudget) - expense;
     const budgetRate = Number(monthlyBudget) > 0 ? Math.min(999, Math.round((expense / Number(monthlyBudget)) * 100)) : 0;
-    return { income, expense, balance, budgetUsed, budgetRemaining, budgetRate, monthlyBudget: Number(monthlyBudget), count: target.length };
+    const categoryBreakdown = categoryBreakdownFor(target, expense);
+    const dailyAllowance = Math.max(0, Math.floor(budgetRemaining / daysRemainingInMonth(month, today)));
+    return {
+      income,
+      expense,
+      balance,
+      budgetUsed,
+      budgetRemaining,
+      budgetRate,
+      monthlyBudget: Number(monthlyBudget),
+      count: target.length,
+      categoryBreakdown,
+      topExpenseCategory: categoryBreakdown[0] || null,
+      dailyAllowance
+    };
   }
 
   function hasSampleForMonth(transactions, month) {
@@ -156,6 +223,8 @@
     INCOME_CATEGORIES,
     SAMPLE_SIGNATURE,
     categoriesFor,
+    parseMoneyInput,
+    canonicalizeTransactionInput,
     validateTransaction,
     addTransaction,
     deleteTransaction,

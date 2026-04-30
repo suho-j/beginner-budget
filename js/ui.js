@@ -87,6 +87,42 @@
     elements.budgetStatusText.textContent = summary.budgetRemaining < 0
       ? `예산을 ${formatWon(Math.abs(summary.budgetRemaining))} 초과했어요`
       : `월 예산 ${formatWon(summary.monthlyBudget)} 중 남은 금액`;
+
+    elements.dailyAllowance.textContent = formatWon(summary.dailyAllowance);
+    elements.dailyAllowanceHelp.textContent = summary.budgetRemaining < 0
+      ? '예산을 초과해 하루 사용 가능액을 0원으로 표시합니다'
+      : '남은 예산을 이번 달 남은 날짜로 나눴어요';
+    elements.topCategory.textContent = summary.topExpenseCategory
+      ? `${summary.topExpenseCategory.category} ${formatWon(summary.topExpenseCategory.amount)}`
+      : '아직 없음';
+    elements.topCategoryHelp.textContent = summary.topExpenseCategory
+      ? `선택한 달 지출의 ${summary.topExpenseCategory.rate}%`
+      : '선택한 달에 지출을 추가하면 표시됩니다';
+    renderCategoryBreakdown(elements, summary.categoryBreakdown);
+  }
+
+  function renderCategoryBreakdown(elements, breakdown) {
+    elements.categoryBreakdownList.innerHTML = '';
+    if (!breakdown.length) {
+      const empty = document.createElement('p');
+      empty.className = 'muted';
+      empty.textContent = '선택한 달의 지출 카테고리 분석이 아직 없어요.';
+      elements.categoryBreakdownList.append(empty);
+      return;
+    }
+    breakdown.slice(0, 5).forEach((item) => {
+      const row = document.createElement('div');
+      row.className = 'category-row';
+      const label = document.createElement('span');
+      label.textContent = `${item.category} · ${item.rate}%`;
+      const amount = document.createElement('strong');
+      amount.textContent = formatWon(item.amount);
+      const bar = document.createElement('span');
+      bar.className = 'category-bar';
+      bar.style.width = `${Math.min(item.rate, 100)}%`;
+      row.append(label, amount, bar);
+      elements.categoryBreakdownList.append(row);
+    });
   }
 
   function renderList(elements, transactions) {
@@ -162,6 +198,7 @@
       formMessage: $('#form-message'),
       monthInput: $('#filter-month'),
       filterType: $('#filter-type'),
+      filterQuery: $('#filter-query'),
       toolMessage: $('#tool-message'),
       sampleButton: $('#sample-button'),
       exportButton: $('#export-button'),
@@ -182,7 +219,12 @@
       balanceCard: $('.balance-card'),
       budgetRateLabel: $('#budget-rate-label'),
       budgetMeter: $('.meter-track'),
-      budgetMeterFill: $('#budget-meter-fill')
+      budgetMeterFill: $('#budget-meter-fill'),
+      dailyAllowance: $('#daily-allowance'),
+      dailyAllowanceHelp: $('#daily-allowance-help'),
+      topCategory: $('#top-category'),
+      topCategoryHelp: $('#top-category-help'),
+      categoryBreakdownList: $('#category-breakdown-list')
     };
   }
 
@@ -195,6 +237,7 @@
     fillCategoryOptions,
     initDefaults,
     renderSummary,
+    renderCategoryBreakdown,
     renderList,
     downloadText,
     getElements

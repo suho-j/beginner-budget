@@ -20,9 +20,12 @@ python3 -m http.server 8000
 ## 주요 기능
 
 - 날짜, 유형, 카테고리, 금액, 메모로 수입/지출 추가
+- 쉼표가 포함된 금액 입력 지원(예: 12,000)
 - 월 예산 저장(기본값 500,000원)
-- 월별 필터와 유형별 필터
+- 월별 필터, 유형별 필터, 검색 필터
 - 수입/지출/잔액/예산 남은 금액 요약
+- 하루 사용 가능액과 가장 많이 쓴 카테고리 표시
+- 카테고리별 지출 분석
 - 예산 사용률 진행바
 - 거래 삭제 전 확인 창 표시
 - 샘플 데이터 채우기와 기존 샘플 교체
@@ -43,3 +46,5 @@ cd beginner-budget-app
 node --check js/storage.js && node --check js/transactions.js && node --check js/ui.js && node --check js/app.js
 node tests/run-tests.cjs
 ```
+
+브라우저 스모크 검증은 로컬 서버 실행 후 Chrome/Playwright로 예산 저장, 쉼표 금액 입력, 거래 추가, 인사이트/검색 업데이트, 콘솔 에러 없음을 확인합니다.

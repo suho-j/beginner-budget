@@ -59,6 +59,22 @@
           <span id="budget-meter-fill" class="meter-fill"></span>
         </div>
       </div>
+      <div class="insight-grid" aria-label="이번 달 소비 인사이트" aria-live="polite">
+        <article class="insight-card">
+          <span class="card-label">하루 사용 가능액</span>
+          <strong id="daily-allowance">0원</strong>
+          <small id="daily-allowance-help">남은 예산을 남은 날짜로 나눈 금액</small>
+        </article>
+        <article class="insight-card">
+          <span class="card-label">가장 많이 쓴 카테고리</span>
+          <strong id="top-category">아직 없음</strong>
+          <small id="top-category-help">선택한 달의 지출 기준</small>
+        </article>
+      </div>
+      <div class="category-breakdown" aria-labelledby="category-breakdown-title">
+        <h3 id="category-breakdown-title">카테고리별 지출</h3>
+        <div id="category-breakdown-list" class="category-breakdown-list"></div>
+      </div>
     </section>
 
     <section class="panel" aria-labelledby="budget-title">
@@ -94,8 +110,8 @@
         </div>
         <div class="field">
           <label for="tx-amount">금액</label>
-          <input id="tx-amount" name="amount" type="number" inputmode="numeric" min="1" step="1" placeholder="예: 12000" required aria-describedby="amount-help form-message">
-          <small id="amount-help" class="hint">쉼표 없이 숫자만 입력하세요.</small>
+          <input id="tx-amount" name="amount" type="text" inputmode="numeric" pattern="[0-9,]*" placeholder="예: 12,000" required aria-describedby="amount-help form-message">
+          <small id="amount-help" class="hint">숫자만 입력하거나 쉼표를 넣어도 됩니다. 예: 12,000</small>
         </div>
         <div class="field full">
           <label for="tx-memo">메모 <span class="optional">선택</span></label>
@@ -123,6 +139,10 @@
             <option value="income">수입만</option>
             <option value="expense">지출만</option>
           </select>
+        </div>
+        <div class="field full">
+          <label for="filter-query">검색</label>
+          <input id="filter-query" name="filterQuery" type="search" placeholder="예: 식비, 마트, 2026-05-02">
         </div>
       </div>
       <div class="data-actions">

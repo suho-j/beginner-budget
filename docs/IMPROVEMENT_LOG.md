@@ -78,9 +78,17 @@
 - 최종 리뷰에서 지적된 import 오류 경로의 접근성 누락을 보완했다.
 - 파일 가져오기 실패 시 숨겨진 file input에 `aria-invalid="true"`를 설정하고 가져오기 버튼으로 포커스를 복귀시킨다.
 
+### 4차 개선
+
+- gstack/GSD/Superpowers repo를 `/mnt/c/Users/suho.jung/Documents/TKG AI/Source/_agent-repos/` 아래에 클론하고, 각 repo의 역할을 조합한 `AGENTS.md`를 추가했다.
+- gstack식 제품/디자인 리뷰, Superpowers식 디버깅 리뷰, QA 리뷰를 병렬로 수행해 P1 개선 항목을 선정했다.
+- TDD로 쉼표 포함 금액 입력, 거래 검색 필터, 월 인사이트(하루 사용 가능액/최다 지출 카테고리/카테고리별 지출)를 추가했다.
+- Chrome/Playwright 브라우저 스모크로 모바일 뷰포트에서 예산 저장 → `12,000` 지출 입력 → 인사이트 갱신 → 검색 필터를 검증했다.
+
 ## 최종 검증
 
 - `node --check js/storage.js && node --check js/transactions.js && node --check js/ui.js && node --check js/app.js`: 통과
-- `node tests/run-tests.cjs`: 7개 테스트 통과
+- `node tests/run-tests.cjs`: 9개 테스트 통과
+- Chrome/Playwright 스모크: 통과, 콘솔 에러 없음, 스크린샷 `/tmp/beginner-budget-mobile.png`
 - 정적 서버 응답: `/`, CSS, JS 파일 모두 200 응답
 - 독립 리뷰: Critical 없음, 스펙 준수 PASS

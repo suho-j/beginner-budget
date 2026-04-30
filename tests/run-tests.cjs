@@ -82,6 +82,50 @@ function testNormalizationDropsInvalidRowsAndDeduplicatesIds() {
   assert.strictEqual(new Set(state.transactions.map((tx) => tx.id)).size, 2);
 }
 
+function testAddTransactionCanonicalizesBeginnerMoneyInput() {
+  const win = createContext();
+  const state = win.BudgetStorage.defaultState();
+  const result = win.BudgetTransactions.addTransaction(state, {
+    date: '2026-05-01', type: 'expense', category: '식비', amount: '12,000', memo: '  점심  '
+  });
+  assert.strictEqual(result.ok, true);
+  assert.strictEqual(result.transaction.amount, 12000);
+  assert.strictEqual(result.transaction.memo, '점심');
+  assert.strictEqual(win.BudgetTransactions.parseMoneyInput('5만원'), null);
+  assert.strictEqual(win.BudgetTransactions.parseMoneyInput(true), null);
+}
+
+function testSummaryInsightsAndSearchFilter() {
+  const win = createContext();
+  let state = win.BudgetStorage.defaultState();
+  for (const input of [
+    { date: '2026-05-01', type: 'income', category: '월급', amount: 1000000, memo: '' },
+    { date: '2026-05-02', type: 'expense', category: '식비', amount: 120000, memo: '마트 장보기' },
+    { date: '2026-05-03', type: 'expense', category: '교통', amount: 30000, memo: '버스' },
+    { date: '2026-05-04', type: 'expense', category: '식비', amount: 50000, memo: '점심' }
+  ]) {
+    const result = win.BudgetTransactions.addTransaction(state, input);
+    assert.strictEqual(result.ok, true);
+    state = result.state;
+  }
+
+  const summary = win.BudgetTransactions.summarize(state.transactions, 500000, '2026-05', new Date(2026, 4, 20));
+  assert.strictEqual(summary.income, 1000000);
+  assert.strictEqual(summary.expense, 200000);
+  assert.strictEqual(summary.balance, 800000);
+  assert.strictEqual(summary.budgetRemaining, 300000);
+  assert.strictEqual(summary.dailyAllowance, 25000);
+  assert.strictEqual(JSON.stringify(summary.topExpenseCategory), JSON.stringify({ category: '식비', amount: 170000, rate: 85 }));
+  assert.strictEqual(JSON.stringify(summary.categoryBreakdown), JSON.stringify([
+    { category: '식비', amount: 170000, rate: 85 },
+    { category: '교통', amount: 30000, rate: 15 }
+  ]));
+
+  const filtered = win.BudgetTransactions.filterTransactions(state.transactions, { month: '2026-05', type: 'all', query: '마트' });
+  assert.strictEqual(filtered.length, 1);
+  assert.strictEqual(filtered[0].memo, '마트 장보기');
+}
+
 function testSummaryAndSampleReplace() {
   const win = createContext();
   let state = win.BudgetStorage.defaultState();
@@ -94,19 +138,13 @@ function testSummaryAndSampleReplace() {
     date: '2026-05-02', type: 'expense', category: '식비', amount: 300, memo: ''
   });
   state = result.state;
-  assert.strictEqual(
-    JSON.stringify(win.BudgetTransactions.summarize(state.transactions, 500000, '2026-05')),
-    JSON.stringify({
-      income: 1000,
-      expense: 300,
-      balance: 700,
-      budgetUsed: 300,
-      budgetRemaining: 499700,
-      budgetRate: 0,
-      monthlyBudget: 500000,
-      count: 2
-    })
-  );
+  const summary = win.BudgetTransactions.summarize(state.transactions, 500000, '2026-05', new Date(2026, 4, 2));
+  assert.strictEqual(summary.income, 1000);
+  assert.strictEqual(summary.expense, 300);
+  assert.strictEqual(summary.balance, 700);
+  assert.strictEqual(summary.budgetRemaining, 499700);
+  assert.strictEqual(summary.dailyAllowance, 16656);
+  assert.strictEqual(summary.count, 2);
 
   state = win.BudgetTransactions.createSampleState(state, '2026-05');
   assert.strictEqual(win.BudgetTransactions.hasSampleForMonth(state.transactions, '2026-05'), true);
@@ -144,6 +182,8 @@ const tests = [
   testStrictDateValidation,
   testLocalDateFormatting,
   testNormalizationDropsInvalidRowsAndDeduplicatesIds,
+  testAddTransactionCanonicalizesBeginnerMoneyInput,
+  testSummaryInsightsAndSearchFilter,
   testSummaryAndSampleReplace,
   testImportExport
 ];

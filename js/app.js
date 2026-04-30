@@ -26,7 +26,8 @@
   function activeFilters() {
     return {
       month: elements.monthInput.value || window.BudgetStorage.localMonthString(),
-      type: elements.filterType.value || 'all'
+      type: elements.filterType.value || 'all',
+      query: elements.filterQuery.value || ''
     };
   }
 
@@ -61,7 +62,7 @@
       date: elements.dateInput.value,
       type: elements.typeSelect.value,
       category: elements.categorySelect.value,
-      amount: elements.amountInput.valueAsNumber,
+      amount: elements.amountInput.value,
       memo: elements.memoInput.value
     };
     const result = window.BudgetTransactions.addTransaction(state, input);
@@ -169,6 +170,7 @@
     elements.typeSelect.addEventListener('change', handleTypeChange);
     elements.monthInput.addEventListener('change', render);
     elements.filterType.addEventListener('change', render);
+    elements.filterQuery.addEventListener('input', render);
     elements.list.addEventListener('click', handleListClick);
     elements.sampleButton.addEventListener('click', handleSampleClick);
     elements.exportButton.addEventListener('click', handleExportClick);
