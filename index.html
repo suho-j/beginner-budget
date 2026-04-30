@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>처음 가계부</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <a class="skip-link" href="#main-content">본문으로 바로가기</a>
+  <header class="site-header">
+    <div class="container hero-grid">
+      <div>
+        <p class="eyebrow">입문자용 정적 가계부</p>
+        <h1>처음 가계부</h1>
+        <p class="lead">가입 없이 오늘의 수입과 지출을 기록하고, 이번 달 돈 흐름을 한눈에 확인하세요.</p>
+      </div>
+      <div class="privacy-card" aria-label="저장 방식 안내">
+        <strong>내 브라우저에만 저장</strong>
+        <span>서버 전송 없이 localStorage를 사용합니다.</span>
+      </div>
+    </div>
+  </header>
+
+  <main id="main-content" class="container layout">
+    <section class="summary-section" aria-labelledby="summary-title">
+      <div class="section-heading">
+        <h2 id="summary-title">이번 달 요약</h2>
+        <p id="selected-month-label" class="muted">선택한 달 기준</p>
+      </div>
+      <div class="summary-grid" aria-live="polite">
+        <article class="summary-card income-card">
+          <span class="card-label">수입 합계</span>
+          <strong id="summary-income">0원</strong>
+          <small>들어온 돈</small>
+        </article>
+        <article class="summary-card expense-card">
+          <span class="card-label">지출 합계</span>
+          <strong id="summary-expense">0원</strong>
+          <small>쓴 돈</small>
+        </article>
+        <article class="summary-card balance-card">
+          <span class="card-label">잔액</span>
+          <strong id="summary-balance">0원</strong>
+          <small id="balance-help">수입 - 지출</small>
+        </article>
+        <article class="summary-card budget-card">
+          <span class="card-label">예산 남은 금액</span>
+          <strong id="summary-budget-remaining">0원</strong>
+          <small id="budget-status-text">월 예산에서 지출을 뺀 금액</small>
+        </article>
+      </div>
+      <div class="budget-meter" aria-labelledby="budget-meter-label">
+        <div class="meter-heading">
+          <span id="budget-meter-label">예산 사용률</span>
+          <strong id="budget-rate-label">0%</strong>
+        </div>
+        <div class="meter-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="예산 사용률">
+          <span id="budget-meter-fill" class="meter-fill"></span>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel" aria-labelledby="budget-title">
+      <h2 id="budget-title">월 예산 설정</h2>
+      <form id="budget-form" class="inline-form" novalidate>
+        <div class="field grow">
+          <label for="monthly-budget">한 달 지출 예산</label>
+          <input id="monthly-budget" name="monthlyBudget" type="number" inputmode="numeric" min="1" step="1" required aria-describedby="budget-help budget-message">
+          <small id="budget-help" class="hint">쉼표 없이 숫자만 입력하세요. 예: 500000</small>
+        </div>
+        <button type="submit">예산 저장</button>
+      </form>
+      <p id="budget-message" class="message" role="status" aria-live="polite"></p>
+    </section>
+
+    <section class="panel" aria-labelledby="form-title">
+      <h2 id="form-title">수입/지출 입력</h2>
+      <form id="transaction-form" class="transaction-form" novalidate>
+        <div class="field">
+          <label for="tx-date">날짜</label>
+          <input id="tx-date" name="date" type="date" required aria-describedby="form-message">
+        </div>
+        <div class="field">
+          <label for="tx-type">유형</label>
+          <select id="tx-type" name="type" required aria-describedby="form-message">
+            <option value="expense">지출</option>
+            <option value="income">수입</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="tx-category">카테고리</label>
+          <select id="tx-category" name="category" required aria-describedby="form-message"></select>
+        </div>
+        <div class="field">
+          <label for="tx-amount">금액</label>
+          <input id="tx-amount" name="amount" type="number" inputmode="numeric" min="1" step="1" placeholder="예: 12000" required aria-describedby="amount-help form-message">
+          <small id="amount-help" class="hint">쉼표 없이 숫자만 입력하세요.</small>
+        </div>
+        <div class="field full">
+          <label for="tx-memo">메모 <span class="optional">선택</span></label>
+          <input id="tx-memo" name="memo" type="text" maxlength="80" placeholder="예: 점심, 버스비" aria-describedby="form-message">
+        </div>
+        <div class="form-actions full">
+          <button type="submit" class="primary">기록 추가</button>
+          <button type="reset" class="secondary">입력 비우기</button>
+        </div>
+      </form>
+      <p id="form-message" class="message" role="status" aria-live="polite"></p>
+    </section>
+
+    <section class="panel" aria-labelledby="tools-title">
+      <h2 id="tools-title">보기와 데이터 도구</h2>
+      <div class="filters">
+        <div class="field">
+          <label for="filter-month">월별 보기</label>
+          <input id="filter-month" name="filterMonth" type="month">
+        </div>
+        <div class="field">
+          <label for="filter-type">유형 보기</label>
+          <select id="filter-type" name="filterType">
+            <option value="all">전체</option>
+            <option value="income">수입만</option>
+            <option value="expense">지출만</option>
+          </select>
+        </div>
+      </div>
+      <div class="data-actions">
+        <button id="sample-button" type="button" class="secondary">샘플 데이터 채우기</button>
+        <button id="export-button" type="button" class="secondary">JSON 내보내기</button>
+        <button id="import-button" type="button" class="secondary" aria-describedby="tool-message">JSON 가져오기</button>
+        <button id="reset-button" type="button" class="danger">전체 초기화</button>
+      </div>
+      <input id="import-file" class="visually-hidden" type="file" accept="application/json,.json">
+      <p id="tool-message" class="message" role="status" aria-live="polite"></p>
+    </section>
+
+    <section class="panel transactions-panel" aria-labelledby="list-title">
+      <div class="section-heading">
+        <h2 id="list-title">거래 내역</h2>
+        <p id="list-count" class="muted">0건</p>
+      </div>
+      <div id="empty-state" class="empty-state">
+        <strong>아직 표시할 내역이 없어요.</strong>
+        <p>수입이나 지출을 추가하거나 샘플 데이터를 채워 사용법을 확인해 보세요.</p>
+      </div>
+      <ul id="transaction-list" class="transaction-list"></ul>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container">데이터는 이 브라우저의 localStorage에만 저장됩니다. 중요한 데이터는 JSON 내보내기로 백업하세요.</div>
+  </footer>
+
+  <script src="js/storage.js"></script>
+  <script src="js/transactions.js"></script>
+  <script src="js/ui.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
