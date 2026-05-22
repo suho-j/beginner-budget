@@ -204,10 +204,10 @@
       : currentState.transactions;
     const samples = [
       { date: `${targetMonth}-01`, type: 'income', category: '월급', amount: 2500000, memo: `${SAMPLE_SIGNATURE}: 이번 달 월급` },
-      { date: `${targetMonth}-03`, type: 'expense', category: '식비', amount: 32000, memo: `${SAMPLE_SIGNATURE}: 장보기` },
-      { date: `${targetMonth}-05`, type: 'expense', category: '교통', amount: 62000, memo: `${SAMPLE_SIGNATURE}: 교통카드 충전` },
-      { date: `${targetMonth}-09`, type: 'expense', category: '카페/간식', amount: 6800, memo: `${SAMPLE_SIGNATURE}: 커피` },
-      { date: `${targetMonth}-12`, type: 'expense', category: '고정비', amount: 120000, memo: `${SAMPLE_SIGNATURE}: 통신비와 구독` },
+      { date: `${targetMonth}-03`, type: 'expense', category: '생활비', amount: 32000, memo: `${SAMPLE_SIGNATURE}: 장보기` },
+      { date: `${targetMonth}-05`, type: 'expense', category: '배달비', amount: 62000, memo: `${SAMPLE_SIGNATURE}: 배달 음식` },
+      { date: `${targetMonth}-09`, type: 'expense', category: '의류비', amount: 68000, memo: `${SAMPLE_SIGNATURE}: 옷 구매` },
+      { date: `${targetMonth}-12`, type: 'expense', category: '비상금', amount: 120000, memo: `${SAMPLE_SIGNATURE}: 예비 지출` },
       { date: `${targetMonth}-15`, type: 'income', category: '부수입', amount: 80000, memo: `${SAMPLE_SIGNATURE}: 중고 거래` }
     ].map((tx) => ({ ...tx, id: window.BudgetStorage.createId(), source: 'sample' }));
 

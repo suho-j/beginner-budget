@@ -5,7 +5,19 @@
   const STORAGE_KEY = 'beginner-budget-app:v1';
   const DEFAULT_BUDGET = 500000;
   const MAX_MEMO_LENGTH = 80;
-  const EXPENSE_CATEGORIES = ['식비', '카페/간식', '교통', '생활용품', '쇼핑', '고정비', '여가', '의료', '기타'];
+  const EXPENSE_CATEGORIES = ['생활비', '배달비', '의류비', '비상금'];
+  const LEGACY_EXPENSE_CATEGORY_MAP = {
+    '식비': '생활비',
+    '생활용품': '생활비',
+    '교통': '생활비',
+    '카페': '배달비',
+    '카페/간식': '배달비',
+    '쇼핑': '의류비',
+    '고정비': '비상금',
+    '여가': '비상금',
+    '의료': '비상금',
+    '기타': '비상금'
+  };
   const INCOME_CATEGORIES = ['월급', '용돈', '부수입', '기타'];
 
   function defaultState() {
@@ -44,11 +56,16 @@
     return type === 'income' ? INCOME_CATEGORIES : EXPENSE_CATEGORIES;
   }
 
+  function normalizeExpenseCategory(category) {
+    return EXPENSE_CATEGORIES.includes(category) ? category : LEGACY_EXPENSE_CATEGORY_MAP[category] || category;
+  }
+
   function normalizeTransaction(tx) {
     if (!tx || typeof tx !== 'object') return null;
     const type = tx.type === 'income' ? 'income' : tx.type === 'expense' ? 'expense' : '';
     const date = typeof tx.date === 'string' ? tx.date : '';
-    const category = typeof tx.category === 'string' ? tx.category.trim() : '';
+    const rawCategory = typeof tx.category === 'string' ? tx.category.trim() : '';
+    const category = type === 'expense' ? normalizeExpenseCategory(rawCategory) : rawCategory;
     const amount = Number(tx.amount);
 
     if (!type || !isValidDateString(date) || !categoriesFor(type).includes(category) || !isPositiveInteger(amount)) {
@@ -72,9 +89,11 @@
   function normalizeCategoryBudgets(rawBudgets) {
     const budgets = {};
     if (!rawBudgets || typeof rawBudgets !== 'object' || Array.isArray(rawBudgets)) return budgets;
-    EXPENSE_CATEGORIES.forEach((category) => {
-      const amount = Number(String(rawBudgets[category] || '').replaceAll(',', ''));
-      if (isPositiveInteger(amount)) budgets[category] = amount;
+    Object.keys(rawBudgets).forEach((rawCategory) => {
+      const category = normalizeExpenseCategory(String(rawCategory).trim());
+      if (!EXPENSE_CATEGORIES.includes(category)) return;
+      const amount = Number(String(rawBudgets[rawCategory] || '').replaceAll(',', ''));
+      if (isPositiveInteger(amount)) budgets[category] = (budgets[category] || 0) + amount;
     });
     return budgets;
   }
@@ -130,6 +149,7 @@
     defaultState,
     normalizeState,
     normalizeCategoryBudgets,
+    normalizeExpenseCategory,
     loadState,
     saveState,
     resetState,
