@@ -15,14 +15,30 @@
         <h1>처음 가계부</h1>
         <p class="lead">가입 없이 오늘의 수입과 지출을 기록하고, 이번 달 돈 흐름을 한눈에 확인하세요.</p>
       </div>
-      <div class="privacy-card" aria-label="저장 방식 안내">
-        <strong>Supabase 클라우드 저장</strong>
-        <span>브라우저 localStorage에는 저장하지 않습니다.</span>
-      </div>
     </div>
   </header>
 
   <main id="main-content" class="container layout">
+    <section class="panel cloud-panel" aria-labelledby="cloud-title">
+      <div class="cloud-heading">
+        <div>
+          <h2 id="cloud-title">로그인</h2>
+          <p id="cloud-status" class="muted">로그인 상태를 확인 중입니다.</p>
+        </div>
+        <button id="cloud-logout-button" type="button" class="tiny-logout danger">로그아웃</button>
+      </div>
+      <form id="cloud-login-form" class="inline-form" novalidate>
+        <div class="field grow">
+          <label for="cloud-password">비밀번호</label>
+          <input id="cloud-password" name="password" type="password" autocomplete="current-password" placeholder="공용 비밀번호" aria-describedby="cloud-message">
+        </div>
+        <button type="submit">로그인</button>
+      </form>
+      <button id="cloud-upload-button" type="button" class="visually-hidden" hidden>클라우드에 저장</button>
+      <button id="cloud-download-button" type="button" class="secondary">클라우드에서 불러오기</button>
+      <p id="cloud-message" class="message" role="status" aria-live="polite"></p>
+    </section>
+
     <section class="summary-section" aria-labelledby="summary-title">
       <div class="section-heading">
         <h2 id="summary-title">이번 달 요약</h2>
@@ -81,31 +97,6 @@
       </div>
     </section>
 
-    <section class="panel" aria-labelledby="budget-title">
-      <h2 id="budget-title">월 예산 설정</h2>
-      <form id="budget-form" class="inline-form" novalidate>
-        <div class="field grow">
-          <label for="monthly-budget">한 달 지출 예산</label>
-          <input id="monthly-budget" name="monthlyBudget" type="number" inputmode="numeric" min="1" step="1" required aria-describedby="budget-help budget-message">
-          <small id="budget-help" class="hint">쉼표 없이 숫자만 입력하세요. 예: 500000</small>
-        </div>
-        <button type="submit">예산 저장</button>
-      </form>
-      <p id="budget-message" class="message" role="status" aria-live="polite"></p>
-    </section>
-
-    <section class="panel" aria-labelledby="category-budget-title">
-      <h2 id="category-budget-title">항목별 월 예산</h2>
-      <p id="category-budget-help" class="hint">자주 쓰는 지출 항목만 입력해도 됩니다. 비워둔 항목은 예산 없이 사용액만 보여줘요.</p>
-      <form id="category-budget-form" novalidate>
-        <div id="category-budget-fields" class="category-budget-fields"></div>
-        <div class="form-actions category-budget-actions">
-          <button type="submit">항목별 예산 저장</button>
-        </div>
-      </form>
-      <p id="category-budget-message" class="message" role="status" aria-live="polite"></p>
-    </section>
-
     <section class="panel" aria-labelledby="form-title">
       <h2 id="form-title">수입/지출 입력</h2>
       <form id="transaction-form" class="transaction-form" novalidate>
@@ -141,23 +132,29 @@
       <p id="form-message" class="message" role="status" aria-live="polite"></p>
     </section>
 
-    <section class="panel" aria-labelledby="cloud-title">
-      <h2 id="cloud-title">클라우드 동기화</h2>
-      <p class="hint">공용 비밀번호로 로그인하면 부부가 같은 가계부 데이터를 함께 볼 수 있어요.</p>
-      <form id="cloud-login-form" class="inline-form" novalidate>
+    <section class="panel" aria-labelledby="budget-title">
+      <h2 id="budget-title">월 예산 설정</h2>
+      <form id="budget-form" class="inline-form" novalidate>
         <div class="field grow">
-          <label for="cloud-password">비밀번호</label>
-          <input id="cloud-password" name="password" type="password" autocomplete="current-password" placeholder="공용 비밀번호" aria-describedby="cloud-message">
+          <label for="monthly-budget">한 달 지출 예산</label>
+          <input id="monthly-budget" name="monthlyBudget" type="number" inputmode="numeric" min="1" step="1" required aria-describedby="budget-help budget-message">
+          <small id="budget-help" class="hint">쉼표 없이 숫자만 입력하세요. 예: 500000</small>
         </div>
-        <button type="submit">로그인</button>
+        <button type="submit">예산 저장</button>
       </form>
-      <div class="cloud-actions">
-        <button id="cloud-upload-button" type="button" class="secondary">클라우드에 저장</button>
-        <button id="cloud-download-button" type="button" class="secondary">클라우드에서 불러오기</button>
-        <button id="cloud-logout-button" type="button" class="danger">로그아웃</button>
-      </div>
-      <p id="cloud-status" class="muted">로그인 상태를 확인 중입니다.</p>
-      <p id="cloud-message" class="message" role="status" aria-live="polite"></p>
+      <p id="budget-message" class="message" role="status" aria-live="polite"></p>
+    </section>
+
+    <section class="panel" aria-labelledby="category-budget-title">
+      <h2 id="category-budget-title">항목별 월 예산</h2>
+      <p id="category-budget-help" class="hint">자주 쓰는 지출 항목만 입력해도 됩니다. 비워둔 항목은 예산 없이 사용액만 보여줘요.</p>
+      <form id="category-budget-form" novalidate>
+        <div id="category-budget-fields" class="category-budget-fields"></div>
+        <div class="form-actions category-budget-actions">
+          <button type="submit">항목별 예산 저장</button>
+        </div>
+      </form>
+      <p id="category-budget-message" class="message" role="status" aria-live="polite"></p>
     </section>
 
     <section class="panel" aria-labelledby="tools-title">
@@ -210,8 +207,8 @@
   <script src="js/storage.js"></script>
   <script src="js/transactions.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="js/cloud.js?v=20260522c"></script>
-  <script src="js/ui.js?v=20260522c"></script>
-  <script src="js/app.js?v=20260522c"></script>
+  <script src="js/cloud.js?v=20260522d"></script>
+  <script src="js/ui.js?v=20260522d"></script>
+  <script src="js/app.js?v=20260522d"></script>
 </body>
 </html>

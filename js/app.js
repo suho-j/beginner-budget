@@ -188,9 +188,23 @@
     try {
       const user = await window.BudgetCloud.currentUser();
       window.BudgetUI.updateCloudStatus(elements, user);
+      return user;
     } catch (error) {
       window.BudgetUI.updateCloudStatus(elements, null);
       window.BudgetUI.setMessage(elements.cloudMessage, `로그인 상태 확인 실패: ${error.message}`, 'error');
+      return null;
+    }
+  }
+
+  async function loadCloudStateForSignedInUser() {
+    const user = await refreshCloudStatus();
+    if (!user) return;
+    try {
+      state = await window.BudgetCloud.downloadState();
+      render();
+      window.BudgetUI.setMessage(elements.cloudMessage, '클라우드 데이터를 불러왔어요.', 'ok');
+    } catch (error) {
+      window.BudgetUI.setMessage(elements.cloudMessage, `클라우드 불러오기 실패: ${error.message}`, 'error');
     }
   }
 
@@ -279,7 +293,7 @@
     window.BudgetUI.initDefaults(elements, state);
     bindEvents();
     render();
-    refreshCloudStatus();
+    loadCloudStateForSignedInUser();
   }
 
   document.addEventListener('DOMContentLoaded', init);

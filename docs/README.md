@@ -56,7 +56,7 @@ python3 -m http.server 8000
    - Redirect URLs: `https://suho-j.github.io/beginner-budget/`, `http://localhost:8765/`
 3. Supabase Authentication → Users에 `ho910728@naver.com` 사용자가 있고 공용 비밀번호가 설정되어 있어야 합니다.
 4. 앱의 **클라우드 동기화** 섹션에서 공용 비밀번호로 로그인합니다.
-5. 로그인 후 변경사항은 저장 동작마다 Supabase에 업로드됩니다. 필요하면 **클라우드에 저장** 버튼으로 현재 화면 데이터를 다시 업로드할 수 있습니다.
+5. 로그인 후 예산/거래 변경사항은 저장 동작마다 Supabase에 자동 업로드됩니다.
 6. **클라우드에서 불러오기**는 현재 화면 데이터를 Supabase 데이터로 교체합니다. 필요하면 먼저 JSON 내보내기로 백업하세요.
 
 ## 저장 안내
