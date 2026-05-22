@@ -103,35 +103,15 @@
   }
 
   function loadState() {
-    try {
-      const saved = window.localStorage.getItem(STORAGE_KEY);
-      if (!saved) return defaultState();
-      return normalizeState(JSON.parse(saved));
-    } catch (error) {
-      console.warn('저장된 가계부 데이터를 읽을 수 없어 기본값으로 시작합니다.', error);
-      return defaultState();
-    }
+    return defaultState();
   }
 
   function saveState(state) {
-    const normalized = normalizeState(state);
-    try {
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(normalized));
-      return { ok: true, state: normalized, error: null };
-    } catch (error) {
-      console.error('가계부 데이터를 저장하지 못했습니다.', error);
-      return { ok: false, state: normalized, error };
-    }
+    return { ok: true, state: normalizeState(state), error: null };
   }
 
   function resetState() {
-    try {
-      window.localStorage.removeItem(STORAGE_KEY);
-      return { ok: true, state: defaultState(), error: null };
-    } catch (error) {
-      console.error('가계부 데이터를 초기화하지 못했습니다.', error);
-      return { ok: false, state: loadState(), error };
-    }
+    return { ok: true, state: defaultState(), error: null };
   }
 
   function createId() {

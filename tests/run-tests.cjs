@@ -39,18 +39,18 @@ function createContext(options = {}) {
   return context.window;
 }
 
-function testStorageDefaultsAndCorruption() {
+function testStorageDefaultsAndIgnoresLocalStorage() {
   const win = createContext();
   assert.deepStrictEqual(win.BudgetStorage.loadState(), win.BudgetStorage.defaultState());
-  win.localStorage.setItem(win.BudgetStorage.STORAGE_KEY, '{bad json');
+  win.localStorage.setItem(win.BudgetStorage.STORAGE_KEY, JSON.stringify({ monthlyBudget: 900000 }));
   assert.deepStrictEqual(win.BudgetStorage.loadState(), win.BudgetStorage.defaultState());
 }
 
-function testSaveFailureDoesNotThrow() {
+function testSaveDoesNotUseLocalStorage() {
   const win = createContext({ throwOnSet: true });
-  const result = win.BudgetStorage.saveState(win.BudgetStorage.defaultState());
-  assert.strictEqual(result.ok, false);
-  assert.strictEqual(result.state.monthlyBudget, 500000);
+  const result = win.BudgetStorage.saveState({ monthlyBudget: 700000, transactions: [] });
+  assert.strictEqual(result.ok, true);
+  assert.strictEqual(result.state.monthlyBudget, 700000);
 }
 
 function testStrictDateValidation() {
@@ -230,8 +230,8 @@ function testCloudStateMappingKeepsBudgetAndTransactions() {
 }
 
 const tests = [
-  testStorageDefaultsAndCorruption,
-  testSaveFailureDoesNotThrow,
+  testStorageDefaultsAndIgnoresLocalStorage,
+  testSaveDoesNotUseLocalStorage,
   testStrictDateValidation,
   testLocalDateFormatting,
   testNormalizationDropsInvalidRowsAndDeduplicatesIds,

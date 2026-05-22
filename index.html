@@ -16,8 +16,8 @@
         <p class="lead">가입 없이 오늘의 수입과 지출을 기록하고, 이번 달 돈 흐름을 한눈에 확인하세요.</p>
       </div>
       <div class="privacy-card" aria-label="저장 방식 안내">
-        <strong>로컬 저장 + 선택형 클라우드</strong>
-        <span>기본은 localStorage, 로그인하면 Supabase 동기화</span>
+        <strong>Supabase 클라우드 저장</strong>
+        <span>브라우저 localStorage에는 저장하지 않습니다.</span>
       </div>
     </div>
   </header>
@@ -143,7 +143,7 @@
 
     <section class="panel" aria-labelledby="cloud-title">
       <h2 id="cloud-title">클라우드 동기화</h2>
-      <p class="hint">로그인하면 PC와 휴대폰에서 같은 데이터를 불러올 수 있어요. 로컬 저장은 계속 유지됩니다.</p>
+      <p class="hint">로그인하면 PC와 휴대폰에서 같은 데이터를 불러올 수 있어요. 로그인 전 변경은 새로고침하면 사라집니다.</p>
       <form id="cloud-login-form" class="inline-form" novalidate>
         <div class="field grow">
           <label for="cloud-email">이메일</label>
@@ -204,14 +204,14 @@
   </main>
 
   <footer class="site-footer">
-    <div class="container">기본 데이터는 이 브라우저의 localStorage에 저장됩니다. 로그인 후 클라우드 저장을 누르면 Supabase에도 저장됩니다.</div>
+    <div class="container">데이터는 Supabase에 저장됩니다. 로그인 전 변경은 새로고침하면 사라질 수 있으니 먼저 로그인하세요.</div>
   </footer>
 
   <script src="js/storage.js"></script>
   <script src="js/transactions.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="js/cloud.js?v=20260522"></script>
-  <script src="js/ui.js?v=20260522"></script>
-  <script src="js/app.js?v=20260522"></script>
+  <script src="js/cloud.js?v=20260522b"></script>
+  <script src="js/ui.js?v=20260522b"></script>
+  <script src="js/app.js?v=20260522b"></script>
 </body>
 </html>

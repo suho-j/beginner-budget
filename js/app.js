@@ -6,21 +6,24 @@
   let elements;
   const MAX_IMPORT_BYTES = 1024 * 1024;
 
-  function persist(nextState, options = {}) {
+  async function persist(nextState, options = {}) {
     const result = window.BudgetStorage.saveState(nextState);
-    if (!result.ok) {
-      state = result.state;
-      render();
-      window.BudgetUI.setMessage(
-        options.messageElement || elements.toolMessage,
-        '브라우저 저장소에 저장하지 못했어요. 공간/권한을 확인한 뒤 JSON 내보내기로 백업해 주세요.',
-        'error'
-      );
-      return false;
-    }
     state = result.state;
     render();
-    return true;
+
+    const messageElement = options.messageElement || elements.toolMessage;
+    try {
+      const user = await window.BudgetCloud.currentUser();
+      if (!user) {
+        window.BudgetUI.setMessage(messageElement, '로그인 전 변경은 화면에만 임시 반영돼요. 이메일 로그인 후 클라우드에 저장하세요.', 'error');
+        return false;
+      }
+      await window.BudgetCloud.uploadState(state);
+      return true;
+    } catch (error) {
+      window.BudgetUI.setMessage(messageElement, `Supabase 저장 실패: ${error.message}`, 'error');
+      return false;
+    }
   }
 
   function activeFilters() {
@@ -43,7 +46,7 @@
     window.BudgetUI.renderList(elements, list);
   }
 
-  function handleBudgetSubmit(event) {
+  async function handleBudgetSubmit(event) {
     event.preventDefault();
     window.BudgetUI.clearFieldErrors(elements.budgetForm);
     const result = window.BudgetTransactions.setMonthlyBudget(state, elements.budgetInput.valueAsNumber);
@@ -51,12 +54,12 @@
       window.BudgetUI.showValidationErrors(elements.budgetForm, elements.budgetMessage, result.errors);
       return;
     }
-    if (persist(result.state, { messageElement: elements.budgetMessage })) {
+    if (await persist(result.state, { messageElement: elements.budgetMessage })) {
       window.BudgetUI.setMessage(elements.budgetMessage, '월 예산을 저장했어요.', 'ok');
     }
   }
 
-  function handleCategoryBudgetSubmit(event) {
+  async function handleCategoryBudgetSubmit(event) {
     event.preventDefault();
     window.BudgetUI.clearFieldErrors(elements.categoryBudgetForm);
     const inputBudgets = window.BudgetUI.readCategoryBudgetInputs(elements);
@@ -65,12 +68,12 @@
       window.BudgetUI.showValidationErrors(elements.categoryBudgetForm, elements.categoryBudgetMessage, result.errors);
       return;
     }
-    if (persist(result.state, { messageElement: elements.categoryBudgetMessage })) {
+    if (await persist(result.state, { messageElement: elements.categoryBudgetMessage })) {
       window.BudgetUI.setMessage(elements.categoryBudgetMessage, '항목별 예산을 저장했어요.', 'ok');
     }
   }
 
-  function handleTransactionSubmit(event) {
+  async function handleTransactionSubmit(event) {
     event.preventDefault();
     window.BudgetUI.clearFieldErrors(elements.transactionForm);
     const input = {
@@ -85,7 +88,7 @@
       window.BudgetUI.showValidationErrors(elements.transactionForm, elements.formMessage, result.errors);
       return;
     }
-    if (persist(result.state, { messageElement: elements.formMessage })) {
+    if (await persist(result.state, { messageElement: elements.formMessage })) {
       elements.transactionForm.reset();
       elements.dateInput.value = window.BudgetStorage.localDateString();
       elements.typeSelect.value = input.type;
@@ -98,23 +101,23 @@
     window.BudgetUI.fillCategoryOptions(elements.categorySelect, elements.typeSelect.value);
   }
 
-  function handleListClick(event) {
+  async function handleListClick(event) {
     const button = event.target.closest('.delete-button');
     if (!button) return;
     const tx = state.transactions.find((item) => item.id === button.dataset.id);
     const label = tx ? `${tx.date} ${tx.category} ${window.BudgetUI.formatWon(tx.amount)}` : '이 거래';
     if (!window.confirm(`${label} 내역을 삭제할까요?`)) return;
-    if (persist(window.BudgetTransactions.deleteTransaction(state, button.dataset.id))) {
+    if (await persist(window.BudgetTransactions.deleteTransaction(state, button.dataset.id))) {
       window.BudgetUI.setMessage(elements.toolMessage, '거래를 삭제했어요.', 'ok');
     }
   }
 
-  function handleSampleClick() {
+  async function handleSampleClick() {
     const month = elements.monthInput.value || window.BudgetStorage.localMonthString();
     const hasSample = window.BudgetTransactions.hasSampleForMonth(state.transactions, month);
     if (hasSample && !window.confirm('선택한 달에 이미 샘플 데이터가 있어요. 기존 샘플을 교체할까요?')) return;
     const nextState = window.BudgetTransactions.createSampleState(state, month, { replace: hasSample });
-    if (persist(nextState)) {
+    if (await persist(nextState)) {
       window.BudgetUI.setMessage(elements.toolMessage, hasSample ? '선택한 달의 샘플 데이터를 교체했어요.' : '선택한 달에 샘플 데이터를 추가했어요.', 'ok');
     }
   }
@@ -145,7 +148,7 @@
       return;
     }
     const reader = new FileReader();
-    reader.onload = () => {
+    reader.onload = async () => {
       const result = window.BudgetTransactions.importState(String(reader.result || ''));
       if (!result.ok) {
         showImportError(result.errors.map((item) => item.message).join(' '));
@@ -157,7 +160,7 @@
         elements.importFile.value = '';
         return;
       }
-      if (persist(result.state)) {
+      if (await persist(result.state)) {
         window.BudgetUI.setMessage(elements.toolMessage, 'JSON 데이터를 가져왔어요.', 'ok');
       }
       elements.importFile.value = '';
@@ -166,7 +169,7 @@
     reader.readAsText(file);
   }
 
-  function handleResetClick() {
+  async function handleResetClick() {
     if (!window.confirm('모든 가계부 데이터를 삭제하고 기본 예산으로 되돌릴까요?')) return;
     const result = window.BudgetStorage.resetState();
     if (!result.ok) {
@@ -176,8 +179,9 @@
     state = result.state;
     elements.categoryBudgetFields.innerHTML = '';
     window.BudgetUI.initDefaults(elements, state);
-    render();
-    window.BudgetUI.setMessage(elements.toolMessage, '전체 데이터를 초기화했어요.', 'ok');
+    if (await persist(state)) {
+      window.BudgetUI.setMessage(elements.toolMessage, '전체 데이터를 초기화하고 Supabase에 저장했어요.', 'ok');
+    }
   }
 
   async function refreshCloudStatus() {
@@ -219,7 +223,7 @@
     if (!window.confirm('현재 브라우저 데이터를 클라우드 데이터로 교체할까요? 필요하면 먼저 JSON 내보내기로 백업하세요.')) return;
     try {
       const cloudState = await window.BudgetCloud.downloadState();
-      if (persist(cloudState, { messageElement: elements.cloudMessage })) {
+      if (await persist(cloudState, { messageElement: elements.cloudMessage })) {
         window.BudgetUI.setMessage(elements.cloudMessage, '클라우드 데이터를 불러왔어요.', 'ok');
       }
     } catch (error) {
