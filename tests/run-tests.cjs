@@ -69,6 +69,7 @@ function testNormalizationDropsInvalidRowsAndDeduplicatesIds() {
   const win = createContext();
   const state = win.BudgetStorage.normalizeState({
     monthlyBudget: 700000,
+    categoryBudgets: { 식비: 200000, 교통: '90000', 월급: 1000, 기타: 0, 잘못된값: 5000 },
     transactions: [
       { id: 'same', date: '2026-05-01', type: 'expense', category: '식비', amount: 1000, memo: 'ok' },
       { id: 'same', date: '2026-05-02', type: 'income', category: '월급', amount: 2000, memo: 'ok' },
@@ -78,8 +79,34 @@ function testNormalizationDropsInvalidRowsAndDeduplicatesIds() {
     ]
   });
   assert.strictEqual(state.monthlyBudget, 700000);
+  assert.strictEqual(JSON.stringify(state.categoryBudgets), JSON.stringify({ 식비: 200000, 교통: 90000 }));
   assert.strictEqual(state.transactions.length, 2);
   assert.strictEqual(new Set(state.transactions.map((tx) => tx.id)).size, 2);
+}
+
+function testCategoryBudgetSaveAndSummary() {
+  const win = createContext();
+  let state = win.BudgetStorage.defaultState();
+  const budgetResult = win.BudgetTransactions.setCategoryBudgets(state, { 식비: '200,000', 교통: '90000', 쇼핑: '' });
+  assert.strictEqual(budgetResult.ok, true);
+  assert.strictEqual(JSON.stringify(budgetResult.state.categoryBudgets), JSON.stringify({ 식비: 200000, 교통: 90000 }));
+  state = budgetResult.state;
+
+  state = win.BudgetTransactions.addTransaction(state, {
+    date: '2026-05-02', type: 'expense', category: '식비', amount: 120000, memo: '마트'
+  }).state;
+  state = win.BudgetTransactions.addTransaction(state, {
+    date: '2026-05-03', type: 'expense', category: '교통', amount: 95000, memo: '택시'
+  }).state;
+
+  const summary = win.BudgetTransactions.summarize(state.transactions, state.monthlyBudget, '2026-05', new Date(2026, 4, 20), state.categoryBudgets);
+  assert.strictEqual(JSON.stringify(summary.categoryBudgetStatus.slice(0, 2)), JSON.stringify([
+    { category: '식비', budget: 200000, spent: 120000, remaining: 80000, rate: 60 },
+    { category: '교통', budget: 90000, spent: 95000, remaining: -5000, rate: 106 }
+  ]));
+
+  const invalid = win.BudgetTransactions.setCategoryBudgets(state, { 식비: '-1' });
+  assert.strictEqual(invalid.ok, false);
 }
 
 function testAddTransactionCanonicalizesBeginnerMoneyInput() {
@@ -182,6 +209,7 @@ const tests = [
   testStrictDateValidation,
   testLocalDateFormatting,
   testNormalizationDropsInvalidRowsAndDeduplicatesIds,
+  testCategoryBudgetSaveAndSummary,
   testAddTransactionCanonicalizesBeginnerMoneyInput,
   testSummaryInsightsAndSearchFilter,
   testSummaryAndSampleReplace,

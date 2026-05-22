@@ -12,6 +12,7 @@
     return {
       version: 1,
       monthlyBudget: DEFAULT_BUDGET,
+      categoryBudgets: {},
       transactions: []
     };
   }
@@ -68,12 +69,24 @@
     };
   }
 
+  function normalizeCategoryBudgets(rawBudgets) {
+    const budgets = {};
+    if (!rawBudgets || typeof rawBudgets !== 'object' || Array.isArray(rawBudgets)) return budgets;
+    EXPENSE_CATEGORIES.forEach((category) => {
+      const amount = Number(String(rawBudgets[category] || '').replaceAll(',', ''));
+      if (isPositiveInteger(amount)) budgets[category] = amount;
+    });
+    return budgets;
+  }
+
   function normalizeState(raw) {
     const state = defaultState();
     if (!raw || typeof raw !== 'object') return state;
 
     const budget = Number(raw.monthlyBudget);
     if (isPositiveInteger(budget)) state.monthlyBudget = budget;
+
+    state.categoryBudgets = normalizeCategoryBudgets(raw.categoryBudgets);
 
     if (Array.isArray(raw.transactions)) {
       const seenIds = new Set();
@@ -136,6 +149,7 @@
     INCOME_CATEGORIES,
     defaultState,
     normalizeState,
+    normalizeCategoryBudgets,
     loadState,
     saveState,
     resetState,

@@ -141,8 +141,8 @@ h2 { margin: 0 0 0.8rem; font-size: 1.25rem; }
 .insight-card small { color: var(--muted); }
 .category-breakdown { margin-top: 1rem; display: grid; gap: 0.6rem; }
 .category-breakdown h3 { margin: 0; font-size: 1rem; }
-.category-breakdown-list { display: grid; gap: 0.5rem; }
-.category-row {
+.category-breakdown-list, .category-budget-status-list { display: grid; gap: 0.5rem; }
+.category-row, .category-budget-row {
   position: relative;
   overflow: hidden;
   min-height: 48px;
@@ -155,8 +155,15 @@ h2 { margin: 0 0 0.8rem; font-size: 1.25rem; }
   justify-content: space-between;
   gap: 0.75rem;
 }
-.category-row > span:not(.category-bar), .category-row > strong { position: relative; z-index: 1; }
-.category-bar {
+.category-row > span:not(.category-bar), .category-row > strong,
+.category-budget-row > span:not(.category-budget-bar), .category-budget-row > strong, .category-budget-row > small { position: relative; z-index: 1; }
+.category-budget-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+.category-budget-row small { grid-column: 1 / -1; color: var(--muted); }
+.category-budget-row.over strong, .category-budget-row.over small { color: var(--expense); }
+.category-bar, .category-budget-bar {
   position: absolute;
   inset: auto auto 0 0;
   height: 4px;
@@ -164,6 +171,7 @@ h2 { margin: 0 0 0.8rem; font-size: 1.25rem; }
   background: var(--primary);
   border-radius: 999px;
 }
+.category-budget-row.over .category-budget-bar { background: var(--expense); }
 .meter-heading { display: flex; justify-content: space-between; gap: 1rem; font-weight: 800; }
 .meter-track {
   height: 12px;
@@ -186,7 +194,7 @@ h2 { margin: 0 0 0.8rem; font-size: 1.25rem; }
 .field label { font-weight: 700; }
 .hint { color: var(--muted); }
 .optional { color: var(--muted); font-weight: 500; }
-.inline-form, .transaction-form, .filters { display: grid; gap: 0.8rem; }
+.inline-form, .transaction-form, .filters, .category-budget-fields { display: grid; gap: 0.8rem; }
 .transaction-form { grid-template-columns: 1fr; }
 .full { grid-column: 1 / -1; }
 .grow { min-width: 0; }
@@ -243,6 +251,8 @@ h2 { margin: 0 0 0.8rem; font-size: 1.25rem; }
   .transaction-form { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .inline-form { grid-template-columns: minmax(0, 1fr) auto; align-items: end; }
   .filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .category-budget-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .category-budget-actions { margin-top: 0.8rem; }
   .form-actions { grid-template-columns: repeat(2, minmax(0, max-content)); }
   .data-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .transaction-item { grid-template-columns: minmax(0, 1fr) auto; align-items: center; }
@@ -254,6 +264,7 @@ h2 { margin: 0 0 0.8rem; font-size: 1.25rem; }
   .layout { grid-template-columns: 1.1fr 0.9fr; align-items: start; }
   .summary-section, .transactions-panel { grid-column: 1 / -1; }
   .summary-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .category-budget-fields { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .transaction-actions { grid-column: auto; }
   .data-actions { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 }

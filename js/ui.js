@@ -36,6 +36,10 @@
     const messages = errors.map((item) => item.message || String(item));
     setMessage(messageElement, messages.join(' '), 'error');
     errors.forEach((item) => {
+      if (item.field === 'categoryBudgets') {
+        scope.querySelectorAll('input').forEach((field) => field.setAttribute('aria-invalid', 'true'));
+        return;
+      }
       if (!item.field || !fieldSelectors[item.field]) return;
       const target = document.querySelector(fieldSelectors[item.field]);
       if (target) target.setAttribute('aria-invalid', 'true');
@@ -64,7 +68,47 @@
     elements.dateInput.value = window.BudgetStorage.localDateString();
     elements.monthInput.value = window.BudgetStorage.localMonthString();
     elements.budgetInput.value = state.monthlyBudget;
+    renderCategoryBudgetFields(elements.categoryBudgetFields, state.categoryBudgets || {});
     fillCategoryOptions(elements.categorySelect, elements.typeSelect.value);
+  }
+
+  function renderCategoryBudgetFields(container, categoryBudgets) {
+    if (!container || container.children.length) return;
+    window.BudgetTransactions.EXPENSE_CATEGORIES.forEach((category) => {
+      const id = `category-budget-${category}`;
+      const field = document.createElement('div');
+      field.className = 'field';
+      const label = document.createElement('label');
+      label.setAttribute('for', id);
+      label.textContent = `${category} 예산`;
+      const input = document.createElement('input');
+      input.id = id;
+      input.name = category;
+      input.type = 'text';
+      input.inputMode = 'numeric';
+      input.pattern = '[0-9,]*';
+      input.placeholder = '예: 200,000';
+      input.value = categoryBudgets[category] ? String(categoryBudgets[category]) : '';
+      input.setAttribute('aria-describedby', 'category-budget-help category-budget-message');
+      field.append(label, input);
+      container.append(field);
+    });
+  }
+
+  function syncCategoryBudgetInputs(elements, categoryBudgets = {}) {
+    if (!elements.categoryBudgetFields || !elements.categoryBudgetFields.children.length) return;
+    elements.categoryBudgetFields.querySelectorAll('input').forEach((input) => {
+      if (document.activeElement === input) return;
+      input.value = categoryBudgets[input.name] ? String(categoryBudgets[input.name]) : '';
+    });
+  }
+
+  function readCategoryBudgetInputs(elements) {
+    const budgets = {};
+    elements.categoryBudgetFields.querySelectorAll('input').forEach((input) => {
+      budgets[input.name] = input.value;
+    });
+    return budgets;
   }
 
   function renderSummary(elements, summary, month) {
@@ -99,6 +143,38 @@
       ? `선택한 달 지출의 ${summary.topExpenseCategory.rate}%`
       : '선택한 달에 지출을 추가하면 표시됩니다';
     renderCategoryBreakdown(elements, summary.categoryBreakdown);
+    renderCategoryBudgetStatus(elements, summary.categoryBudgetStatus);
+  }
+
+  function renderCategoryBudgetStatus(elements, rows) {
+    elements.categoryBudgetStatusList.innerHTML = '';
+    if (!rows.length) {
+      const empty = document.createElement('p');
+      empty.className = 'muted';
+      empty.textContent = '항목별 예산을 저장하면 여기에서 남은 금액을 볼 수 있어요.';
+      elements.categoryBudgetStatusList.append(empty);
+      return;
+    }
+    rows.forEach((item) => {
+      const row = document.createElement('div');
+      row.className = 'category-budget-row';
+      row.classList.toggle('over', item.remaining < 0);
+      const label = document.createElement('span');
+      label.textContent = item.budget > 0 ? `${item.category} · ${item.rate}% 사용` : `${item.category} · 예산 미설정`;
+      const amount = document.createElement('strong');
+      amount.textContent = item.budget > 0
+        ? `${formatWon(item.remaining)} 남음`
+        : `${formatWon(item.spent)} 사용`;
+      const detail = document.createElement('small');
+      detail.textContent = item.budget > 0
+        ? `예산 ${formatWon(item.budget)} / 사용 ${formatWon(item.spent)}`
+        : '항목별 예산을 입력하면 남은 금액을 계산합니다';
+      const bar = document.createElement('span');
+      bar.className = 'category-budget-bar';
+      bar.style.width = `${Math.min(item.rate, 100)}%`;
+      row.append(label, amount, detail, bar);
+      elements.categoryBudgetStatusList.append(row);
+    });
   }
 
   function renderCategoryBreakdown(elements, breakdown) {
@@ -189,6 +265,9 @@
       budgetForm: $('#budget-form'),
       budgetInput: $('#monthly-budget'),
       budgetMessage: $('#budget-message'),
+      categoryBudgetForm: $('#category-budget-form'),
+      categoryBudgetFields: $('#category-budget-fields'),
+      categoryBudgetMessage: $('#category-budget-message'),
       transactionForm: $('#transaction-form'),
       dateInput: $('#tx-date'),
       typeSelect: $('#tx-type'),
@@ -224,7 +303,8 @@
       dailyAllowanceHelp: $('#daily-allowance-help'),
       topCategory: $('#top-category'),
       topCategoryHelp: $('#top-category-help'),
-      categoryBreakdownList: $('#category-breakdown-list')
+      categoryBreakdownList: $('#category-breakdown-list'),
+      categoryBudgetStatusList: $('#category-budget-status-list')
     };
   }
 
@@ -236,7 +316,11 @@
     showValidationErrors,
     fillCategoryOptions,
     initDefaults,
+    renderCategoryBudgetFields,
+    syncCategoryBudgetInputs,
+    readCategoryBudgetInputs,
     renderSummary,
+    renderCategoryBudgetStatus,
     renderCategoryBreakdown,
     renderList,
     downloadText,

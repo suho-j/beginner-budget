@@ -94,6 +94,23 @@
     return { state: { ...state, monthlyBudget: budget }, ok: true, errors: [] };
   }
 
+  function setCategoryBudgets(state, inputBudgets = {}) {
+    const errors = [];
+    const categoryBudgets = {};
+    EXPENSE_CATEGORIES.forEach((category) => {
+      const rawValue = inputBudgets[category];
+      if (rawValue === undefined || rawValue === null || String(rawValue).trim() === '') return;
+      const amount = parseMoneyInput(rawValue);
+      if (!amount) {
+        errors.push(error('categoryBudgets', `${category} 예산은 1원 이상의 숫자로 입력해 주세요.`));
+        return;
+      }
+      categoryBudgets[category] = amount;
+    });
+    if (errors.length) return { state, ok: false, errors };
+    return { state: { ...state, categoryBudgets }, ok: true, errors: [] };
+  }
+
   function filterTransactions(transactions, filters) {
     const month = filters.month || '';
     const type = filters.type || 'all';
@@ -127,6 +144,20 @@
     })).sort((a, b) => b.amount - a.amount || a.category.localeCompare(b.category, 'ko-KR'));
   }
 
+  function categoryBudgetStatusFor(categoryBreakdown, categoryBudgets = {}) {
+    const spentByCategory = new Map(categoryBreakdown.map((item) => [item.category, item.amount]));
+    return EXPENSE_CATEGORIES
+      .filter((category) => window.BudgetStorage.isPositiveInteger(Number(categoryBudgets[category])) || spentByCategory.has(category))
+      .map((category) => {
+        const budget = Number(categoryBudgets[category]) || 0;
+        const spent = spentByCategory.get(category) || 0;
+        const remaining = budget - spent;
+        const rate = budget > 0 ? Math.min(999, Math.round((spent / budget) * 100)) : 0;
+        return { category, budget, spent, remaining, rate };
+      })
+      .sort((a, b) => (b.budget > 0) - (a.budget > 0) || b.spent - a.spent || a.category.localeCompare(b.category, 'ko-KR'));
+  }
+
   function daysRemainingInMonth(month, today = new Date()) {
     if (!/^\d{4}-\d{2}$/.test(month)) return 0;
     const [year, monthNumber] = month.split('-').map(Number);
@@ -136,7 +167,7 @@
     return Math.max(1, lastDay - startDay + 1);
   }
 
-  function summarize(transactions, monthlyBudget, month, today = new Date()) {
+  function summarize(transactions, monthlyBudget, month, today = new Date(), categoryBudgets = {}) {
     const target = filterTransactions(transactions, { month, type: 'all' });
     const income = target.filter((tx) => tx.type === 'income').reduce((sum, tx) => sum + tx.amount, 0);
     const expense = target.filter((tx) => tx.type === 'expense').reduce((sum, tx) => sum + tx.amount, 0);
@@ -156,6 +187,7 @@
       monthlyBudget: Number(monthlyBudget),
       count: target.length,
       categoryBreakdown,
+      categoryBudgetStatus: categoryBudgetStatusFor(categoryBreakdown, categoryBudgets),
       topExpenseCategory: categoryBreakdown[0] || null,
       dailyAllowance
     };
@@ -229,6 +261,7 @@
     addTransaction,
     deleteTransaction,
     setMonthlyBudget,
+    setCategoryBudgets,
     filterTransactions,
     summarize,
     hasSampleForMonth,

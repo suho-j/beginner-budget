@@ -36,7 +36,8 @@
     if (document.activeElement !== elements.budgetInput) {
       elements.budgetInput.value = state.monthlyBudget;
     }
-    const summary = window.BudgetTransactions.summarize(state.transactions, state.monthlyBudget, filters.month);
+    window.BudgetUI.syncCategoryBudgetInputs(elements, state.categoryBudgets);
+    const summary = window.BudgetTransactions.summarize(state.transactions, state.monthlyBudget, filters.month, new Date(), state.categoryBudgets);
     const list = window.BudgetTransactions.filterTransactions(state.transactions, filters);
     window.BudgetUI.renderSummary(elements, summary, filters.month);
     window.BudgetUI.renderList(elements, list);
@@ -52,6 +53,20 @@
     }
     if (persist(result.state, { messageElement: elements.budgetMessage })) {
       window.BudgetUI.setMessage(elements.budgetMessage, '월 예산을 저장했어요.', 'ok');
+    }
+  }
+
+  function handleCategoryBudgetSubmit(event) {
+    event.preventDefault();
+    window.BudgetUI.clearFieldErrors(elements.categoryBudgetForm);
+    const inputBudgets = window.BudgetUI.readCategoryBudgetInputs(elements);
+    const result = window.BudgetTransactions.setCategoryBudgets(state, inputBudgets);
+    if (!result.ok) {
+      window.BudgetUI.showValidationErrors(elements.categoryBudgetForm, elements.categoryBudgetMessage, result.errors);
+      return;
+    }
+    if (persist(result.state, { messageElement: elements.categoryBudgetMessage })) {
+      window.BudgetUI.setMessage(elements.categoryBudgetMessage, '항목별 예산을 저장했어요.', 'ok');
     }
   }
 
@@ -159,6 +174,7 @@
       return;
     }
     state = result.state;
+    elements.categoryBudgetFields.innerHTML = '';
     window.BudgetUI.initDefaults(elements, state);
     render();
     window.BudgetUI.setMessage(elements.toolMessage, '전체 데이터를 초기화했어요.', 'ok');
@@ -166,6 +182,7 @@
 
   function bindEvents() {
     elements.budgetForm.addEventListener('submit', handleBudgetSubmit);
+    elements.categoryBudgetForm.addEventListener('submit', handleCategoryBudgetSubmit);
     elements.transactionForm.addEventListener('submit', handleTransactionSubmit);
     elements.typeSelect.addEventListener('change', handleTypeChange);
     elements.monthInput.addEventListener('change', render);
