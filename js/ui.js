@@ -251,6 +251,7 @@
   function updateCloudStatus(elements, user) {
     if (!window.BudgetCloud || !window.BudgetCloud.isConfigured()) {
       elements.cloudStatus.textContent = 'Supabase 클라이언트를 불러오지 못했어요. 네트워크를 확인해 주세요.';
+      elements.cloudPanel.hidden = false;
       elements.cloudLoginForm.hidden = true;
       elements.cloudUploadButton.disabled = true;
       elements.cloudDownloadButton.hidden = true;
@@ -260,11 +261,12 @@
       return;
     }
     const signedIn = Boolean(user);
-    elements.cloudStatus.textContent = signedIn ? '공용 가계부 계정으로 로그인 중' : '공용 비밀번호로 로그인해 주세요.';
+    elements.cloudStatus.textContent = signedIn ? '' : '공용 비밀번호로 로그인해 주세요.';
+    elements.cloudPanel.hidden = signedIn;
     elements.cloudLoginForm.hidden = signedIn;
     elements.cloudUploadButton.disabled = !signedIn;
-    elements.cloudDownloadButton.hidden = !signedIn;
-    elements.cloudDownloadButton.disabled = !signedIn;
+    elements.cloudDownloadButton.hidden = true;
+    elements.cloudDownloadButton.disabled = true;
     elements.cloudLogoutButton.hidden = !signedIn;
     elements.cloudLogoutButton.disabled = !signedIn;
   }
@@ -289,6 +291,7 @@
       categoryBudgetForm: $('#category-budget-form'),
       categoryBudgetFields: $('#category-budget-fields'),
       categoryBudgetMessage: $('#category-budget-message'),
+      cloudPanel: $('#cloud-panel'),
       cloudLoginForm: $('#cloud-login-form'),
       cloudPassword: $('#cloud-password'),
       cloudUploadButton: $('#cloud-upload-button'),

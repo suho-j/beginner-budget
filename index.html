@@ -15,17 +15,17 @@
         <h1>처음 가계부</h1>
         <p class="lead">가입 없이 오늘의 수입과 지출을 기록하고, 이번 달 돈 흐름을 한눈에 확인하세요.</p>
       </div>
+      <button id="cloud-logout-button" type="button" class="header-logout" hidden>로그아웃</button>
     </div>
   </header>
 
   <main id="main-content" class="container layout">
-    <section class="panel cloud-panel" aria-labelledby="cloud-title">
+    <section id="cloud-panel" class="panel cloud-panel" aria-labelledby="cloud-title">
       <div class="cloud-heading">
         <div>
           <h2 id="cloud-title">로그인</h2>
           <p id="cloud-status" class="muted">로그인 상태를 확인 중입니다.</p>
         </div>
-        <button id="cloud-logout-button" type="button" class="tiny-logout danger">로그아웃</button>
       </div>
       <form id="cloud-login-form" class="inline-form" novalidate>
         <div class="field grow">
@@ -35,7 +35,7 @@
         <button type="submit">로그인</button>
       </form>
       <button id="cloud-upload-button" type="button" class="visually-hidden" hidden>클라우드에 저장</button>
-      <button id="cloud-download-button" type="button" class="secondary">클라우드에서 불러오기</button>
+      <button id="cloud-download-button" type="button" class="visually-hidden" hidden>클라우드에서 불러오기</button>
       <p id="cloud-message" class="message" role="status" aria-live="polite"></p>
     </section>
 
@@ -207,8 +207,8 @@
   <script src="js/storage.js"></script>
   <script src="js/transactions.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="js/cloud.js?v=20260522d"></script>
-  <script src="js/ui.js?v=20260522d"></script>
-  <script src="js/app.js?v=20260522d"></script>
+  <script src="js/cloud.js?v=20260522e"></script>
+  <script src="js/ui.js?v=20260522e"></script>
+  <script src="js/app.js?v=20260522e"></script>
 </body>
 </html>
