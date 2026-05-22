@@ -15,7 +15,7 @@
     try {
       const user = await window.BudgetCloud.currentUser();
       if (!user) {
-        window.BudgetUI.setMessage(messageElement, '로그인 전 변경은 화면에만 임시 반영돼요. 이메일 로그인 후 클라우드에 저장하세요.', 'error');
+        window.BudgetUI.setMessage(messageElement, '로그인 전 변경은 화면에만 임시 반영돼요. 공용 비밀번호로 로그인 후 저장하세요.', 'error');
         return false;
       }
       await window.BudgetCloud.uploadState(state);
@@ -196,17 +196,22 @@
 
   async function handleCloudLogin(event) {
     event.preventDefault();
-    const email = elements.cloudEmail.value.trim();
-    if (!email) {
-      window.BudgetUI.setMessage(elements.cloudMessage, '이메일을 입력해 주세요.', 'error');
-      elements.cloudEmail.focus();
+    const password = elements.cloudPassword.value;
+    if (!password) {
+      window.BudgetUI.setMessage(elements.cloudMessage, '비밀번호를 입력해 주세요.', 'error');
+      elements.cloudPassword.focus();
       return;
     }
     try {
-      await window.BudgetCloud.signInWithEmail(email);
-      window.BudgetUI.setMessage(elements.cloudMessage, '이메일로 로그인 링크를 보냈어요. 메일함을 확인해 주세요.', 'ok');
+      await window.BudgetCloud.signInWithPassword(password);
+      elements.cloudPassword.value = '';
+      await refreshCloudStatus();
+      const cloudState = await window.BudgetCloud.downloadState();
+      state = cloudState;
+      render();
+      window.BudgetUI.setMessage(elements.cloudMessage, '로그인하고 클라우드 데이터를 불러왔어요.', 'ok');
     } catch (error) {
-      window.BudgetUI.setMessage(elements.cloudMessage, `로그인 링크 발송 실패: ${error.message}`, 'error');
+      window.BudgetUI.setMessage(elements.cloudMessage, `로그인 실패: ${error.message}`, 'error');
     }
   }
 

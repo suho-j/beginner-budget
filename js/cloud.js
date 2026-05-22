@@ -4,6 +4,7 @@
 
   const SUPABASE_URL = 'https://htarkoatahivxgzbogmx.supabase.co';
   const SUPABASE_ANON_KEY = 'sb_publishable_bx0mPHkBtNdbYF8GUn_4Fg_TLKDEY1j';
+  const LOGIN_EMAIL = 'ho910728@naver.com';
   let client = null;
 
   function isConfigured() {
@@ -63,13 +64,10 @@
     return data && data.user ? data.user : null;
   }
 
-  async function signInWithEmail(email) {
+  async function signInWithPassword(password) {
     const supabase = getClient();
     if (!supabase) throw new Error('Supabase 설정을 찾지 못했어요.');
-    const { error } = await supabase.auth.signInWithOtp({
-      email,
-      options: { emailRedirectTo: window.location.origin + window.location.pathname }
-    });
+    const { error } = await supabase.auth.signInWithPassword({ email: LOGIN_EMAIL, password });
     if (error) throw error;
   }
 
@@ -126,12 +124,13 @@
   window.BudgetCloud = {
     SUPABASE_URL,
     SUPABASE_ANON_KEY,
+    LOGIN_EMAIL,
     isConfigured,
     getClient,
     stateToRemote,
     remoteToState,
     currentUser,
-    signInWithEmail,
+    signInWithPassword,
     signOut,
     uploadState,
     downloadState

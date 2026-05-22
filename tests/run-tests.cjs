@@ -244,6 +244,11 @@ function testCloudStateMappingKeepsBudgetAndTransactions() {
   assert.strictEqual(restored.transactions[0].id, 'tx-a');
 }
 
+function testCloudUsesSharedLoginEmail() {
+  const win = createContext();
+  assert.strictEqual(win.BudgetCloud.LOGIN_EMAIL, 'ho910728@naver.com');
+}
+
 const tests = [
   testStorageDefaultsAndIgnoresLocalStorage,
   testSaveDoesNotUseLocalStorage,
@@ -256,7 +261,8 @@ const tests = [
   testSummaryAndSampleReplace,
   testImportExport,
   testLegacyExpenseCategoriesMapToFourBudgets,
-  testCloudStateMappingKeepsBudgetAndTransactions
+  testCloudStateMappingKeepsBudgetAndTransactions,
+  testCloudUsesSharedLoginEmail
 ];
 
 for (const test of tests) {

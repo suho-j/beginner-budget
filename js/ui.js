@@ -258,7 +258,7 @@
       return;
     }
     const signedIn = Boolean(user);
-    elements.cloudStatus.textContent = signedIn ? `${user.email || '로그인됨'} 계정으로 로그인 중` : '로그인하면 클라우드 저장을 사용할 수 있어요.';
+    elements.cloudStatus.textContent = signedIn ? '공용 가계부 계정으로 로그인 중' : '공용 비밀번호로 로그인해 주세요.';
     elements.cloudLoginForm.hidden = signedIn;
     elements.cloudUploadButton.disabled = !signedIn;
     elements.cloudDownloadButton.disabled = !signedIn;
@@ -286,7 +286,7 @@
       categoryBudgetFields: $('#category-budget-fields'),
       categoryBudgetMessage: $('#category-budget-message'),
       cloudLoginForm: $('#cloud-login-form'),
-      cloudEmail: $('#cloud-email'),
+      cloudPassword: $('#cloud-password'),
       cloudUploadButton: $('#cloud-upload-button'),
       cloudDownloadButton: $('#cloud-download-button'),
       cloudLogoutButton: $('#cloud-logout-button'),
