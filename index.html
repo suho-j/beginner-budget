@@ -134,20 +134,29 @@
 
     <section class="panel" aria-labelledby="budget-title">
       <h2 id="budget-title">월 예산 설정</h2>
+      <form id="month-start-form" class="inline-form" novalidate>
+        <div class="field grow">
+          <label for="month-start-day">월 시작일</label>
+          <input id="month-start-day" name="monthStartDay" type="number" inputmode="numeric" min="1" max="31" step="1" required aria-describedby="month-start-help month-start-message">
+          <small id="month-start-help" class="hint">예: 1일이면 매월 1일~말일, 25일이면 25일~다음달 24일로 계산해요.</small>
+        </div>
+        <button type="submit">시작일 저장</button>
+      </form>
+      <p id="month-start-message" class="message" role="status" aria-live="polite"></p>
       <form id="budget-form" class="inline-form" novalidate>
         <div class="field grow">
-          <label for="monthly-budget">한 달 지출 예산</label>
+          <label for="monthly-budget">선택한 월 지출 예산</label>
           <input id="monthly-budget" name="monthlyBudget" type="number" inputmode="numeric" min="1" step="1" required aria-describedby="budget-help budget-message">
-          <small id="budget-help" class="hint">쉼표 없이 숫자만 입력하세요. 예: 500000</small>
+          <small id="budget-help" class="hint">월별 보기에서 선택한 달에만 적용됩니다. 예: 500000</small>
         </div>
-        <button type="submit">예산 저장</button>
+        <button type="submit">이번 기간 예산 저장</button>
       </form>
       <p id="budget-message" class="message" role="status" aria-live="polite"></p>
     </section>
 
     <section class="panel" aria-labelledby="category-budget-title">
       <h2 id="category-budget-title">항목별 월 예산</h2>
-      <p id="category-budget-help" class="hint">자주 쓰는 지출 항목만 입력해도 됩니다. 비워둔 항목은 예산 없이 사용액만 보여줘요.</p>
+      <p id="category-budget-help" class="hint">월별 보기에서 선택한 달에만 적용됩니다. 비워둔 항목은 예산 없이 사용액만 보여줘요.</p>
       <form id="category-budget-form" novalidate>
         <div id="category-budget-fields" class="category-budget-fields"></div>
         <div class="form-actions category-budget-actions">
@@ -207,8 +216,8 @@
   <script src="js/storage.js"></script>
   <script src="js/transactions.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="js/cloud.js?v=20260522e"></script>
-  <script src="js/ui.js?v=20260522e"></script>
-  <script src="js/app.js?v=20260522e"></script>
+  <script src="js/cloud.js?v=20260522f"></script>
+  <script src="js/ui.js?v=20260522f"></script>
+  <script src="js/app.js?v=20260522f"></script>
 </body>
 </html>

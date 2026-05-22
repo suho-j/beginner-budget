@@ -72,6 +72,11 @@ function testNormalizationDropsInvalidRowsAndDeduplicatesIds() {
   const state = win.BudgetStorage.normalizeState({
     monthlyBudget: 700000,
     categoryBudgets: { 생활비: 200000, 배달비: '90000', 월급: 1000, 기타: 0, 잘못된값: 5000 },
+    monthStartDay: 25,
+    monthlyBudgets: {
+      '2026-05': { monthlyBudget: 800000, categoryBudgets: { 생활비: 300000 } },
+      'bad': { monthlyBudget: 100000 }
+    },
     transactions: [
       { id: 'same', date: '2026-05-01', type: 'expense', category: '생활비', amount: 1000, memo: 'ok' },
       { id: 'same', date: '2026-05-02', type: 'income', category: '월급', amount: 2000, memo: 'ok' },
@@ -81,7 +86,9 @@ function testNormalizationDropsInvalidRowsAndDeduplicatesIds() {
     ]
   });
   assert.strictEqual(state.monthlyBudget, 700000);
+  assert.strictEqual(state.monthStartDay, 25);
   assert.strictEqual(JSON.stringify(state.categoryBudgets), JSON.stringify({ 생활비: 200000, 배달비: 90000 }));
+  assert.strictEqual(JSON.stringify(state.monthlyBudgets), JSON.stringify({ '2026-05': { monthlyBudget: 800000, categoryBudgets: { 생활비: 300000 } } }));
   assert.strictEqual(state.transactions.length, 2);
   assert.strictEqual(new Set(state.transactions.map((tx) => tx.id)).size, 2);
 }
@@ -109,6 +116,38 @@ function testCategoryBudgetSaveAndSummary() {
 
   const invalid = win.BudgetTransactions.setCategoryBudgets(state, { 생활비: '-1' });
   assert.strictEqual(invalid.ok, false);
+}
+
+
+function testBudgetMonthStartAndMonthlyBudgets() {
+  const win = createContext();
+  let state = win.BudgetStorage.defaultState();
+  let result = win.BudgetTransactions.setMonthStartDay(state, 25);
+  assert.strictEqual(result.ok, true);
+  state = result.state;
+  result = win.BudgetTransactions.setMonthlyBudget(state, 700000, '2026-05');
+  assert.strictEqual(result.ok, true);
+  state = result.state;
+  result = win.BudgetTransactions.setCategoryBudgets(state, { 생활비: '300,000', 배달비: '100000' }, '2026-05');
+  assert.strictEqual(result.ok, true);
+  state = result.state;
+
+  assert.strictEqual(win.BudgetStorage.monthKeyForDate('2026-05-24', state.monthStartDay), '2026-04');
+  assert.strictEqual(win.BudgetStorage.monthKeyForDate('2026-05-25', state.monthStartDay), '2026-05');
+  assert.strictEqual(JSON.stringify(win.BudgetStorage.periodRangeForMonth('2026-05', state.monthStartDay)), JSON.stringify({ start: '2026-05-25', end: '2026-06-24' }));
+  assert.strictEqual(win.BudgetStorage.budgetForMonth(state, '2026-05').monthlyBudget, 700000);
+  assert.strictEqual(JSON.stringify(win.BudgetStorage.budgetForMonth(state, '2026-05').categoryBudgets), JSON.stringify({ 생활비: 300000, 배달비: 100000 }));
+
+  state = win.BudgetTransactions.addTransaction(state, { date: '2026-05-24', type: 'expense', category: '생활비', amount: 1000, memo: '' }).state;
+  state = win.BudgetTransactions.addTransaction(state, { date: '2026-05-25', type: 'expense', category: '생활비', amount: 2000, memo: '' }).state;
+  state = win.BudgetTransactions.addTransaction(state, { date: '2026-06-24', type: 'expense', category: '배달비', amount: 3000, memo: '' }).state;
+  state = win.BudgetTransactions.addTransaction(state, { date: '2026-06-25', type: 'expense', category: '배달비', amount: 4000, memo: '' }).state;
+  const filtered = win.BudgetTransactions.filterTransactions(state.transactions, { month: '2026-05', type: 'expense', monthStartDay: state.monthStartDay });
+  assert.strictEqual(filtered.length, 2);
+  const monthBudget = win.BudgetStorage.budgetForMonth(state, '2026-05');
+  const summary = win.BudgetTransactions.summarize(state.transactions, monthBudget.monthlyBudget, '2026-05', new Date(2026, 5, 1), monthBudget.categoryBudgets, state.monthStartDay);
+  assert.strictEqual(summary.expense, 5000);
+  assert.strictEqual(summary.budgetRemaining, 695000);
 }
 
 function testAddTransactionCanonicalizesBeginnerMoneyInput() {
@@ -229,9 +268,11 @@ function testCloudStateMappingKeepsBudgetAndTransactions() {
       { id: 'tx-a', date: '2026-05-02', type: 'expense', category: '생활비', amount: 120000, memo: '마트', source: 'user' }
     ]
   });
+  state = win.BudgetTransactions.setMonthStartDay(state, 25).state;
+  state = win.BudgetTransactions.setMonthlyBudget(state, 900000, '2026-06').state;
   const mapped = win.BudgetCloud.stateToRemote(state, 'user-1');
   assert.strictEqual(JSON.stringify(mapped.settings), JSON.stringify({
-    user_id: 'user-1', monthly_budget: 800000, category_budgets: { 생활비: 200000 }
+    user_id: 'user-1', monthly_budget: 800000, category_budgets: { 생활비: 200000, __month_start_day: 25, __monthly_budgets: { '2026-06': { monthlyBudget: 900000, categoryBudgets: { 생활비: 200000 } } } }
   }));
   assert.strictEqual(JSON.stringify(mapped.transactions), JSON.stringify([
     { id: 'tx-a', user_id: 'user-1', date: '2026-05-02', type: 'expense', category: '생활비', amount: 120000, memo: '마트', source: 'user' }
@@ -239,7 +280,9 @@ function testCloudStateMappingKeepsBudgetAndTransactions() {
 
   const restored = win.BudgetCloud.remoteToState(mapped.settings, mapped.transactions);
   assert.strictEqual(restored.monthlyBudget, 800000);
+  assert.strictEqual(restored.monthStartDay, 25);
   assert.strictEqual(JSON.stringify(restored.categoryBudgets), JSON.stringify({ 생활비: 200000 }));
+  assert.strictEqual(restored.monthlyBudgets['2026-06'].monthlyBudget, 900000);
   assert.strictEqual(restored.transactions.length, 1);
   assert.strictEqual(restored.transactions[0].id, 'tx-a');
 }
@@ -256,6 +299,7 @@ const tests = [
   testLocalDateFormatting,
   testNormalizationDropsInvalidRowsAndDeduplicatesIds,
   testCategoryBudgetSaveAndSummary,
+  testBudgetMonthStartAndMonthlyBudgets,
   testAddTransactionCanonicalizesBeginnerMoneyInput,
   testSummaryInsightsAndSearchFilter,
   testSummaryAndSampleReplace,

@@ -2,20 +2,36 @@
 
 ## 저장 위치
 
-- 저장소: 브라우저 `localStorage`
-- 키: `beginner-budget-app:v1`
-- 저장 실패 가능성: 브라우저 정책, 비공개 모드, 용량 초과, 사용자 설정에 따라 `setItem` 또는 `removeItem`이 실패할 수 있다. 앱은 실패 메시지를 보여주고 런타임 오류로 중단되지 않도록 처리한다.
+- 앱 데이터 저장소: Supabase DB
+  - `budget_settings`: 월 시작일, 기본 예산, 월별 예산, 항목별 예산
+  - `transactions`: 거래 내역
+- 브라우저 `localStorage`에는 예산/거래 데이터를 저장하지 않는다.
+- Supabase Auth 세션 유지를 위한 브라우저 저장소 사용은 허용된다.
 
-## 구조
+## 상태 구조
 
 ```json
 {
   "version": 1,
   "monthlyBudget": 500000,
+  "categoryBudgets": {
+    "생활비": 200000,
+    "배달비": 100000
+  },
+  "monthStartDay": 25,
+  "monthlyBudgets": {
+    "2026-05": {
+      "monthlyBudget": 700000,
+      "categoryBudgets": {
+        "생활비": 300000,
+        "배달비": 100000
+      }
+    }
+  },
   "transactions": [
     {
       "id": "tx-...",
-      "date": "2026-05-01",
+      "date": "2026-05-25",
       "type": "expense",
       "category": "생활비",
       "amount": 12000,
@@ -29,7 +45,13 @@
 ## 필드 설명
 
 - `version`: 데이터 구조 버전. 현재는 `1`.
-- `monthlyBudget`: 월 지출 예산. 1 이상의 정수.
+- `monthlyBudget`: 월별 예산이 없는 기간에 쓰는 기본 월 지출 예산. 1 이상의 정수.
+- `categoryBudgets`: 월별 항목 예산이 없는 기간에 쓰는 기본 항목 예산.
+- `monthStartDay`: 예산 기간 시작일. 1~31 사이 정수.
+- `monthlyBudgets`: `YYYY-MM` 키별 예산 설정.
+  - 예: `monthStartDay`가 25이고 키가 `2026-05`이면 `2026-05-25 ~ 2026-06-24` 기간 예산이다.
+  - `monthlyBudget`: 해당 기간 총 지출 예산.
+  - `categoryBudgets`: 해당 기간 항목별 예산.
 - `transactions`: 거래 배열.
 - `id`: 거래 고유 ID. `tx-` 접두사를 사용한다.
 - `date`: 실제 존재하는 `YYYY-MM-DD` 형식 날짜.
@@ -39,6 +61,14 @@
 - `memo`: 선택 입력 메모. 최대 80자.
 - `source`: `user` 또는 `sample`. 샘플 데이터 중복 방지와 교체에 사용한다.
 
+## Supabase 매핑
+
+- `budget_settings.monthly_budget`: 기본 월 예산.
+- `budget_settings.category_budgets`: 기본 항목 예산과 함께 아래 내부 설정을 JSON으로 보관한다.
+  - `__month_start_day`: 월 시작일.
+  - `__monthly_budgets`: 월별 예산 설정.
+- `transactions`: 거래 내역 전체.
+
 ## 카테고리
 
 - 지출: 생활비, 배달비, 의류비, 비상금
@@ -46,12 +76,15 @@
 
 ## 오류 복구
 
-저장소가 비어 있거나 JSON 파싱에 실패하면 기본 상태로 복구한다. 일부 거래 필드가 잘못된 경우 해당 거래만 제외하고 가능한 정상 데이터는 유지한다.
+저장소가 비어 있거나 데이터 형식이 잘못되면 기본 상태로 복구한다. 일부 거래 필드가 잘못된 경우 해당 거래만 제외하고 가능한 정상 데이터는 유지한다.
 
 ```json
 {
   "version": 1,
   "monthlyBudget": 500000,
+  "categoryBudgets": {},
+  "monthStartDay": 1,
+  "monthlyBudgets": {},
   "transactions": []
 }
 ```

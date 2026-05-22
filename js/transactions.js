@@ -15,6 +15,10 @@
     return typeof date === 'string' ? date.slice(0, 7) : '';
   }
 
+  function budgetMonthFromDate(date, monthStartDay) {
+    return window.BudgetStorage.monthKeyForDate(date, monthStartDay);
+  }
+
   function error(field, message) {
     return { field, message };
   }
@@ -86,15 +90,38 @@
     };
   }
 
-  function setMonthlyBudget(state, amount) {
+  function setMonthlyBudget(state, amount, month) {
     const budget = Number(amount);
     if (!window.BudgetStorage.isPositiveInteger(budget)) {
       return { state, ok: false, errors: [error('monthlyBudget', '예산은 쉼표 없이 1원 이상의 양의 정수로 입력해 주세요.')] };
     }
-    return { state: { ...state, monthlyBudget: budget }, ok: true, errors: [] };
+    if (!month) return { state: { ...state, monthlyBudget: budget }, ok: true, errors: [] };
+    const currentMonthBudget = window.BudgetStorage.budgetForMonth(state, month);
+    return {
+      state: {
+        ...state,
+        monthlyBudgets: {
+          ...(state.monthlyBudgets || {}),
+          [month]: {
+            monthlyBudget: budget,
+            categoryBudgets: currentMonthBudget.categoryBudgets || {}
+          }
+        }
+      },
+      ok: true,
+      errors: []
+    };
   }
 
-  function setCategoryBudgets(state, inputBudgets = {}) {
+  function setMonthStartDay(state, day) {
+    const normalizedDay = window.BudgetStorage.normalizeMonthStartDay(day);
+    if (String(day || '').trim() === '' || Number(day) !== normalizedDay) {
+      return { state, ok: false, errors: [error('monthStartDay', '월 시작일은 1일부터 31일 사이로 입력해 주세요.')] };
+    }
+    return { state: { ...state, monthStartDay: normalizedDay }, ok: true, errors: [] };
+  }
+
+  function setCategoryBudgets(state, inputBudgets = {}, month) {
     const errors = [];
     const categoryBudgets = {};
     EXPENSE_CATEGORIES.forEach((category) => {
@@ -108,15 +135,31 @@
       categoryBudgets[category] = amount;
     });
     if (errors.length) return { state, ok: false, errors };
-    return { state: { ...state, categoryBudgets }, ok: true, errors: [] };
+    if (!month) return { state: { ...state, categoryBudgets }, ok: true, errors: [] };
+    const currentMonthBudget = window.BudgetStorage.budgetForMonth(state, month);
+    return {
+      state: {
+        ...state,
+        monthlyBudgets: {
+          ...(state.monthlyBudgets || {}),
+          [month]: {
+            monthlyBudget: currentMonthBudget.monthlyBudget,
+            categoryBudgets
+          }
+        }
+      },
+      ok: true,
+      errors: []
+    };
   }
 
   function filterTransactions(transactions, filters) {
     const month = filters.month || '';
+    const monthStartDay = window.BudgetStorage.normalizeMonthStartDay(filters.monthStartDay || 1);
     const type = filters.type || 'all';
     const query = String(filters.query || '').trim().toLocaleLowerCase('ko-KR');
     return transactions
-      .filter((tx) => !month || monthFromDate(tx.date) === month)
+      .filter((tx) => !month || window.BudgetStorage.isDateInBudgetMonth(tx.date, month, monthStartDay))
       .filter((tx) => type === 'all' || tx.type === type)
       .filter((tx) => {
         if (!query) return true;
@@ -158,17 +201,20 @@
       .sort((a, b) => (b.budget > 0) - (a.budget > 0) || b.spent - a.spent || a.category.localeCompare(b.category, 'ko-KR'));
   }
 
-  function daysRemainingInMonth(month, today = new Date()) {
+  function daysRemainingInMonth(month, today = new Date(), monthStartDay = 1) {
     if (!/^\d{4}-\d{2}$/.test(month)) return 0;
-    const [year, monthNumber] = month.split('-').map(Number);
-    const lastDay = new Date(year, monthNumber, 0).getDate();
-    const sameMonth = today.getFullYear() === year && today.getMonth() === monthNumber - 1;
-    const startDay = sameMonth ? today.getDate() : 1;
-    return Math.max(1, lastDay - startDay + 1);
+    const range = window.BudgetStorage.periodRangeForMonth(month, monthStartDay);
+    const todayString = window.BudgetStorage.localDateString(today);
+    const startString = todayString >= range.start && todayString <= range.end ? todayString : range.start;
+    const [startYear, startMonth, startDay] = startString.split('-').map(Number);
+    const [endYear, endMonth, endDay] = range.end.split('-').map(Number);
+    const startDate = new Date(startYear, startMonth - 1, startDay);
+    const endDate = new Date(endYear, endMonth - 1, endDay);
+    return Math.max(1, Math.floor((endDate - startDate) / 86400000) + 1);
   }
 
-  function summarize(transactions, monthlyBudget, month, today = new Date(), categoryBudgets = {}) {
-    const target = filterTransactions(transactions, { month, type: 'all' });
+  function summarize(transactions, monthlyBudget, month, today = new Date(), categoryBudgets = {}, monthStartDay = 1) {
+    const target = filterTransactions(transactions, { month, type: 'all', monthStartDay });
     const income = target.filter((tx) => tx.type === 'income').reduce((sum, tx) => sum + tx.amount, 0);
     const expense = target.filter((tx) => tx.type === 'expense').reduce((sum, tx) => sum + tx.amount, 0);
     const balance = income - expense;
@@ -176,7 +222,7 @@
     const budgetRemaining = Number(monthlyBudget) - expense;
     const budgetRate = Number(monthlyBudget) > 0 ? Math.min(999, Math.round((expense / Number(monthlyBudget)) * 100)) : 0;
     const categoryBreakdown = categoryBreakdownFor(target, expense);
-    const dailyAllowance = Math.max(0, Math.floor(budgetRemaining / daysRemainingInMonth(month, today)));
+    const dailyAllowance = Math.max(0, Math.floor(budgetRemaining / daysRemainingInMonth(month, today, monthStartDay)));
     return {
       income,
       expense,
@@ -193,8 +239,8 @@
     };
   }
 
-  function hasSampleForMonth(transactions, month) {
-    return transactions.some((tx) => tx.source === 'sample' && monthFromDate(tx.date) === month);
+  function hasSampleForMonth(transactions, month, monthStartDay = 1) {
+    return transactions.some((tx) => tx.source === 'sample' && budgetMonthFromDate(tx.date, monthStartDay) === month);
   }
 
   function createSampleState(currentState, month, options = {}) {
@@ -261,6 +307,7 @@
     addTransaction,
     deleteTransaction,
     setMonthlyBudget,
+    setMonthStartDay,
     setCategoryBudgets,
     filterTransactions,
     summarize,

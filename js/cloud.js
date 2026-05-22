@@ -25,7 +25,11 @@
       settings: {
         user_id: userId,
         monthly_budget: normalized.monthlyBudget,
-        category_budgets: normalized.categoryBudgets || {}
+        category_budgets: {
+          ...(normalized.categoryBudgets || {}),
+          __month_start_day: normalized.monthStartDay,
+          __monthly_budgets: normalized.monthlyBudgets || {}
+        }
       },
       transactions: normalized.transactions.map((tx) => ({
         id: tx.id,
@@ -41,9 +45,12 @@
   }
 
   function remoteToState(settings, rows) {
+    const remoteBudgets = settings && settings.category_budgets ? settings.category_budgets : {};
     return window.BudgetStorage.normalizeState({
       monthlyBudget: settings && settings.monthly_budget,
-      categoryBudgets: settings && settings.category_budgets,
+      categoryBudgets: remoteBudgets,
+      monthStartDay: remoteBudgets.__month_start_day,
+      monthlyBudgets: remoteBudgets.__monthly_budgets,
       transactions: (rows || []).map((row) => ({
         id: row.id,
         date: row.date,

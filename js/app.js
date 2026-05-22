@@ -28,7 +28,8 @@
 
   function activeFilters() {
     return {
-      month: elements.monthInput.value || window.BudgetStorage.localMonthString(),
+      month: elements.monthInput.value || window.BudgetStorage.monthKeyForDate(window.BudgetStorage.localDateString(), state.monthStartDay || 1) || window.BudgetStorage.localMonthString(),
+      monthStartDay: state.monthStartDay || 1,
       type: elements.filterType.value || 'all',
       query: elements.filterQuery.value || ''
     };
@@ -36,26 +37,47 @@
 
   function render() {
     const filters = activeFilters();
-    if (document.activeElement !== elements.budgetInput) {
-      elements.budgetInput.value = state.monthlyBudget;
+    const selectedBudget = window.BudgetStorage.budgetForMonth(state, filters.month);
+    if (document.activeElement !== elements.monthStartInput) {
+      elements.monthStartInput.value = state.monthStartDay || 1;
     }
-    window.BudgetUI.syncCategoryBudgetInputs(elements, state.categoryBudgets);
-    const summary = window.BudgetTransactions.summarize(state.transactions, state.monthlyBudget, filters.month, new Date(), state.categoryBudgets);
+    if (document.activeElement !== elements.budgetInput) {
+      elements.budgetInput.value = selectedBudget.monthlyBudget;
+    }
+    window.BudgetUI.syncCategoryBudgetInputs(elements, selectedBudget.categoryBudgets);
+    const summary = window.BudgetTransactions.summarize(state.transactions, selectedBudget.monthlyBudget, filters.month, new Date(), selectedBudget.categoryBudgets, filters.monthStartDay);
     const list = window.BudgetTransactions.filterTransactions(state.transactions, filters);
-    window.BudgetUI.renderSummary(elements, summary, filters.month);
+    window.BudgetUI.renderSummary(elements, summary, filters.month, window.BudgetStorage.periodRangeForMonth(filters.month, filters.monthStartDay));
     window.BudgetUI.renderList(elements, list);
   }
 
   async function handleBudgetSubmit(event) {
     event.preventDefault();
     window.BudgetUI.clearFieldErrors(elements.budgetForm);
-    const result = window.BudgetTransactions.setMonthlyBudget(state, elements.budgetInput.valueAsNumber);
+    const month = activeFilters().month;
+    const result = window.BudgetTransactions.setMonthlyBudget(state, elements.budgetInput.valueAsNumber, month);
     if (!result.ok) {
       window.BudgetUI.showValidationErrors(elements.budgetForm, elements.budgetMessage, result.errors);
       return;
     }
     if (await persist(result.state, { messageElement: elements.budgetMessage })) {
-      window.BudgetUI.setMessage(elements.budgetMessage, '월 예산을 저장했어요.', 'ok');
+      window.BudgetUI.setMessage(elements.budgetMessage, `${month} 예산을 저장했어요.`, 'ok');
+    }
+  }
+
+  async function handleMonthStartSubmit(event) {
+    event.preventDefault();
+    window.BudgetUI.clearFieldErrors(elements.monthStartForm);
+    const oldMonth = activeFilters().month;
+    const result = window.BudgetTransactions.setMonthStartDay(state, elements.monthStartInput.valueAsNumber);
+    if (!result.ok) {
+      window.BudgetUI.showValidationErrors(elements.monthStartForm, elements.monthStartMessage, result.errors);
+      return;
+    }
+    const todayMonth = window.BudgetStorage.monthKeyForDate(window.BudgetStorage.localDateString(), result.state.monthStartDay);
+    elements.monthInput.value = todayMonth || oldMonth;
+    if (await persist(result.state, { messageElement: elements.monthStartMessage })) {
+      window.BudgetUI.setMessage(elements.monthStartMessage, '월 시작일을 저장했어요.', 'ok');
     }
   }
 
@@ -63,13 +85,14 @@
     event.preventDefault();
     window.BudgetUI.clearFieldErrors(elements.categoryBudgetForm);
     const inputBudgets = window.BudgetUI.readCategoryBudgetInputs(elements);
-    const result = window.BudgetTransactions.setCategoryBudgets(state, inputBudgets);
+    const month = activeFilters().month;
+    const result = window.BudgetTransactions.setCategoryBudgets(state, inputBudgets, month);
     if (!result.ok) {
       window.BudgetUI.showValidationErrors(elements.categoryBudgetForm, elements.categoryBudgetMessage, result.errors);
       return;
     }
     if (await persist(result.state, { messageElement: elements.categoryBudgetMessage })) {
-      window.BudgetUI.setMessage(elements.categoryBudgetMessage, '항목별 예산을 저장했어요.', 'ok');
+      window.BudgetUI.setMessage(elements.categoryBudgetMessage, `${month} 항목별 예산을 저장했어요.`, 'ok');
     }
   }
 
@@ -114,7 +137,7 @@
 
   async function handleSampleClick() {
     const month = elements.monthInput.value || window.BudgetStorage.localMonthString();
-    const hasSample = window.BudgetTransactions.hasSampleForMonth(state.transactions, month);
+    const hasSample = window.BudgetTransactions.hasSampleForMonth(state.transactions, month, state.monthStartDay || 1);
     if (hasSample && !window.confirm('선택한 달에 이미 샘플 데이터가 있어요. 기존 샘플을 교체할까요?')) return;
     const nextState = window.BudgetTransactions.createSampleState(state, month, { replace: hasSample });
     if (await persist(nextState)) {
@@ -261,6 +284,7 @@
   }
 
   function bindEvents() {
+    elements.monthStartForm.addEventListener('submit', handleMonthStartSubmit);
     elements.budgetForm.addEventListener('submit', handleBudgetSubmit);
     elements.categoryBudgetForm.addEventListener('submit', handleCategoryBudgetSubmit);
     elements.transactionForm.addEventListener('submit', handleTransactionSubmit);

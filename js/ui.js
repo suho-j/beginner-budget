@@ -5,6 +5,7 @@
   const typeLabels = { income: '수입', expense: '지출', all: '전체' };
   const fieldSelectors = {
     monthlyBudget: '#monthly-budget',
+    monthStartDay: '#month-start-day',
     date: '#tx-date',
     type: '#tx-type',
     category: '#tx-category',
@@ -65,10 +66,13 @@
   }
 
   function initDefaults(elements, state) {
+    const month = window.BudgetStorage.monthKeyForDate(window.BudgetStorage.localDateString(), state.monthStartDay || 1) || window.BudgetStorage.localMonthString();
+    const monthBudget = window.BudgetStorage.budgetForMonth(state, month);
     elements.dateInput.value = window.BudgetStorage.localDateString();
-    elements.monthInput.value = window.BudgetStorage.localMonthString();
-    elements.budgetInput.value = state.monthlyBudget;
-    renderCategoryBudgetFields(elements.categoryBudgetFields, state.categoryBudgets || {});
+    elements.monthInput.value = month;
+    elements.monthStartInput.value = state.monthStartDay || 1;
+    elements.budgetInput.value = monthBudget.monthlyBudget;
+    renderCategoryBudgetFields(elements.categoryBudgetFields, monthBudget.categoryBudgets || {});
     fillCategoryOptions(elements.categorySelect, elements.typeSelect.value);
   }
 
@@ -111,9 +115,9 @@
     return budgets;
   }
 
-  function renderSummary(elements, summary, month) {
+  function renderSummary(elements, summary, month, periodRange) {
     const meterValue = Math.min(summary.budgetRate, 100);
-    elements.selectedMonthLabel.textContent = `${month} 기준`;
+    elements.selectedMonthLabel.textContent = periodRange ? `${month} 예산 기간: ${periodRange.start} ~ ${periodRange.end}` : `${month} 기준`;
     elements.summaryIncome.textContent = formatWon(summary.income);
     elements.summaryExpense.textContent = formatWon(summary.expense);
     elements.summaryBalance.textContent = formatWon(summary.balance);
@@ -285,6 +289,9 @@
 
   function getElements() {
     return {
+      monthStartForm: $('#month-start-form'),
+      monthStartInput: $('#month-start-day'),
+      monthStartMessage: $('#month-start-message'),
       budgetForm: $('#budget-form'),
       budgetInput: $('#monthly-budget'),
       budgetMessage: $('#budget-message'),
