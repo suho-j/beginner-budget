@@ -16,8 +16,8 @@
         <p class="lead">가입 없이 오늘의 수입과 지출을 기록하고, 이번 달 돈 흐름을 한눈에 확인하세요.</p>
       </div>
       <div class="privacy-card" aria-label="저장 방식 안내">
-        <strong>내 브라우저에만 저장</strong>
-        <span>서버 전송 없이 localStorage를 사용합니다.</span>
+        <strong>로컬 저장 + 선택형 클라우드</strong>
+        <span>기본은 localStorage, 로그인하면 Supabase 동기화</span>
       </div>
     </div>
   </header>
@@ -141,6 +141,25 @@
       <p id="form-message" class="message" role="status" aria-live="polite"></p>
     </section>
 
+    <section class="panel" aria-labelledby="cloud-title">
+      <h2 id="cloud-title">클라우드 동기화</h2>
+      <p class="hint">로그인하면 PC와 휴대폰에서 같은 데이터를 불러올 수 있어요. 로컬 저장은 계속 유지됩니다.</p>
+      <form id="cloud-login-form" class="inline-form" novalidate>
+        <div class="field grow">
+          <label for="cloud-email">이메일</label>
+          <input id="cloud-email" name="email" type="email" autocomplete="email" placeholder="name@example.com" aria-describedby="cloud-message">
+        </div>
+        <button type="submit">로그인 링크 받기</button>
+      </form>
+      <div class="cloud-actions">
+        <button id="cloud-upload-button" type="button" class="secondary">클라우드에 저장</button>
+        <button id="cloud-download-button" type="button" class="secondary">클라우드에서 불러오기</button>
+        <button id="cloud-logout-button" type="button" class="danger">로그아웃</button>
+      </div>
+      <p id="cloud-status" class="muted">로그인 상태를 확인 중입니다.</p>
+      <p id="cloud-message" class="message" role="status" aria-live="polite"></p>
+    </section>
+
     <section class="panel" aria-labelledby="tools-title">
       <h2 id="tools-title">보기와 데이터 도구</h2>
       <div class="filters">
@@ -185,12 +204,14 @@
   </main>
 
   <footer class="site-footer">
-    <div class="container">데이터는 이 브라우저의 localStorage에만 저장됩니다. 중요한 데이터는 JSON 내보내기로 백업하세요.</div>
+    <div class="container">기본 데이터는 이 브라우저의 localStorage에 저장됩니다. 로그인 후 클라우드 저장을 누르면 Supabase에도 저장됩니다.</div>
   </footer>
 
   <script src="js/storage.js"></script>
   <script src="js/transactions.js"></script>
-  <script src="js/ui.js"></script>
-  <script src="js/app.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="js/cloud.js?v=20260522"></script>
+  <script src="js/ui.js?v=20260522"></script>
+  <script src="js/app.js?v=20260522"></script>
 </body>
 </html>

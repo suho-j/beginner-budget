@@ -198,8 +198,8 @@ h2 { margin: 0 0 0.8rem; font-size: 1.25rem; }
 .transaction-form { grid-template-columns: 1fr; }
 .full { grid-column: 1 / -1; }
 .grow { min-width: 0; }
-.form-actions, .data-actions { display: grid; gap: 0.6rem; }
-.data-actions { margin-top: 0.8rem; }
+.form-actions, .data-actions, .cloud-actions { display: grid; gap: 0.6rem; }
+.data-actions, .cloud-actions { margin-top: 0.8rem; }
 .message { min-height: 1.5rem; margin: 0.7rem 0 0; font-weight: 700; }
 .message.ok { color: var(--income); }
 .message.error { color: var(--expense); }
@@ -255,6 +255,7 @@ h2 { margin: 0 0 0.8rem; font-size: 1.25rem; }
   .category-budget-actions { margin-top: 0.8rem; }
   .form-actions { grid-template-columns: repeat(2, minmax(0, max-content)); }
   .data-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .cloud-actions { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .transaction-item { grid-template-columns: minmax(0, 1fr) auto; align-items: center; }
   .transaction-actions { grid-column: 1 / -1; }
 }

@@ -30,8 +30,10 @@ function createContext(options = {}) {
   };
   context.window.window = context.window;
   vm.createContext(context);
-  for (const file of ['js/storage.js', 'js/transactions.js']) {
-    const source = fs.readFileSync(path.join(__dirname, '..', file), 'utf8');
+  for (const file of ['js/storage.js', 'js/transactions.js', 'js/cloud.js']) {
+    const filePath = path.join(__dirname, '..', file);
+    if (!fs.existsSync(filePath)) continue;
+    const source = fs.readFileSync(filePath, 'utf8');
     vm.runInContext(source, context, { filename: file });
   }
   return context.window;
@@ -203,6 +205,30 @@ function testImportExport() {
   assert.strictEqual(mixed.summary.skippedCount, 1);
 }
 
+function testCloudStateMappingKeepsBudgetAndTransactions() {
+  const win = createContext();
+  let state = win.BudgetStorage.normalizeState({
+    monthlyBudget: 800000,
+    categoryBudgets: { 식비: 200000 },
+    transactions: [
+      { id: 'tx-a', date: '2026-05-02', type: 'expense', category: '식비', amount: 120000, memo: '마트', source: 'user' }
+    ]
+  });
+  const mapped = win.BudgetCloud.stateToRemote(state, 'user-1');
+  assert.strictEqual(JSON.stringify(mapped.settings), JSON.stringify({
+    user_id: 'user-1', monthly_budget: 800000, category_budgets: { 식비: 200000 }
+  }));
+  assert.strictEqual(JSON.stringify(mapped.transactions), JSON.stringify([
+    { id: 'tx-a', user_id: 'user-1', date: '2026-05-02', type: 'expense', category: '식비', amount: 120000, memo: '마트', source: 'user' }
+  ]));
+
+  const restored = win.BudgetCloud.remoteToState(mapped.settings, mapped.transactions);
+  assert.strictEqual(restored.monthlyBudget, 800000);
+  assert.strictEqual(JSON.stringify(restored.categoryBudgets), JSON.stringify({ 식비: 200000 }));
+  assert.strictEqual(restored.transactions.length, 1);
+  assert.strictEqual(restored.transactions[0].id, 'tx-a');
+}
+
 const tests = [
   testStorageDefaultsAndCorruption,
   testSaveFailureDoesNotThrow,
@@ -213,7 +239,8 @@ const tests = [
   testAddTransactionCanonicalizesBeginnerMoneyInput,
   testSummaryInsightsAndSearchFilter,
   testSummaryAndSampleReplace,
-  testImportExport
+  testImportExport,
+  testCloudStateMappingKeepsBudgetAndTransactions
 ];
 
 for (const test of tests) {

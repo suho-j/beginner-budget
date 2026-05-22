@@ -248,6 +248,23 @@
     });
   }
 
+  function updateCloudStatus(elements, user) {
+    if (!window.BudgetCloud || !window.BudgetCloud.isConfigured()) {
+      elements.cloudStatus.textContent = 'Supabase 클라이언트를 불러오지 못했어요. 네트워크를 확인해 주세요.';
+      elements.cloudLoginForm.hidden = true;
+      elements.cloudUploadButton.disabled = true;
+      elements.cloudDownloadButton.disabled = true;
+      elements.cloudLogoutButton.disabled = true;
+      return;
+    }
+    const signedIn = Boolean(user);
+    elements.cloudStatus.textContent = signedIn ? `${user.email || '로그인됨'} 계정으로 로그인 중` : '로그인하면 클라우드 저장을 사용할 수 있어요.';
+    elements.cloudLoginForm.hidden = signedIn;
+    elements.cloudUploadButton.disabled = !signedIn;
+    elements.cloudDownloadButton.disabled = !signedIn;
+    elements.cloudLogoutButton.disabled = !signedIn;
+  }
+
   function downloadText(filename, content) {
     const blob = new Blob([content], { type: 'application/json;charset=utf-8' });
     const url = URL.createObjectURL(blob);
@@ -268,6 +285,13 @@
       categoryBudgetForm: $('#category-budget-form'),
       categoryBudgetFields: $('#category-budget-fields'),
       categoryBudgetMessage: $('#category-budget-message'),
+      cloudLoginForm: $('#cloud-login-form'),
+      cloudEmail: $('#cloud-email'),
+      cloudUploadButton: $('#cloud-upload-button'),
+      cloudDownloadButton: $('#cloud-download-button'),
+      cloudLogoutButton: $('#cloud-logout-button'),
+      cloudStatus: $('#cloud-status'),
+      cloudMessage: $('#cloud-message'),
       transactionForm: $('#transaction-form'),
       dateInput: $('#tx-date'),
       typeSelect: $('#tx-type'),
@@ -323,6 +347,7 @@
     renderCategoryBudgetStatus,
     renderCategoryBreakdown,
     renderList,
+    updateCloudStatus,
     downloadText,
     getElements
   };

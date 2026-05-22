@@ -180,6 +180,63 @@
     window.BudgetUI.setMessage(elements.toolMessage, '전체 데이터를 초기화했어요.', 'ok');
   }
 
+  async function refreshCloudStatus() {
+    try {
+      const user = await window.BudgetCloud.currentUser();
+      window.BudgetUI.updateCloudStatus(elements, user);
+    } catch (error) {
+      window.BudgetUI.updateCloudStatus(elements, null);
+      window.BudgetUI.setMessage(elements.cloudMessage, `로그인 상태 확인 실패: ${error.message}`, 'error');
+    }
+  }
+
+  async function handleCloudLogin(event) {
+    event.preventDefault();
+    const email = elements.cloudEmail.value.trim();
+    if (!email) {
+      window.BudgetUI.setMessage(elements.cloudMessage, '이메일을 입력해 주세요.', 'error');
+      elements.cloudEmail.focus();
+      return;
+    }
+    try {
+      await window.BudgetCloud.signInWithEmail(email);
+      window.BudgetUI.setMessage(elements.cloudMessage, '이메일로 로그인 링크를 보냈어요. 메일함을 확인해 주세요.', 'ok');
+    } catch (error) {
+      window.BudgetUI.setMessage(elements.cloudMessage, `로그인 링크 발송 실패: ${error.message}`, 'error');
+    }
+  }
+
+  async function handleCloudUpload() {
+    try {
+      const result = await window.BudgetCloud.uploadState(state);
+      window.BudgetUI.setMessage(elements.cloudMessage, `클라우드에 저장했어요. 거래 ${result.uploadedCount}건`, 'ok');
+    } catch (error) {
+      window.BudgetUI.setMessage(elements.cloudMessage, `클라우드 저장 실패: ${error.message}`, 'error');
+    }
+  }
+
+  async function handleCloudDownload() {
+    if (!window.confirm('현재 브라우저 데이터를 클라우드 데이터로 교체할까요? 필요하면 먼저 JSON 내보내기로 백업하세요.')) return;
+    try {
+      const cloudState = await window.BudgetCloud.downloadState();
+      if (persist(cloudState, { messageElement: elements.cloudMessage })) {
+        window.BudgetUI.setMessage(elements.cloudMessage, '클라우드 데이터를 불러왔어요.', 'ok');
+      }
+    } catch (error) {
+      window.BudgetUI.setMessage(elements.cloudMessage, `클라우드 불러오기 실패: ${error.message}`, 'error');
+    }
+  }
+
+  async function handleCloudLogout() {
+    try {
+      await window.BudgetCloud.signOut();
+      await refreshCloudStatus();
+      window.BudgetUI.setMessage(elements.cloudMessage, '로그아웃했어요.', 'ok');
+    } catch (error) {
+      window.BudgetUI.setMessage(elements.cloudMessage, `로그아웃 실패: ${error.message}`, 'error');
+    }
+  }
+
   function bindEvents() {
     elements.budgetForm.addEventListener('submit', handleBudgetSubmit);
     elements.categoryBudgetForm.addEventListener('submit', handleCategoryBudgetSubmit);
@@ -194,6 +251,10 @@
     elements.importButton.addEventListener('click', handleImportClick);
     elements.importFile.addEventListener('change', handleImportFile);
     elements.resetButton.addEventListener('click', handleResetClick);
+    elements.cloudLoginForm.addEventListener('submit', handleCloudLogin);
+    elements.cloudUploadButton.addEventListener('click', handleCloudUpload);
+    elements.cloudDownloadButton.addEventListener('click', handleCloudDownload);
+    elements.cloudLogoutButton.addEventListener('click', handleCloudLogout);
     elements.transactionForm.addEventListener('reset', () => {
       window.setTimeout(() => {
         elements.dateInput.value = window.BudgetStorage.localDateString();
@@ -209,6 +270,7 @@
     window.BudgetUI.initDefaults(elements, state);
     bindEvents();
     render();
+    refreshCloudStatus();
   }
 
   document.addEventListener('DOMContentLoaded', init);

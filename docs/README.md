@@ -34,6 +34,7 @@ python3 -m http.server 8000
 - 쉼표가 포함된 금액 입력 지원(예: 12,000)
 - 월 예산 저장(기본값 500,000원)
 - 항목별 월 예산 저장과 항목별 남은 금액 표시
+- 선택형 Supabase 클라우드 동기화(이메일 매직 링크 로그인)
 - 월별 필터, 유형별 필터, 검색 필터
 - 수입/지출/잔액/예산 남은 금액 요약
 - 하루 사용 가능액과 가장 많이 쓴 카테고리 표시
@@ -47,9 +48,19 @@ python3 -m http.server 8000
 - 전체 초기화
 - `localStorage` 저장으로 새로고침 후에도 데이터 유지
 
+## Supabase 클라우드 동기화 설정
+
+1. Supabase Dashboard → SQL Editor에서 `docs/supabase-setup.sql` 내용을 실행합니다.
+2. Authentication → URL Configuration에서 아래를 등록합니다.
+   - Site URL: `https://suho-j.github.io/beginner-budget/`
+   - Redirect URLs: `https://suho-j.github.io/beginner-budget/`, `http://localhost:8765/`
+3. 앱의 **클라우드 동기화** 섹션에서 이메일로 로그인 링크를 받아 로그인합니다.
+4. **클라우드에 저장**은 현재 브라우저 데이터를 Supabase로 업로드합니다.
+5. **클라우드에서 불러오기**는 현재 브라우저 데이터를 Supabase 데이터로 교체합니다. 필요하면 먼저 JSON 내보내기로 백업하세요.
+
 ## 저장 안내
 
-데이터는 서버로 전송되지 않고 현재 브라우저의 `localStorage`에만 저장됩니다. 저장 키는 `beginner-budget-app:v1`입니다. 브라우저 데이터를 삭제하면 가계부 데이터도 사라질 수 있으므로 중요한 데이터는 **JSON 내보내기**로 백업하세요.
+데이터는 기본적으로 현재 브라우저의 `localStorage`에 저장됩니다. 저장 키는 `beginner-budget-app:v1`입니다. Supabase에 로그인한 뒤 **클라우드에 저장**을 누르면 같은 데이터가 사용자 계정의 Supabase DB에도 저장됩니다. 브라우저 데이터를 삭제하면 로컬 데이터는 사라질 수 있으므로 중요한 변경 뒤에는 클라우드 저장 또는 **JSON 내보내기**로 백업하세요.
 
 ## 검증
 
