@@ -292,6 +292,12 @@ function testCloudUsesSharedLoginEmail() {
   assert.strictEqual(win.BudgetCloud.LOGIN_EMAIL, 'ho910728@naver.com');
 }
 
+function testCategoryBudgetDetailShowsSpentBeforeBudget() {
+  const source = fs.readFileSync(path.join(__dirname, '..', 'js/ui.js'), 'utf8');
+  assert.ok(source.includes('`사용 ${formatWon(item.spent)} / 예산 ${formatWon(item.budget)}`'));
+  assert.ok(!source.includes('`예산 ${formatWon(item.budget)} / 사용 ${formatWon(item.spent)}`'));
+}
+
 const tests = [
   testStorageDefaultsAndIgnoresLocalStorage,
   testSaveDoesNotUseLocalStorage,
@@ -306,7 +312,8 @@ const tests = [
   testImportExport,
   testLegacyExpenseCategoriesMapToFourBudgets,
   testCloudStateMappingKeepsBudgetAndTransactions,
-  testCloudUsesSharedLoginEmail
+  testCloudUsesSharedLoginEmail,
+  testCategoryBudgetDetailShowsSpentBeforeBudget
 ];
 
 for (const test of tests) {

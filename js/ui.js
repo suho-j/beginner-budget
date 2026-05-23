@@ -171,7 +171,7 @@
         : `${formatWon(item.spent)} 사용`;
       const detail = document.createElement('small');
       detail.textContent = item.budget > 0
-        ? `예산 ${formatWon(item.budget)} / 사용 ${formatWon(item.spent)}`
+        ? `사용 ${formatWon(item.spent)} / 예산 ${formatWon(item.budget)}`
         : '항목별 예산을 입력하면 남은 금액을 계산합니다';
       const bar = document.createElement('span');
       bar.className = 'category-budget-bar';
