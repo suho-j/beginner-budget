@@ -132,6 +132,18 @@
       <p id="form-message" class="message" role="status" aria-live="polite"></p>
     </section>
 
+    <section class="panel transactions-panel" aria-labelledby="list-title">
+      <div class="section-heading">
+        <h2 id="list-title">거래 내역</h2>
+        <p id="list-count" class="muted">0건</p>
+      </div>
+      <div id="empty-state" class="empty-state">
+        <strong>아직 표시할 내역이 없어요.</strong>
+        <p>수입이나 지출을 추가하거나 샘플 데이터를 채워 사용법을 확인해 보세요.</p>
+      </div>
+      <ul id="transaction-list" class="transaction-list"></ul>
+    </section>
+
     <section class="panel" aria-labelledby="budget-title">
       <h2 id="budget-title">월 예산 설정</h2>
       <form id="month-start-form" class="inline-form" novalidate>
@@ -194,18 +206,6 @@
       </div>
       <input id="import-file" class="visually-hidden" type="file" accept="application/json,.json">
       <p id="tool-message" class="message" role="status" aria-live="polite"></p>
-    </section>
-
-    <section class="panel transactions-panel" aria-labelledby="list-title">
-      <div class="section-heading">
-        <h2 id="list-title">거래 내역</h2>
-        <p id="list-count" class="muted">0건</p>
-      </div>
-      <div id="empty-state" class="empty-state">
-        <strong>아직 표시할 내역이 없어요.</strong>
-        <p>수입이나 지출을 추가하거나 샘플 데이터를 채워 사용법을 확인해 보세요.</p>
-      </div>
-      <ul id="transaction-list" class="transaction-list"></ul>
     </section>
   </main>
 
