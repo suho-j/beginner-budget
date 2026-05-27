@@ -111,11 +111,15 @@ input[aria-invalid="true"], select[aria-invalid="true"] {
 .header-logout:hover, .header-logout:focus-visible { background: rgba(255, 255, 255, 0.24); }
 
 .quick-nav {
+  position: sticky;
+  top: 0;
+  z-index: 20;
   margin-top: -1rem;
   display: grid;
-  gap: 0.6rem;
-  padding: 0.85rem 1rem 0;
-  background: #fff;
+  gap: 0;
+  padding: 0.5rem 1rem 0;
+  background: rgba(255, 255, 255, 0.96);
+  backdrop-filter: blur(10px);
   border: 1px solid #e6ebf4;
   border-radius: 18px 18px 0 0;
   box-shadow: 0 8px 20px rgba(23, 32, 51, 0.06);
@@ -131,6 +135,7 @@ input[aria-invalid="true"], select[aria-invalid="true"] {
   display: flex;
   flex-wrap: wrap;
   gap: 0;
+  padding-top: 0.35rem;
 }
 .quick-nav-tabs a {
   position: relative;
