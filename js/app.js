@@ -4,6 +4,9 @@
 
   let state = window.BudgetStorage.loadState();
   let elements;
+  let quickNavLinks = [];
+  let quickNavTargets = [];
+  let quickNavRaf = 0;
   const MAX_IMPORT_BYTES = 1024 * 1024;
 
   async function persist(nextState, options = {}) {
@@ -33,6 +36,45 @@
       type: elements.filterType.value || 'all',
       query: elements.filterQuery.value || ''
     };
+  }
+
+  function syncQuickNavTargets() {
+    quickNavLinks = Array.from(document.querySelectorAll('.quick-nav-tabs a'));
+    quickNavTargets = quickNavLinks
+      .map((link) => {
+        const id = (link.getAttribute('href') || '').replace('#', '');
+        return { link, target: id ? document.getElementById(id) : null };
+      })
+      .filter((item) => item.target);
+  }
+
+  function setActiveQuickNav(link) {
+    quickNavLinks.forEach((item) => {
+      const active = item === link;
+      item.classList.toggle('is-active', active);
+      if (active) item.setAttribute('aria-current', 'page');
+      else item.removeAttribute('aria-current');
+    });
+  }
+
+  function updateQuickNavActive() {
+    if (!quickNavTargets.length) return;
+    const anchorY = 124;
+    let current = quickNavTargets[0].link;
+    for (const item of quickNavTargets) {
+      const rect = item.target.getBoundingClientRect();
+      if (rect.top <= anchorY) current = item.link;
+      else break;
+    }
+    setActiveQuickNav(current);
+  }
+
+  function scheduleQuickNavUpdate() {
+    if (quickNavRaf) return;
+    quickNavRaf = window.requestAnimationFrame(() => {
+      quickNavRaf = 0;
+      updateQuickNavActive();
+    });
   }
 
   function render() {
@@ -302,6 +344,9 @@
     elements.cloudUploadButton.addEventListener('click', handleCloudUpload);
     elements.cloudDownloadButton.addEventListener('click', handleCloudDownload);
     elements.cloudLogoutButton.addEventListener('click', handleCloudLogout);
+    window.addEventListener('scroll', scheduleQuickNavUpdate, { passive: true });
+    window.addEventListener('resize', scheduleQuickNavUpdate);
+    window.addEventListener('hashchange', scheduleQuickNavUpdate);
     elements.transactionForm.addEventListener('reset', () => {
       window.setTimeout(() => {
         elements.dateInput.value = window.BudgetStorage.localDateString();
@@ -315,8 +360,10 @@
   function init() {
     elements = window.BudgetUI.getElements();
     window.BudgetUI.initDefaults(elements, state);
+    syncQuickNavTargets();
     bindEvents();
     render();
+    updateQuickNavActive();
     loadCloudStateForSignedInUser();
   }
 
