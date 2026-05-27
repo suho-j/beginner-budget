@@ -6,7 +6,7 @@
   <title>처음 가계부</title>
   <link rel="stylesheet" href="css/style.css">
 </head>
-<body>
+<body id="top">
   <a class="skip-link" href="#main-content">본문으로 바로가기</a>
   <header class="site-header">
     <div class="container hero-grid">
@@ -21,7 +21,7 @@
 
   <nav class="container quick-nav" aria-label="바로가기">
     <p class="quick-nav-title">바로가기</p>
-    <div class="quick-nav-links">
+    <div class="quick-nav-tabs">
       <a href="#summary-title">이번 달 요약</a>
       <a href="#form-title">수입/지출 입력</a>
       <a href="#list-title">거래 내역</a>
@@ -52,9 +52,10 @@
     </section>
 
     <section class="summary-section" aria-labelledby="summary-title">
-      <div class="section-heading">
+      <div class="section-heading section-heading-spread">
         <h2 id="summary-title">이번 달 요약</h2>
         <p id="selected-month-label" class="muted">선택한 달 기준</p>
+        <a class="back-to-top" href="#top">위로 ↑</a>
       </div>
       <div class="summary-grid" aria-live="polite">
         <article class="summary-card income-card">
@@ -110,7 +111,10 @@
     </section>
 
     <section class="panel" aria-labelledby="form-title">
-      <h2 id="form-title">수입/지출 입력</h2>
+      <div class="section-heading section-heading-spread">
+        <h2 id="form-title">수입/지출 입력</h2>
+        <a class="back-to-top" href="#top">위로 ↑</a>
+      </div>
       <form id="transaction-form" class="transaction-form" novalidate>
         <div class="field">
           <label for="tx-date">날짜</label>
@@ -145,9 +149,10 @@
     </section>
 
     <section class="panel transactions-panel" aria-labelledby="list-title">
-      <div class="section-heading">
+      <div class="section-heading section-heading-spread">
         <h2 id="list-title">거래 내역</h2>
         <p id="list-count" class="muted">0건</p>
+        <a class="back-to-top" href="#top">위로 ↑</a>
       </div>
       <div id="empty-state" class="empty-state">
         <strong>아직 표시할 내역이 없어요.</strong>
@@ -157,7 +162,10 @@
     </section>
 
     <section class="panel" aria-labelledby="budget-title">
-      <h2 id="budget-title">월 예산 설정</h2>
+      <div class="section-heading section-heading-spread">
+        <h2 id="budget-title">월 예산 설정</h2>
+        <a class="back-to-top" href="#top">위로 ↑</a>
+      </div>
       <form id="month-start-form" class="inline-form" novalidate>
         <div class="field grow">
           <label for="month-start-day">월 시작일</label>
@@ -179,7 +187,10 @@
     </section>
 
     <section class="panel" aria-labelledby="category-budget-title">
-      <h2 id="category-budget-title">항목별 월 예산</h2>
+      <div class="section-heading section-heading-spread">
+        <h2 id="category-budget-title">항목별 월 예산</h2>
+        <a class="back-to-top" href="#top">위로 ↑</a>
+      </div>
       <p id="category-budget-help" class="hint">월별 보기에서 선택한 달에만 적용됩니다. 비워둔 항목은 예산 없이 사용액만 보여줘요.</p>
       <form id="category-budget-form" novalidate>
         <div id="category-budget-fields" class="category-budget-fields"></div>
@@ -191,7 +202,10 @@
     </section>
 
     <section class="panel" aria-labelledby="tools-title">
-      <h2 id="tools-title">보기와 데이터 도구</h2>
+      <div class="section-heading section-heading-spread">
+        <h2 id="tools-title">보기와 데이터 도구</h2>
+        <a class="back-to-top" href="#top">위로 ↑</a>
+      </div>
       <div class="filters">
         <div class="field">
           <label for="filter-month">월별 보기</label>
