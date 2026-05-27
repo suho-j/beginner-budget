@@ -15,7 +15,7 @@
 }
 
 * { box-sizing: border-box; }
-html { min-width: 0; }
+html { min-width: 0; scroll-padding-top: 6.5rem; }
 body {
   margin: 0;
   min-width: 0;
@@ -184,6 +184,8 @@ h2 { margin: 0 0 0.8rem; font-size: 1.25rem; }
 .section-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 0.75rem; flex-wrap: wrap; }
 .section-heading-spread { align-items: center; }
 .section-heading-spread h2 { margin-bottom: 0; }
+
+h2[id], h3[id] { scroll-margin-top: 6.5rem; }
 .back-to-top {
   margin-left: auto;
   color: var(--primary);
