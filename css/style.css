@@ -111,36 +111,45 @@ input[aria-invalid="true"], select[aria-invalid="true"] {
 .header-logout:hover, .header-logout:focus-visible { background: rgba(255, 255, 255, 0.24); }
 
 .quick-nav {
-  margin-top: 0.9rem;
+  margin-top: -1rem;
   display: grid;
-  gap: 0.55rem;
+  gap: 0.7rem;
+  padding: 0.95rem 1rem;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  box-shadow: var(--shadow);
 }
 .quick-nav-title {
   margin: 0;
-  color: rgba(255, 255, 255, 0.88);
+  color: var(--muted);
   font-size: 0.9rem;
   font-weight: 800;
+  letter-spacing: 0.01em;
 }
 .quick-nav-links {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.5rem;
+  gap: 0.55rem;
 }
 .quick-nav-links a {
   display: inline-flex;
   align-items: center;
   min-height: 36px;
-  padding: 0.45rem 0.8rem;
-  border: 1px solid rgba(255, 255, 255, 0.3);
+  padding: 0.45rem 0.82rem;
+  border: 1px solid #dbe4ff;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.12);
-  color: #fff;
+  background: #f4f7ff;
+  color: #1e3a8a;
   text-decoration: none;
   font-weight: 700;
-  font-size: 0.92rem;
+  font-size: 0.9rem;
+  transition: transform 120ms ease, background 120ms ease, border-color 120ms ease;
 }
 .quick-nav-links a:hover, .quick-nav-links a:focus-visible {
-  background: rgba(255, 255, 255, 0.24);
+  background: #eaf0ff;
+  border-color: #c5d4ff;
+  transform: translateY(-1px);
 }
 
 .layout {
