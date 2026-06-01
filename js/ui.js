@@ -70,10 +70,12 @@
     const monthBudget = window.BudgetStorage.budgetForMonth(state, month);
     elements.dateInput.value = window.BudgetStorage.localDateString();
     elements.monthInput.value = month;
+    elements.monthInput.dataset.autoMonth = 'true';
     elements.monthStartInput.value = state.monthStartDay || 1;
     elements.budgetInput.value = monthBudget.monthlyBudget;
     renderCategoryBudgetFields(elements.categoryBudgetFields, monthBudget.categoryBudgets || {});
     fillCategoryOptions(elements.categorySelect, elements.typeSelect.value);
+    syncCategoryBudgetInputs(elements, monthBudget.categoryBudgets);
   }
 
   function renderCategoryBudgetFields(container, categoryBudgets) {

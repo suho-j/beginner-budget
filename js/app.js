@@ -29,6 +29,21 @@
     }
   }
 
+  function currentBudgetMonth() {
+    return window.BudgetStorage.monthKeyForDate(window.BudgetStorage.localDateString(), state.monthStartDay || 1)
+      || window.BudgetStorage.localMonthString();
+  }
+
+  function syncMonthFilterToBudgetPeriod(force = false) {
+    if (!elements || !elements.monthInput) return;
+    if (!force && elements.monthInput.dataset.autoMonth === 'false') return;
+    const month = currentBudgetMonth();
+    if (elements.monthInput.value !== month) {
+      elements.monthInput.value = month;
+    }
+    elements.monthInput.dataset.autoMonth = 'true';
+  }
+
   function activeFilters() {
     return {
       month: elements.monthInput.value || window.BudgetStorage.monthKeyForDate(window.BudgetStorage.localDateString(), state.monthStartDay || 1) || window.BudgetStorage.localMonthString(),
@@ -78,6 +93,7 @@
   }
 
   function render() {
+    syncMonthFilterToBudgetPeriod();
     const filters = activeFilters();
     const selectedBudget = window.BudgetStorage.budgetForMonth(state, filters.month);
     if (document.activeElement !== elements.monthStartInput) {
@@ -118,6 +134,7 @@
     }
     const todayMonth = window.BudgetStorage.monthKeyForDate(window.BudgetStorage.localDateString(), result.state.monthStartDay);
     elements.monthInput.value = todayMonth || oldMonth;
+    elements.monthInput.dataset.autoMonth = 'true';
     if (await persist(result.state, { messageElement: elements.monthStartMessage })) {
       window.BudgetUI.setMessage(elements.monthStartMessage, '월 시작일을 저장했어요.', 'ok');
     }
@@ -263,13 +280,15 @@
 
   async function loadCloudStateForSignedInUser() {
     const user = await refreshCloudStatus();
-    if (!user) return;
+    if (!user) return false;
     try {
       state = await window.BudgetCloud.downloadState();
       render();
       window.BudgetUI.setMessage(elements.cloudMessage, '클라우드 데이터를 불러왔어요.', 'ok');
+      return true;
     } catch (error) {
       window.BudgetUI.setMessage(elements.cloudMessage, `클라우드 불러오기 실패: ${error.message}`, 'error');
+      return false;
     }
   }
 
@@ -331,7 +350,10 @@
     elements.categoryBudgetForm.addEventListener('submit', handleCategoryBudgetSubmit);
     elements.transactionForm.addEventListener('submit', handleTransactionSubmit);
     elements.typeSelect.addEventListener('change', handleTypeChange);
-    elements.monthInput.addEventListener('change', render);
+    elements.monthInput.addEventListener('change', () => {
+      elements.monthInput.dataset.autoMonth = 'false';
+      render();
+    });
     elements.filterType.addEventListener('change', render);
     elements.filterQuery.addEventListener('input', render);
     elements.list.addEventListener('click', handleListClick);
@@ -357,14 +379,14 @@
     });
   }
 
-  function init() {
+  async function init() {
     elements = window.BudgetUI.getElements();
     window.BudgetUI.initDefaults(elements, state);
     syncQuickNavTargets();
     bindEvents();
-    render();
     updateQuickNavActive();
-    loadCloudStateForSignedInUser();
+    const loaded = await loadCloudStateForSignedInUser();
+    if (!loaded) render();
   }
 
   document.addEventListener('DOMContentLoaded', init);
