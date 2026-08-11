@@ -44,6 +44,29 @@
     };
   }
 
+  function transactionToRemote(transaction, userId) {
+    const normalized = window.BudgetStorage.normalizeState({ transactions: [transaction] }).transactions[0];
+    if (!normalized) throw new Error('저장할 거래 정보가 올바르지 않아요.');
+    return {
+      id: normalized.id,
+      user_id: userId,
+      date: normalized.date,
+      type: normalized.type,
+      category: normalized.category,
+      amount: normalized.amount,
+      memo: normalized.memo || '',
+      source: normalized.source === 'sample' ? 'sample' : 'user'
+    };
+  }
+
+  async function authenticatedClient() {
+    const supabase = getClient();
+    if (!supabase) throw new Error('Supabase 설정을 찾지 못했어요.');
+    const user = await currentUser();
+    if (!user) throw new Error('먼저 로그인해 주세요.');
+    return { supabase, user };
+  }
+
   function remoteToState(settings, rows) {
     const remoteBudgets = settings && settings.category_budgets ? settings.category_budgets : {};
     return window.BudgetStorage.normalizeState({
@@ -83,6 +106,46 @@
     if (!supabase) return;
     const { error } = await supabase.auth.signOut();
     if (error) throw error;
+  }
+
+  async function saveSettings(state) {
+    const { supabase, user } = await authenticatedClient();
+    const settings = stateToRemote(state, user.id).settings;
+    const result = await supabase.from('budget_settings').upsert(settings, { onConflict: 'user_id' });
+    if (result.error) throw result.error;
+    return { ok: true };
+  }
+
+  async function insertTransaction(transaction) {
+    const { supabase, user } = await authenticatedClient();
+    const row = transactionToRemote(transaction, user.id);
+    const result = await supabase.from('transactions').insert(row);
+    if (result.error) throw result.error;
+    return { ok: true, id: row.id };
+  }
+
+  async function updateTransaction(transaction) {
+    const { supabase, user } = await authenticatedClient();
+    const row = transactionToRemote(transaction, user.id);
+    const patch = {
+      date: row.date,
+      type: row.type,
+      category: row.category,
+      amount: row.amount,
+      memo: row.memo,
+      source: row.source
+    };
+    const result = await supabase.from('transactions').update(patch).eq('id', row.id).eq('user_id', user.id);
+    if (result.error) throw result.error;
+    return { ok: true, id: row.id };
+  }
+
+  async function deleteTransaction(id) {
+    if (typeof id !== 'string' || !id) throw new Error('삭제할 거래 ID가 올바르지 않아요.');
+    const { supabase, user } = await authenticatedClient();
+    const result = await supabase.from('transactions').delete().eq('id', id).eq('user_id', user.id);
+    if (result.error) throw result.error;
+    return { ok: true, id };
   }
 
   async function uploadState(state) {
@@ -135,10 +198,15 @@
     isConfigured,
     getClient,
     stateToRemote,
+    transactionToRemote,
     remoteToState,
     currentUser,
     signInWithPassword,
     signOut,
+    saveSettings,
+    insertTransaction,
+    updateTransaction,
+    deleteTransaction,
     uploadState,
     downloadState
   };

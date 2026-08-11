@@ -24,6 +24,7 @@ function createContext(options = {}) {
     window: {
       localStorage,
       crypto: { randomUUID: () => 'test-uuid-' + Math.random().toString(16).slice(2) },
+      supabase: options.supabase,
       console: testConsole
     },
     console: testConsole
@@ -37,6 +38,31 @@ function createContext(options = {}) {
     vm.runInContext(source, context, { filename: file });
   }
   return context.window;
+}
+
+function createSupabaseFake() {
+  const calls = [];
+  function filteredQuery(table, action, payload) {
+    const call = { table, action, payload, filters: [] };
+    calls.push(call);
+    const query = {
+      eq(column, value) { call.filters.push([column, value]); return query; },
+      then(resolve, reject) { return Promise.resolve({ data: null, error: null }).then(resolve, reject); }
+    };
+    return query;
+  }
+  const client = {
+    auth: { async getUser() { return { data: { user: { id: 'user-1' } }, error: null }; } },
+    from(table) {
+      return {
+        insert(payload) { calls.push({ table, action: 'insert', payload, filters: [] }); return Promise.resolve({ data: null, error: null }); },
+        update(payload) { return filteredQuery(table, 'update', payload); },
+        delete() { return filteredQuery(table, 'delete', null); },
+        upsert(payload, options) { calls.push({ table, action: 'upsert', payload, options, filters: [] }); return Promise.resolve({ data: null, error: null }); }
+      };
+    }
+  };
+  return { calls, supabase: { createClient: () => client } };
 }
 
 function testStorageDefaultsAndIgnoresLocalStorage() {
@@ -394,6 +420,25 @@ function testSummarizeTransactionsByDateHonorsBudgetPeriod() {
   assert.strictEqual(JSON.stringify(byDate['2026-05-25'].transactions.map((tx) => tx.id)), JSON.stringify(['b', 'a']));
 }
 
+async function testCloudMutatesOnlyRequestedTransactionRow() {
+  const fake = createSupabaseFake();
+  const win = createContext({ supabase: fake.supabase });
+  const transaction = { id: 'tx-a', date: '2026-05-02', type: 'expense', category: '생활비', amount: 12000, memo: '마트', source: 'user' };
+  await win.BudgetCloud.insertTransaction(transaction);
+  await win.BudgetCloud.updateTransaction({ ...transaction, amount: 15000 });
+  await win.BudgetCloud.deleteTransaction('tx-a');
+  await win.BudgetCloud.saveSettings(win.BudgetStorage.defaultState());
+  assert.strictEqual(fake.calls[0].table, 'transactions');
+  assert.strictEqual(fake.calls[0].action, 'insert');
+  assert.strictEqual(fake.calls[0].payload.user_id, 'user-1');
+  assert.strictEqual(fake.calls[1].action, 'update');
+  assert.strictEqual(JSON.stringify(fake.calls[1].filters), JSON.stringify([['id', 'tx-a'], ['user_id', 'user-1']]));
+  assert.strictEqual(fake.calls[2].action, 'delete');
+  assert.strictEqual(JSON.stringify(fake.calls[2].filters), JSON.stringify([['id', 'tx-a'], ['user_id', 'user-1']]));
+  assert.strictEqual(fake.calls[3].table, 'budget_settings');
+  assert.strictEqual(fake.calls[3].action, 'upsert');
+}
+
 const tests = [
   testStorageDefaultsAndIgnoresLocalStorage,
   testSaveDoesNotUseLocalStorage,
@@ -413,11 +458,15 @@ const tests = [
   testCategoryFilterCombinesWithMonthTypeAndQuery,
   testUpdateTransactionValidatesAndPreservesIdentity,
   testCalendarDaysCoverBudgetPeriodByWholeWeeks,
-  testSummarizeTransactionsByDateHonorsBudgetPeriod
+  testSummarizeTransactionsByDateHonorsBudgetPeriod,
+  testCloudMutatesOnlyRequestedTransactionRow
 ];
 
-for (const test of tests) {
-  test();
-  console.log('PASS', test.name);
+async function run() {
+  for (const test of tests) {
+    await test();
+    console.log('PASS', test.name);
+  }
+  console.log(`${tests.length} tests passed`);
 }
-console.log(`${tests.length} tests passed`);
+run().catch((error) => { console.error(error); process.exitCode = 1; });
