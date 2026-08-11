@@ -121,13 +121,19 @@
     return result.ok;
   }
 
-  function replaceAllRemoteFirst(nextState, messageElement, busyButton) {
+  function replaceAllRemoteFirst(
+    nextState,
+    messageElement,
+    busyButton,
+    failurePrefix = 'Supabase 저장 실패'
+  ) {
     const expectedState = state;
     return persistRemoteFirst(
       nextState,
       () => window.BudgetCloud.uploadState(nextState, expectedState),
       messageElement,
-      busyButton
+      busyButton,
+      failurePrefix
     );
   }
 
@@ -386,22 +392,13 @@
     const monthStartDay = state.monthStartDay || 1;
     const hasSample = window.BudgetTransactions.hasSampleForMonth(state.transactions, month, monthStartDay);
     if (hasSample && !window.confirm('선택한 달에 이미 샘플 데이터가 있어요. 기존 샘플만 교체할까요?')) return;
-    const expectedSampleRows = state.transactions.filter((transaction) => (
-      transaction.source === 'sample'
-      && window.BudgetStorage.isDateInBudgetMonth(transaction.date, month, monthStartDay)
-    ));
 
     const preparedState = window.BudgetTransactions.createSampleState(state, month, {
       replace: hasSample,
       monthStartDay
     });
-    const existingIds = new Set(state.transactions.map((transaction) => transaction.id));
-    const newSampleRows = preparedState.transactions.filter((transaction) => (
-      transaction.source === 'sample' && !existingIds.has(transaction.id)
-    ));
-    const saved = await persistRemoteFirst(
+    const saved = await replaceAllRemoteFirst(
       preparedState,
-      () => window.BudgetCloud.replaceSampleTransactions(month, monthStartDay, newSampleRows, expectedSampleRows),
       elements.toolMessage,
       event.currentTarget,
       '샘플 저장 실패'

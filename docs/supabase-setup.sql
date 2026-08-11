@@ -20,6 +20,18 @@ create table if not exists public.transactions (
   created_at timestamptz not null default now()
 );
 
+-- Repair legacy IDs without trimming two rows into the same primary key.
+update public.transactions
+set id = 'tx-' || gen_random_uuid()::text
+where id <> btrim(id)
+  or btrim(id) = '';
+
+alter table public.transactions
+drop constraint if exists transactions_id_canonical;
+alter table public.transactions
+add constraint transactions_id_canonical
+check (id = btrim(id) and btrim(id) <> '');
+
 create or replace function public.set_budget_settings_updated_at()
 returns trigger
 language plpgsql
@@ -342,178 +354,6 @@ revoke all on function public.replace_budget_state(integer, jsonb, jsonb, timest
 revoke all on function public.replace_budget_state(integer, jsonb, jsonb, timestamptz, jsonb) from anon;
 grant execute on function public.replace_budget_state(integer, jsonb, jsonb, timestamptz, jsonb) to authenticated;
 
--- Atomically replace sample rows inside one validated budget period.
+-- Remove obsolete sample-only replacement RPC overloads.
 drop function if exists public.replace_budget_samples(date, date, jsonb);
-
-create or replace function public.replace_budget_samples(
-  p_period_start date,
-  p_period_end date,
-  p_transactions jsonb,
-  p_expected_samples jsonb
-)
-returns table (replaced_count integer)
-language plpgsql
-security invoker
-set search_path = pg_catalog, public
-as $function$
-declare
-  v_user_id uuid := auth.uid();
-  v_expected_samples jsonb;
-  v_current_samples jsonb;
-begin
-  if v_user_id is null then
-    raise exception 'authentication required' using errcode = '42501';
-  end if;
-
-  if p_period_start is null
-    or p_period_end is null
-    or p_period_end < p_period_start
-    or (p_period_end - p_period_start) not between 27 and 30 then
-    raise exception 'sample period must contain 28 to 31 days' using errcode = '22023';
-  end if;
-  if p_transactions is null
-    or jsonb_typeof(p_transactions) <> 'array'
-    or jsonb_array_length(p_transactions) <> 6 then
-    raise exception 'exactly six sample transactions are required' using errcode = '22023';
-  end if;
-  if p_expected_samples is null or jsonb_typeof(p_expected_samples) <> 'array' then
-    raise exception 'expected sample transactions must be a JSON array' using errcode = '22023';
-  end if;
-
-  if exists (
-    select 1
-    from jsonb_array_elements(p_transactions || p_expected_samples) as transaction_row
-    where jsonb_typeof(transaction_row) <> 'object'
-      or jsonb_typeof(transaction_row -> 'id') <> 'string'
-      or nullif(btrim(transaction_row ->> 'id'), '') is null
-      or btrim(transaction_row ->> 'id') <> transaction_row ->> 'id'
-      or jsonb_typeof(transaction_row -> 'date') <> 'string'
-      or coalesce(transaction_row ->> 'date', '') !~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
-      or to_char(to_date(transaction_row ->> 'date', 'YYYY-MM-DD'), 'YYYY-MM-DD') <> transaction_row ->> 'date'
-      or (transaction_row ->> 'date')::date not between p_period_start and p_period_end
-      or jsonb_typeof(transaction_row -> 'type') <> 'string'
-      or coalesce(transaction_row ->> 'type', '') not in ('income', 'expense')
-      or jsonb_typeof(transaction_row -> 'category') <> 'string'
-      or nullif(btrim(transaction_row ->> 'category'), '') is null
-      or jsonb_typeof(transaction_row -> 'amount') <> 'number'
-      or coalesce(transaction_row ->> 'amount', '') !~ '^[0-9]+$'
-      or (transaction_row ->> 'amount')::numeric not between 1 and 2147483647
-      or jsonb_typeof(transaction_row -> 'source') <> 'string'
-      or coalesce(transaction_row ->> 'source', '') <> 'sample'
-      or (transaction_row ? 'memo' and jsonb_typeof(transaction_row -> 'memo') <> 'string')
-      or char_length(coalesce(transaction_row ->> 'memo', '')) > 80
-  ) then
-    raise exception 'sample transaction rows are invalid' using errcode = '22023';
-  end if;
-
-  if exists (
-    select 1
-    from jsonb_array_elements(p_transactions) as transaction_row
-    group by transaction_row ->> 'id'
-    having count(*) > 1
-  ) then
-    raise exception 'duplicate transaction ids are not allowed' using errcode = '22023';
-  end if;
-
-  if exists (
-    select 1
-    from jsonb_array_elements(p_expected_samples) as transaction_row
-    group by transaction_row ->> 'id'
-    having count(*) > 1
-  ) then
-    raise exception 'duplicate expected sample transaction ids are not allowed' using errcode = '22023';
-  end if;
-
-  select coalesce(
-    jsonb_agg(
-      jsonb_build_object(
-        'id', transaction_row.id,
-        'date', to_char(transaction_row.date, 'YYYY-MM-DD'),
-        'type', transaction_row.type,
-        'category', transaction_row.category,
-        'amount', transaction_row.amount,
-        'memo', coalesce(transaction_row.memo, ''),
-        'source', coalesce(transaction_row.source, 'sample')
-      ) order by transaction_row.id collate "C"
-    ),
-    '[]'::jsonb
-  )
-  into v_expected_samples
-  from jsonb_to_recordset(p_expected_samples) as transaction_row(
-    id text,
-    date date,
-    type text,
-    category text,
-    amount integer,
-    memo text,
-    source text
-  );
-
-  lock table public.transactions in share row exclusive mode;
-
-  select coalesce(
-    jsonb_agg(
-      jsonb_build_object(
-        'id', transaction_row.id,
-        'date', to_char(transaction_row.date, 'YYYY-MM-DD'),
-        'type', transaction_row.type,
-        'category', transaction_row.category,
-        'amount', transaction_row.amount,
-        'memo', coalesce(transaction_row.memo, ''),
-        'source', coalesce(transaction_row.source, 'sample')
-      ) order by transaction_row.id collate "C"
-    ),
-    '[]'::jsonb
-  )
-  into v_current_samples
-  from public.transactions as transaction_row
-  where transaction_row.user_id = v_user_id
-    and transaction_row.source = 'sample'
-    and transaction_row.date between p_period_start and p_period_end;
-
-  if v_current_samples is distinct from v_expected_samples then
-    raise exception '다른 브라우저에서 샘플 데이터가 변경됐어요. 클라우드 데이터를 다시 불러와 주세요.'
-      using errcode = '40001';
-  end if;
-
-  delete from public.transactions
-  where user_id = v_user_id
-    and source = 'sample'
-    and date between p_period_start and p_period_end;
-
-  insert into public.transactions (
-    id,
-    user_id,
-    date,
-    type,
-    category,
-    amount,
-    memo,
-    source
-  )
-  select
-    transaction_row.id,
-    v_user_id,
-    transaction_row.date,
-    transaction_row.type,
-    transaction_row.category,
-    transaction_row.amount,
-    coalesce(transaction_row.memo, ''),
-    'sample'
-  from jsonb_to_recordset(p_transactions) as transaction_row(
-    id text,
-    date date,
-    type text,
-    category text,
-    amount integer,
-    memo text,
-    source text
-  );
-
-  return query select jsonb_array_length(p_transactions)::integer;
-end;
-$function$;
-
-revoke all on function public.replace_budget_samples(date, date, jsonb, jsonb) from public;
-revoke all on function public.replace_budget_samples(date, date, jsonb, jsonb) from anon;
-grant execute on function public.replace_budget_samples(date, date, jsonb, jsonb) to authenticated;
+drop function if exists public.replace_budget_samples(date, date, jsonb, jsonb);

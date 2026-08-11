@@ -273,60 +273,6 @@
     };
   }
 
-  async function replaceSampleTransactions(month, startDay, transactions, expectedSamples) {
-    if (!window.BudgetStorage.isValidMonthString(month)) {
-      throw new Error('샘플을 저장할 예산월이 올바르지 않아요.');
-    }
-    const normalizedStartDay = window.BudgetStorage.normalizeMonthStartDay(startDay || 1);
-    if (Number(startDay || 1) !== normalizedStartDay) {
-      throw new Error('월 시작일은 1일부터 31일 사이여야 해요.');
-    }
-    if (!Array.isArray(transactions) || transactions.length !== 6) {
-      throw new Error('저장할 샘플 거래 6건이 필요해요.');
-    }
-    if (!Array.isArray(expectedSamples)) {
-      throw new Error('비교할 기존 샘플 거래 정보가 필요해요.');
-    }
-
-    const period = window.BudgetStorage.periodRangeForMonth(month, normalizedStartDay);
-    const normalizeSamples = (sampleRows) => sampleRows.map((transaction) => {
-      if (!transaction || transaction.source !== 'sample') {
-        throw new Error('샘플 거래 정보가 올바르지 않아요.');
-      }
-      const normalized = window.BudgetStorage.normalizeState({ transactions: [transaction] }).transactions[0];
-      if (!normalized || normalized.id !== transaction.id || normalized.source !== 'sample') {
-        throw new Error('샘플 거래 정보가 올바르지 않아요.');
-      }
-      if (!window.BudgetStorage.isDateInBudgetMonth(normalized.date, month, normalizedStartDay)) {
-        throw new Error('샘플 거래 날짜가 선택한 예산월 밖에 있어요.');
-      }
-      return {
-        id: normalized.id,
-        date: normalized.date,
-        type: normalized.type,
-        category: normalized.category,
-        amount: normalized.amount,
-        memo: normalized.memo || '',
-        source: 'sample'
-      };
-    });
-    const rows = normalizeSamples(transactions);
-    const expectedRows = normalizeSamples(expectedSamples);
-
-    const { supabase } = await authenticatedClient();
-    const result = await supabase.rpc('replace_budget_samples', {
-      p_period_start: period.start,
-      p_period_end: period.end,
-      p_transactions: rows,
-      p_expected_samples: expectedRows
-    });
-    if (result.error) throw result.error;
-    return {
-      ok: true,
-      replacedCount: countFromRpcResult(result.data, 'replaced_count', rows.length)
-    };
-  }
-
   async function downloadState() {
     const supabase = getClient();
     if (!supabase) throw new Error('Supabase 설정을 찾지 못했어요.');
@@ -370,7 +316,6 @@
     updateTransaction,
     deleteTransaction,
     uploadState,
-    replaceSampleTransactions,
     downloadState
   };
 })(window);

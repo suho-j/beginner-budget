@@ -335,9 +335,6 @@ function createSupabaseFake(options = {}) {
           updated_at: options.rpcUpdatedAt || '2026-08-12T00:00:00.000Z'
         }];
       }
-      if (data === undefined && name === 'replace_budget_samples') {
-        data = [{ replaced_count: Array.isArray(args.p_transactions) ? args.p_transactions.length : 0 }];
-      }
       return Promise.resolve({ data: error ? null : data, error });
     },
     from(table) {
@@ -599,7 +596,7 @@ function createAppHarness(options = {}) {
   const cloudCalls = {
     currentUser: [], downloadState: [], signInWithPassword: [], signOut: [],
     saveSettings: [], insertTransaction: [], updateTransaction: [], deleteTransaction: [],
-    uploadState: [], replaceSampleTransactions: []
+    uploadState: []
   };
   const cloudBehaviors = options.cloud || {};
   async function runCloudBehavior(name, args, fallback) {
@@ -625,8 +622,7 @@ function createAppHarness(options = {}) {
       'uploadState',
       [nextState, expectedState],
       { ok: true, uploadedCount: nextState.transactions.length }
-    ),
-    replaceSampleTransactions: (...args) => runCloudBehavior('replaceSampleTransactions', args, { ok: true, replacedCount: 6 })
+    )
   };
 
   vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'js/app.js'), 'utf8'), context, { filename: 'js/app.js' });
@@ -1828,7 +1824,7 @@ async function testCloudWholeStateRpcErrorsBeforeAnyDirectWrite() {
 function testSupabaseSetupDefinesTransactionalWholeStateRpc() {
   const source = fs.readFileSync(path.join(__dirname, '..', 'docs', 'supabase-setup.sql'), 'utf8');
   const start = source.search(/create or replace function public\.replace_budget_state\s*\(/i);
-  const end = source.indexOf('-- Atomically replace sample rows', start);
+  const end = source.search(/drop function if exists public\.replace_budget_samples/i);
   const rpc = source.slice(start, end);
   assert.match(source, /create or replace function public\.replace_budget_state\s*\(/i);
   assert.match(source, /drop function if exists public\.replace_budget_state\s*\(integer,\s*jsonb,\s*jsonb\)/i);
@@ -1869,7 +1865,7 @@ function testSupabaseSettingsVersionIsDatabaseOwnedAndMonotonic() {
   assert.match(source, /create trigger set_budget_settings_updated_at\s+before insert or update on public\.budget_settings[\s\S]*execute function public\.set_budget_settings_updated_at\s*\(\s*\)/i);
 
   const rpcStart = source.search(/create or replace function public\.replace_budget_state\s*\(/i);
-  const rpcEnd = source.indexOf('-- Atomically replace sample rows', rpcStart);
+  const rpcEnd = source.search(/drop function if exists public\.replace_budget_samples/i);
   const rpc = source.slice(rpcStart, rpcEnd);
   assert.match(rpc, /v_new_updated_at\s+timestamptz\s*;/i);
   assert.doesNotMatch(rpc, /v_new_updated_at\s+timestamptz\s*:=\s*clock_timestamp/i);
@@ -1888,22 +1884,44 @@ function testSupabaseSettingsVersionIsDatabaseOwnedAndMonotonic() {
   assert.match(rpc, /return query select jsonb_array_length\(p_transactions\)::integer,\s*v_new_updated_at/i);
 }
 
-function testSupabaseReplacementRpcsRejectUntrimmedTransactionIds() {
+function testSupabaseCanonicalizesLegacyTransactionIdsBeforeRpcUse() {
+  const source = fs.readFileSync(path.join(__dirname, '..', 'docs', 'supabase-setup.sql'), 'utf8');
+  const migrationStart = source.search(/update public\.transactions\s+set id\s*=/i);
+  const constraintDrop = source.search(/drop constraint if exists transactions_id_canonical/i);
+  const constraintAdd = source.search(/add constraint transactions_id_canonical/i);
+  const rpcStart = source.search(/create or replace function public\.replace_budget_state\s*\(/i);
+
+  assert.ok(migrationStart >= 0 && migrationStart < constraintDrop, 'legacy IDs must be repaired before the check constraint');
+  assert.ok(constraintDrop < constraintAdd && constraintAdd < rpcStart, 'canonical ID constraint must be installed before RPC use');
+  const migration = source.slice(migrationStart, constraintDrop);
+  assert.match(migration, /set id\s*=\s*'tx-'\s*\|\|\s*gen_random_uuid\(\)::text/i);
+  assert.match(migration, /where id\s*<>\s*btrim\(id\)\s+or\s+btrim\(id\)\s*=\s*''/i);
+  assert.doesNotMatch(migration, /set id\s*=\s*btrim\(id\)/i, 'trim-collision rows must not be merged in place');
+  assert.match(source, /add constraint transactions_id_canonical\s+check\s*\(\s*id\s*=\s*btrim\(id\)\s+and\s+btrim\(id\)\s*<>\s*''\s*\)/i);
+
+  const trimCollisionFixture = ['collision', ' collision ', '\tcollision\t', '   '];
+  let generated = 0;
+  const migratedIds = trimCollisionFixture.map((id) => (
+    id !== id.trim() || !id.trim() ? `tx-fixture-${++generated}` : id
+  ));
+  assert.strictEqual(new Set(migratedIds).size, trimCollisionFixture.length);
+  assert.strictEqual(migratedIds.slice(1).every((id) => id.startsWith('tx-fixture-')), true);
+}
+
+function testSupabaseWholeStateRpcRejectsUntrimmedTransactionIds() {
   const source = fs.readFileSync(path.join(__dirname, '..', 'docs', 'supabase-setup.sql'), 'utf8');
   const wholeStart = source.search(/create or replace function public\.replace_budget_state\s*\(/i);
-  const sampleStart = source.search(/create or replace function public\.replace_budget_samples\s*\(/i);
-  const wholeRpc = source.slice(wholeStart, sampleStart);
-  const sampleRpc = source.slice(sampleStart);
+  const sampleDrop = source.search(/drop function if exists public\.replace_budget_samples/i);
+  const wholeRpc = source.slice(wholeStart, sampleDrop);
   const trimmedIdGuard = /btrim\(transaction_row\s*->>\s*'id'\)\s*<>\s*transaction_row\s*->>\s*'id'/i;
 
   assert.match(wholeRpc, trimmedIdGuard, 'whole-state proposed and expected IDs must already be trimmed');
-  assert.match(sampleRpc, trimmedIdGuard, 'sample proposed and expected IDs must already be trimmed');
 }
 
 function testSupabaseWholeStateRpcLocksTransactionsBeforeSnapshotAndReplacement() {
   const source = fs.readFileSync(path.join(__dirname, '..', 'docs', 'supabase-setup.sql'), 'utf8');
   const start = source.search(/create or replace function public\.replace_budget_state\s*\(/i);
-  const end = source.indexOf('-- Atomically replace sample rows', start);
+  const end = source.search(/drop function if exists public\.replace_budget_samples/i);
   const rpc = source.slice(start, end).toLowerCase();
   const lock = rpc.indexOf('lock table public.transactions in share row exclusive mode');
   const snapshotRead = rpc.indexOf('into v_current_transactions');
@@ -1921,7 +1939,7 @@ function testSupabaseWholeStateRpcLocksTransactionsBeforeSnapshotAndReplacement(
 function testSupabaseWholeStateRpcCanonicalizesExpectedTransactionsWithDatabaseOrdering() {
   const source = fs.readFileSync(path.join(__dirname, '..', 'docs', 'supabase-setup.sql'), 'utf8');
   const start = source.search(/create or replace function public\.replace_budget_state\s*\(/i);
-  const end = source.indexOf('-- Atomically replace sample rows', start);
+  const end = source.search(/drop function if exists public\.replace_budget_samples/i);
   const rpc = source.slice(start, end);
 
   // A supplementary character and a BMP private-use character sort differently
@@ -1943,121 +1961,38 @@ function testSupabaseWholeStateRpcCanonicalizesExpectedTransactionsWithDatabaseO
   assert.doesNotMatch(rpc, /v_current_transactions\s+is distinct from\s+p_expected_transactions/i);
 }
 
-function testAppReplacesSamplesThroughOneCloudRpc() {
+function testAppReplacesSamplesThroughWholeStateCas() {
   const source = fs.readFileSync(path.join(__dirname, '..', 'js', 'app.js'), 'utf8');
   const start = source.indexOf('async function handleSampleClick');
   const end = source.indexOf('function handleExportClick', start);
   assert.ok(start >= 0 && end > start, 'sample handler source must be present');
   const handler = source.slice(start, end);
 
-  assert.match(handler, /BudgetCloud\.replaceSampleTransactions/);
-  assert.doesNotMatch(handler, /BudgetCloud\.(?:insertTransaction|deleteTransaction)/);
-  assert.doesNotMatch(handler, /insertedIds|cleanupError|reloadError/);
+  assert.match(handler, /replaceAllRemoteFirst\(\s*preparedState/);
+  assert.doesNotMatch(handler, /BudgetCloud\.replaceSampleTransactions/);
+
+  const importStart = source.indexOf('function handleImportFile');
+  const resetStart = source.indexOf('async function handleResetClick');
+  const importHandler = source.slice(importStart, resetStart);
+  const resetHandler = source.slice(resetStart, source.indexOf('function applyDownloadedState', resetStart));
+  assert.match(importHandler, /replaceAllRemoteFirst\(result\.state/);
+  assert.match(resetHandler, /replaceAllRemoteFirst\(result\.state/);
 }
 
-async function testCloudReplacesSelectedPeriodSamplesWithOneRpc() {
-  const fake = createSupabaseFake();
-  const win = createContext({ supabase: fake.supabase });
-  const sampleState = win.BudgetTransactions.createSampleState(
-    { ...win.BudgetStorage.defaultState(), monthStartDay: 25 },
-    '2026-05',
-    { monthStartDay: 25 }
-  );
-  const samples = sampleState.transactions;
-  const expectedSamples = win.BudgetStorage.normalizeState({
-    transactions: [
-      { id: 'sample-old', date: '2026-05-25', type: 'expense', category: '생활비', amount: 1000, memo: '기존', source: 'sample' }
-    ]
-  }).transactions;
-  const before = JSON.stringify(samples);
-  const expectedBefore = JSON.stringify(expectedSamples);
+function testCloudDoesNotExposeUnsafeSampleReplacement() {
+  const win = createContext();
+  const source = fs.readFileSync(path.join(__dirname, '..', 'js', 'cloud.js'), 'utf8');
 
-  const result = await win.BudgetCloud.replaceSampleTransactions('2026-05', 25, samples, expectedSamples);
-
-  assert.strictEqual(result.replacedCount, 6);
-  assert.strictEqual(JSON.stringify(samples), before);
-  assert.strictEqual(JSON.stringify(expectedSamples), expectedBefore);
-  assert.strictEqual(fake.calls.length, 1);
-  assert.strictEqual(fake.calls[0].action, 'rpc');
-  assert.strictEqual(fake.calls[0].name, 'replace_budget_samples');
-  assert.strictEqual(fake.calls[0].args.p_period_start, '2026-05-25');
-  assert.strictEqual(fake.calls[0].args.p_period_end, '2026-06-24');
-  assert.strictEqual(fake.calls[0].args.p_transactions.length, 6);
-  assert.strictEqual(JSON.stringify(fake.calls[0].args.p_expected_samples), JSON.stringify(expectedSamples));
-  assert.strictEqual(fake.calls[0].args.p_transactions.every((transaction) => (
-    transaction.source === 'sample'
-    && !Object.prototype.hasOwnProperty.call(transaction, 'user_id')
-    && win.BudgetStorage.isDateInBudgetMonth(transaction.date, '2026-05', 25)
-  )), true);
+  assert.strictEqual(typeof win.BudgetCloud.replaceSampleTransactions, 'undefined');
+  assert.doesNotMatch(source, /replaceSampleTransactions|replace_budget_samples/);
 }
 
-async function testCloudSampleRpcErrorsWithoutFallbackWrites() {
-  const rpcError = new Error('replace_budget_samples 함수를 찾지 못했어요.');
-  const fake = createSupabaseFake({ rpcErrors: { replace_budget_samples: rpcError } });
-  const win = createContext({ supabase: fake.supabase });
-  const samples = win.BudgetTransactions.createSampleState(win.BudgetStorage.defaultState(), '2026-05').transactions;
-  const before = JSON.stringify(samples);
-
-  await assert.rejects(
-    win.BudgetCloud.replaceSampleTransactions('2026-05', 1, samples, []),
-    /replace_budget_samples 함수를 찾지 못했어요/
-  );
-
-  assert.strictEqual(JSON.stringify(samples), before);
-  assert.strictEqual(fake.calls.length, 1);
-  assert.strictEqual(fake.calls[0].action, 'rpc');
-  assert.strictEqual(fake.calls[0].name, 'replace_budget_samples');
-}
-
-function testSupabaseSetupDefinesTransactionalSampleRpc() {
+function testSupabaseSetupDropsUnsafeSampleRpcOverloads() {
   const source = fs.readFileSync(path.join(__dirname, '..', 'docs', 'supabase-setup.sql'), 'utf8');
-  assert.match(source, /create or replace function public\.replace_budget_samples\s*\(/i);
-  assert.match(source, /replace_budget_samples[\s\S]*security invoker/i);
-  assert.match(source, /source\s*=\s*'sample'/i);
-  assert.match(source, /grant execute on function public\.replace_budget_samples/i);
-}
-
-function testSupabaseSampleRpcUsesExpectedSnapshotUnderOneTableLock() {
-  const source = fs.readFileSync(path.join(__dirname, '..', 'docs', 'supabase-setup.sql'), 'utf8');
-  const createStart = source.search(/create or replace function public\.replace_budget_samples\s*\(/i);
-  const oldDrop = source.search(/drop function if exists public\.replace_budget_samples\s*\(date,\s*date,\s*jsonb\)/i);
-  const rpc = source.slice(createStart);
-
-  assert.ok(oldDrop >= 0 && oldDrop < createStart, 'legacy three-argument sample RPC must be dropped before replacement');
-  assert.match(rpc, /p_expected_samples\s+jsonb/i);
-  assert.match(rpc, /jsonb_typeof\(p_expected_samples\)\s*<>\s*'array'/i);
-  assert.doesNotMatch(rpc, /jsonb_array_length\(p_expected_samples\)\s*<>?\s*6/i);
-  assert.match(rpc, /jsonb_array_elements\(p_transactions\s*\|\|\s*p_expected_samples\)/i);
-  assert.match(rpc, /\(transaction_row\s*->>\s*'date'\)::date\s+not between p_period_start and p_period_end/i);
-  assert.match(rpc, /coalesce\(transaction_row\s*->>\s*'source',\s*''\)\s*<>\s*'sample'/i);
-  assert.match(rpc, /duplicate expected sample transaction ids/i);
-
-  const expectedInto = rpc.indexOf('into v_expected_samples');
-  const expectedStart = rpc.lastIndexOf('select coalesce(', expectedInto);
-  const expectedEnd = rpc.indexOf(';', expectedInto);
-  const expectedCanonicalization = rpc.slice(expectedStart, expectedEnd);
-  assert.ok(expectedInto >= 0, 'expected sample snapshot must be canonicalized');
-  assert.match(expectedCanonicalization, /from jsonb_to_recordset\(p_expected_samples\)/i);
-  assert.match(expectedCanonicalization, /jsonb_build_object[\s\S]*'id'[\s\S]*'date'[\s\S]*'type'[\s\S]*'category'[\s\S]*'amount'[\s\S]*'memo'[\s\S]*'source'/i);
-  assert.match(expectedCanonicalization, /order by transaction_row\.id collate "C"/i);
-
-  const lowerRpc = rpc.toLowerCase();
-  const lock = lowerRpc.indexOf('lock table public.transactions in share row exclusive mode');
-  const currentSnapshot = lowerRpc.indexOf('into v_current_samples');
-  const compare = lowerRpc.indexOf('v_current_samples is distinct from v_expected_samples');
-  const transactionDelete = lowerRpc.indexOf('delete from public.transactions');
-  const transactionInsert = lowerRpc.indexOf('insert into public.transactions');
-  assert.ok(lock >= 0 && lock < currentSnapshot, 'sample RPC lock must precede current snapshot read');
-  assert.ok(currentSnapshot < compare, 'sample snapshot must be read before CAS comparison');
-  assert.ok(compare < transactionDelete, 'sample CAS comparison must precede delete');
-  assert.ok(transactionDelete < transactionInsert, 'sample delete and insert must remain one ordered replacement');
-  assert.match(rpc.slice(compare, transactionDelete), /errcode\s*=\s*'40001'/i);
-  assert.doesNotMatch(rpc, /on conflict/i, 'duplicate IDs must fail and roll back instead of bypassing CAS');
-
-  assert.match(source, /revoke all on function public\.replace_budget_samples\(date,\s*date,\s*jsonb,\s*jsonb\) from public/i);
-  assert.match(source, /revoke all on function public\.replace_budget_samples\(date,\s*date,\s*jsonb,\s*jsonb\) from anon/i);
-  assert.match(source, /grant execute on function public\.replace_budget_samples\(date,\s*date,\s*jsonb,\s*jsonb\) to authenticated/i);
-  assert.doesNotMatch(source, /grant execute on function public\.replace_budget_samples\(date,\s*date,\s*jsonb\) to authenticated/i);
+  assert.match(source, /drop function if exists public\.replace_budget_samples\(date,\s*date,\s*jsonb\)/i);
+  assert.match(source, /drop function if exists public\.replace_budget_samples\(date,\s*date,\s*jsonb,\s*jsonb\)/i);
+  assert.doesNotMatch(source, /create or replace function public\.replace_budget_samples\s*\(/i);
+  assert.doesNotMatch(source, /grant execute on function public\.replace_budget_samples/i);
 }
 
 function testUiCloudStatusShowsLoadingRetryAndSignedOutStates() {
@@ -2273,7 +2208,7 @@ async function testAppTransactionConflictPassesExpectedRowAndKeepsLocalState() {
   assert.strictEqual(harness.elements.cloudDownloadButton.hidden, false);
 }
 
-async function testAppSampleConflictPassesExpectedRowsAndKeepsLocalState() {
+async function testAppSampleUsesWholeStateCasAndRollsBackOnConflict() {
   const storage = createContext().BudgetStorage;
   const sampleDate = storage.localDateString();
   const selectedMonth = storage.monthKeyForDate(sampleDate, 1);
@@ -2290,22 +2225,30 @@ async function testAppSampleConflictPassesExpectedRowsAndKeepsLocalState() {
     new Error('다른 브라우저에서 샘플 데이터가 변경됐어요. 클라우드 데이터를 다시 불러와 주세요.'),
     { code: '40001' }
   );
+  const currentState = storage.normalizeState({
+    ...storage.defaultState(),
+    transactions: [priorSample, currentSample]
+  });
   const harness = createAppHarness({
-    cloudState: { ...storage.defaultState(), transactions: [priorSample, currentSample] },
-    cloud: { replaceSampleTransactions: async () => { throw conflict; } }
+    cloudState: currentState,
+    cloud: { uploadState: async () => { throw conflict; } }
   });
   await harness.init();
 
   await harness.elements.sampleButton.dispatch('click');
   await harness.elements.exportButton.dispatch('click');
   const exported = JSON.parse(harness.records.downloads.at(-1).content);
-  const sampleCall = harness.cloudCalls.replaceSampleTransactions[0];
-
-  assert.strictEqual(sampleCall[0], selectedMonth);
-  assert.strictEqual(sampleCall[1], 1);
-  assert.strictEqual(sampleCall[2].length, 6);
-  assert.strictEqual(JSON.stringify(sampleCall[3]), JSON.stringify([currentSample]));
-  assert.strictEqual(JSON.stringify(exported.transactions), JSON.stringify([priorSample, currentSample]));
+  assert.strictEqual(harness.cloudCalls.uploadState.length, 1);
+  const [preparedState, expectedState] = harness.cloudCalls.uploadState[0];
+  const preparedSelectedSamples = preparedState.transactions.filter((transaction) => (
+    transaction.source === 'sample'
+    && storage.isDateInBudgetMonth(transaction.date, selectedMonth, 1)
+  ));
+  assert.strictEqual(JSON.stringify(expectedState), JSON.stringify(currentState));
+  assert.strictEqual(preparedSelectedSamples.length, 6);
+  assert.strictEqual(preparedState.transactions.some((transaction) => transaction.id === priorSample.id), true);
+  assert.strictEqual(preparedState.transactions.some((transaction) => transaction.id === currentSample.id), false);
+  assert.strictEqual(JSON.stringify(exported), JSON.stringify(currentState));
   assert.match(harness.elements.globalMessage.textContent, /다른 브라우저에서 샘플 데이터가 변경됐어요/);
   assert.strictEqual(harness.records.cloudStatuses.at(-1).readiness, 'load-error');
   assert.strictEqual(harness.writeControls.every((control) => control.disabled), true);
@@ -2474,21 +2417,20 @@ const tests = [
   testCloudWholeStateRpcErrorsBeforeAnyDirectWrite,
   testSupabaseSetupDefinesTransactionalWholeStateRpc,
   testSupabaseSettingsVersionIsDatabaseOwnedAndMonotonic,
-  testSupabaseReplacementRpcsRejectUntrimmedTransactionIds,
+  testSupabaseCanonicalizesLegacyTransactionIdsBeforeRpcUse,
+  testSupabaseWholeStateRpcRejectsUntrimmedTransactionIds,
   testSupabaseWholeStateRpcLocksTransactionsBeforeSnapshotAndReplacement,
   testSupabaseWholeStateRpcCanonicalizesExpectedTransactionsWithDatabaseOrdering,
-  testAppReplacesSamplesThroughOneCloudRpc,
-  testCloudReplacesSelectedPeriodSamplesWithOneRpc,
-  testCloudSampleRpcErrorsWithoutFallbackWrites,
-  testSupabaseSetupDefinesTransactionalSampleRpc,
-  testSupabaseSampleRpcUsesExpectedSnapshotUnderOneTableLock,
+  testAppSampleUsesWholeStateCasAndRollsBackOnConflict,
+  testAppReplacesSamplesThroughWholeStateCas,
+  testCloudDoesNotExposeUnsafeSampleReplacement,
+  testSupabaseSetupDropsUnsafeSampleRpcOverloads,
   testUiCloudStatusShowsLoadingRetryAndSignedOutStates,
   testAppDisablesWritesDuringInitialSessionLookup,
   testAppReadinessBlocksWritesAfterLoadErrorAndEnablesAfterSuccess,
   testAppSerializesMutationsAndRemoteFailureUnlocksWithoutCommit,
   testAppRoutesDeleteAndMovedEditFeedbackToGlobalMessage,
   testAppTransactionConflictPassesExpectedRowAndKeepsLocalState,
-  testAppSampleConflictPassesExpectedRowsAndKeepsLocalState,
   testAppWholeStateConflictPassesExpectedStateAndKeepsLocalState,
   testAppSettingsConflictRetriesOnlyAfterCloudRefresh,
   testAppLogoutClearsPrivateStateAndFocusesLogin
