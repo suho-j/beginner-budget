@@ -53,7 +53,7 @@
     if (!window.BudgetStorage.isValidDateString(normalized.date)) errors.push(error('date', '날짜를 올바르게 선택해 주세요.'));
     if (!TYPES.includes(normalized.type)) errors.push(error('type', '유형은 수입 또는 지출만 선택할 수 있어요.'));
     if (!normalized.category || !categoriesFor(normalized.type).includes(normalized.category)) errors.push(error('category', '선택한 유형에 맞는 카테고리를 골라 주세요.'));
-    if (!window.BudgetStorage.isPositiveInteger(normalized.amount)) errors.push(error('amount', '금액은 1원 이상의 숫자로 입력해 주세요. 쉼표(예: 12,000)는 사용할 수 있어요.'));
+    if (!window.BudgetStorage.isPositiveInteger(normalized.amount)) errors.push(error('amount', '금액은 1원 이상 2,147,483,647원 이하의 숫자로 입력해 주세요. 쉼표(예: 12,000)는 사용할 수 있어요.'));
     if (normalized.memo.length > window.BudgetStorage.MAX_MEMO_LENGTH) errors.push(error('memo', '메모는 80자 이내로 입력해 주세요.'));
 
     return { valid: errors.length === 0, errors, value: normalized };
@@ -116,7 +116,7 @@
   function setMonthlyBudget(state, amount, month) {
     const budget = Number(amount);
     if (!window.BudgetStorage.isPositiveInteger(budget)) {
-      return { state, ok: false, errors: [error('monthlyBudget', '예산은 쉼표 없이 1원 이상의 양의 정수로 입력해 주세요.')] };
+      return { state, ok: false, errors: [error('monthlyBudget', '예산은 쉼표 없이 1원 이상 2,147,483,647원 이하의 양의 정수로 입력해 주세요.')] };
     }
     if (!month) return { state: { ...state, monthlyBudget: budget }, ok: true, errors: [] };
     const currentMonthBudget = window.BudgetStorage.budgetForMonth(state, month);
@@ -152,7 +152,7 @@
       if (rawValue === undefined || rawValue === null || String(rawValue).trim() === '') return;
       const amount = parseMoneyInput(rawValue);
       if (!amount) {
-        errors.push(error('categoryBudgets', `${category} 예산은 1원 이상의 숫자로 입력해 주세요.`));
+        errors.push(error('categoryBudgets', `${category} 예산은 1원 이상 2,147,483,647원 이하의 숫자로 입력해 주세요.`));
         return;
       }
       categoryBudgets[category] = amount;

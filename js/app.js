@@ -290,33 +290,15 @@
       monthStartDay
     });
     const existingIds = new Set(state.transactions.map((transaction) => transaction.id));
-    const previousSampleIds = state.transactions
-      .filter((transaction) => (
-        transaction.source === 'sample'
-        && window.BudgetStorage.isDateInBudgetMonth(transaction.date, month, monthStartDay)
-      ))
-      .map((transaction) => transaction.id);
-    const previousSampleIdSet = new Set(previousSampleIds);
     const newSampleRows = preparedState.transactions.filter((transaction) => (
       transaction.source === 'sample' && !existingIds.has(transaction.id)
     ));
-    const nextState = {
-      ...preparedState,
-      transactions: preparedState.transactions.filter((transaction) => !previousSampleIdSet.has(transaction.id))
-    };
-    const insertedIds = [];
     const button = event.currentTarget;
     button.disabled = true;
 
     try {
-      for (const transaction of newSampleRows) {
-        await window.BudgetCloud.insertTransaction(transaction);
-        insertedIds.push(transaction.id);
-      }
-      for (const id of previousSampleIds) {
-        await window.BudgetCloud.deleteTransaction(id);
-      }
-      state = window.BudgetStorage.saveState(nextState).state;
+      await window.BudgetCloud.replaceSampleTransactions(month, monthStartDay, newSampleRows);
+      state = window.BudgetStorage.saveState(preparedState).state;
       render();
       window.BudgetUI.setMessage(
         elements.toolMessage,
@@ -324,19 +306,6 @@
         'ok'
       );
     } catch (error) {
-      for (const id of insertedIds) {
-        try {
-          await window.BudgetCloud.deleteTransaction(id);
-        } catch (cleanupError) {
-          window.console.error('샘플 정리 실패', cleanupError);
-        }
-      }
-      try {
-        const cloudState = await window.BudgetCloud.downloadState();
-        applyDownloadedState(cloudState);
-      } catch (reloadError) {
-        window.console.error('샘플 재동기화 실패', reloadError);
-      }
       window.BudgetUI.setMessage(elements.toolMessage, `샘플 저장 실패: ${error.message}`, 'error');
     } finally {
       button.disabled = false;

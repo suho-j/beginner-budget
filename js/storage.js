@@ -6,6 +6,7 @@
   const DEFAULT_BUDGET = 500000;
   const DEFAULT_MONTH_START_DAY = 1;
   const MAX_MEMO_LENGTH = 80;
+  const MAX_DB_INTEGER = 2147483647;
   const EXPENSE_CATEGORIES = ['생활비', '배달비', '의류비', '비상금'];
   const LEGACY_EXPENSE_CATEGORY_MAP = {
     '식비': '생활비',
@@ -33,7 +34,7 @@
   }
 
   function isPositiveInteger(value) {
-    return Number.isInteger(value) && value > 0;
+    return Number.isInteger(value) && value > 0 && value <= MAX_DB_INTEGER;
   }
 
   function pad2(value) {
@@ -154,13 +155,21 @@
 
   function normalizeCategoryBudgets(rawBudgets) {
     const budgets = {};
+    const overflowedCategories = new Set();
     if (!rawBudgets || typeof rawBudgets !== 'object' || Array.isArray(rawBudgets)) return budgets;
     Object.keys(rawBudgets).forEach((rawCategory) => {
       if (String(rawCategory).startsWith('__')) return;
       const category = normalizeExpenseCategory(String(rawCategory).trim());
       if (!EXPENSE_CATEGORIES.includes(category)) return;
       const amount = Number(String(rawBudgets[rawCategory] || '').replaceAll(',', ''));
-      if (isPositiveInteger(amount)) budgets[category] = (budgets[category] || 0) + amount;
+      if (!isPositiveInteger(amount) || overflowedCategories.has(category)) return;
+      const combined = (budgets[category] || 0) + amount;
+      if (!isPositiveInteger(combined)) {
+        delete budgets[category];
+        overflowedCategories.add(category);
+        return;
+      }
+      budgets[category] = combined;
     });
     return budgets;
   }
@@ -241,6 +250,7 @@
     DEFAULT_BUDGET,
     DEFAULT_MONTH_START_DAY,
     MAX_MEMO_LENGTH,
+    MAX_DB_INTEGER,
     EXPENSE_CATEGORIES,
     INCOME_CATEGORIES,
     defaultState,

@@ -257,6 +257,8 @@ function createUiContext() {
 function createSupabaseFake(options = {}) {
   const calls = [];
   const emptyActions = new Set(options.emptyActions || []);
+  const rpcErrors = options.rpcErrors || {};
+  const rpcData = options.rpcData || {};
   function filteredQuery(table, action, payload) {
     const call = { table, action, payload, filters: [], select: null };
     calls.push(call);
@@ -275,6 +277,21 @@ function createSupabaseFake(options = {}) {
   }
   const client = {
     auth: { async getUser() { return { data: { user: { id: 'user-1' } }, error: null }; } },
+    rpc(name, args) {
+      calls.push({ action: 'rpc', name, args });
+      const configuredError = rpcErrors[name];
+      const error = configuredError
+        ? (configuredError instanceof Error ? configuredError : new Error(String(configuredError)))
+        : null;
+      let data = rpcData[name];
+      if (data === undefined && name === 'replace_budget_state') {
+        data = [{ uploaded_count: Array.isArray(args.p_transactions) ? args.p_transactions.length : 0 }];
+      }
+      if (data === undefined && name === 'replace_budget_samples') {
+        data = [{ replaced_count: Array.isArray(args.p_transactions) ? args.p_transactions.length : 0 }];
+      }
+      return Promise.resolve({ data: error ? null : data, error });
+    },
     from(table) {
       return {
         insert(payload) { calls.push({ table, action: 'insert', payload, filters: [] }); return Promise.resolve({ data: null, error: null }); },
@@ -339,6 +356,68 @@ function testNormalizationDropsInvalidRowsAndDeduplicatesIds() {
   assert.strictEqual(JSON.stringify(state.monthlyBudgets), JSON.stringify({ '2026-05': { monthlyBudget: 800000, categoryBudgets: { 생활비: 300000 } } }));
   assert.strictEqual(state.transactions.length, 2);
   assert.strictEqual(new Set(state.transactions.map((tx) => tx.id)).size, 2);
+}
+
+function testDatabaseIntegerBoundsAreEnforced() {
+  const win = createContext();
+  const max = 2147483647;
+  const overflow = max + 1;
+  const base = win.BudgetStorage.defaultState();
+
+  assert.strictEqual(win.BudgetStorage.MAX_DB_INTEGER, max);
+  assert.strictEqual(win.BudgetStorage.isPositiveInteger(max), true);
+  assert.strictEqual(win.BudgetStorage.isPositiveInteger(overflow), false);
+
+  const acceptedTransaction = win.BudgetTransactions.addTransaction(base, {
+    date: '2026-05-01', type: 'expense', category: '생활비', amount: String(max), memo: ''
+  });
+  const rejectedTransaction = win.BudgetTransactions.addTransaction(base, {
+    date: '2026-05-01', type: 'expense', category: '생활비', amount: String(overflow), memo: ''
+  });
+  assert.strictEqual(acceptedTransaction.ok, true);
+  assert.strictEqual(acceptedTransaction.transaction.amount, max);
+  assert.strictEqual(rejectedTransaction.ok, false);
+  assert.strictEqual(rejectedTransaction.errors[0].field, 'amount');
+  assert.match(rejectedTransaction.errors[0].message, /2,147,483,647원 이하/);
+
+  assert.strictEqual(win.BudgetTransactions.setMonthlyBudget(base, max, '2026-05').ok, true);
+  const rejectedBudget = win.BudgetTransactions.setMonthlyBudget(base, overflow, '2026-05');
+  assert.strictEqual(rejectedBudget.ok, false);
+  assert.strictEqual(rejectedBudget.errors[0].field, 'monthlyBudget');
+  assert.match(rejectedBudget.errors[0].message, /2,147,483,647원 이하/);
+  const rejectedCategoryBudget = win.BudgetTransactions.setCategoryBudgets(base, { 생활비: String(overflow) });
+  assert.strictEqual(rejectedCategoryBudget.ok, false);
+  assert.match(rejectedCategoryBudget.errors[0].message, /2,147,483,647원 이하/);
+
+  const normalized = win.BudgetStorage.normalizeState({
+    monthlyBudget: overflow,
+    categoryBudgets: { 생활비: overflow },
+    monthlyBudgets: { '2026-05': { monthlyBudget: overflow, categoryBudgets: { 생활비: overflow } } },
+    transactions: [
+      { id: 'max', date: '2026-05-01', type: 'expense', category: '생활비', amount: max },
+      { id: 'overflow', date: '2026-05-02', type: 'expense', category: '생활비', amount: overflow }
+    ]
+  });
+  assert.strictEqual(normalized.monthlyBudget, win.BudgetStorage.DEFAULT_BUDGET);
+  assert.strictEqual(JSON.stringify(normalized.categoryBudgets), '{}');
+  assert.strictEqual(JSON.stringify(normalized.monthlyBudgets), '{}');
+  assert.strictEqual(JSON.stringify(normalized.transactions.map((transaction) => transaction.id)), JSON.stringify(['max']));
+  assert.strictEqual(
+    JSON.stringify(win.BudgetStorage.normalizeCategoryBudgets({ 생활비: max, 식비: 1 })),
+    '{}'
+  );
+
+  const imported = win.BudgetTransactions.importState(JSON.stringify({
+    monthlyBudget: max,
+    transactions: [
+      { id: 'max', date: '2026-05-01', type: 'expense', category: '생활비', amount: max },
+      { id: 'overflow', date: '2026-05-02', type: 'expense', category: '생활비', amount: overflow }
+    ]
+  }));
+  assert.strictEqual(imported.ok, true);
+  assert.strictEqual(imported.state.monthlyBudget, max);
+  assert.strictEqual(imported.summary.importedCount, 1);
+  assert.strictEqual(imported.summary.skippedCount, 1);
 }
 
 function testCategoryBudgetSaveAndSummary() {
@@ -1114,12 +1193,146 @@ async function testCloudRejectsInvalidOrStaleTransactionMutations() {
   assert.strictEqual(staleFake.calls[1].select, 'id');
 }
 
+async function testCloudReplacesWholeStateWithOneRpc() {
+  const fake = createSupabaseFake();
+  const win = createContext({ supabase: fake.supabase });
+  const state = win.BudgetStorage.normalizeState({
+    monthlyBudget: 900000,
+    categoryBudgets: { 생활비: 300000 },
+    monthStartDay: 25,
+    monthlyBudgets: {
+      '2026-05': { monthlyBudget: 800000, categoryBudgets: { 배달비: 100000 } }
+    },
+    transactions: [
+      { id: 'tx-a', date: '2026-05-25', type: 'expense', category: '생활비', amount: 12000, memo: '마트', source: 'user' }
+    ]
+  });
+  const before = JSON.stringify(state);
+
+  const result = await win.BudgetCloud.uploadState(state);
+
+  assert.strictEqual(result.uploadedCount, 1);
+  assert.strictEqual(JSON.stringify(state), before);
+  assert.strictEqual(fake.calls.length, 1);
+  assert.strictEqual(fake.calls[0].action, 'rpc');
+  assert.strictEqual(fake.calls[0].name, 'replace_budget_state');
+  assert.strictEqual(JSON.stringify(fake.calls[0].args), JSON.stringify({
+    p_monthly_budget: 900000,
+    p_category_budgets: {
+      생활비: 300000,
+      __month_start_day: 25,
+      __monthly_budgets: {
+        '2026-05': { monthlyBudget: 800000, categoryBudgets: { 배달비: 100000 } }
+      }
+    },
+    p_transactions: [
+      { id: 'tx-a', date: '2026-05-25', type: 'expense', category: '생활비', amount: 12000, memo: '마트', source: 'user' }
+    ]
+  }));
+  assert.strictEqual(fake.calls.some((call) => ['delete', 'insert', 'upsert'].includes(call.action)), false);
+}
+
+async function testCloudWholeStateRpcErrorsBeforeAnyDirectWrite() {
+  const rpcError = new Error('replace_budget_state 함수를 찾지 못했어요.');
+  const fake = createSupabaseFake({ rpcErrors: { replace_budget_state: rpcError } });
+  const win = createContext({ supabase: fake.supabase });
+  const state = win.BudgetStorage.normalizeState({
+    transactions: [
+      { id: 'tx-a', date: '2026-05-01', type: 'expense', category: '생활비', amount: 1000 }
+    ]
+  });
+  const before = JSON.stringify(state);
+
+  await assert.rejects(win.BudgetCloud.uploadState(state), /replace_budget_state 함수를 찾지 못했어요/);
+
+  assert.strictEqual(JSON.stringify(state), before);
+  assert.strictEqual(fake.calls.length, 1);
+  assert.strictEqual(fake.calls[0].action, 'rpc');
+  assert.strictEqual(fake.calls[0].name, 'replace_budget_state');
+}
+
+function testSupabaseSetupDefinesTransactionalWholeStateRpc() {
+  const source = fs.readFileSync(path.join(__dirname, '..', 'docs', 'supabase-setup.sql'), 'utf8');
+  assert.match(source, /create or replace function public\.replace_budget_state\s*\(/i);
+  assert.match(source, /security invoker/i);
+  assert.match(source, /auth\.uid\(\)/i);
+  assert.match(source, /duplicate transaction ids/i);
+  assert.match(source, /grant execute on function public\.replace_budget_state/i);
+}
+
+function testAppReplacesSamplesThroughOneCloudRpc() {
+  const source = fs.readFileSync(path.join(__dirname, '..', 'js', 'app.js'), 'utf8');
+  const start = source.indexOf('async function handleSampleClick');
+  const end = source.indexOf('function handleExportClick', start);
+  assert.ok(start >= 0 && end > start, 'sample handler source must be present');
+  const handler = source.slice(start, end);
+
+  assert.match(handler, /BudgetCloud\.replaceSampleTransactions/);
+  assert.doesNotMatch(handler, /BudgetCloud\.(?:insertTransaction|deleteTransaction)/);
+  assert.doesNotMatch(handler, /insertedIds|cleanupError|reloadError/);
+}
+
+async function testCloudReplacesSelectedPeriodSamplesWithOneRpc() {
+  const fake = createSupabaseFake();
+  const win = createContext({ supabase: fake.supabase });
+  const sampleState = win.BudgetTransactions.createSampleState(
+    { ...win.BudgetStorage.defaultState(), monthStartDay: 25 },
+    '2026-05',
+    { monthStartDay: 25 }
+  );
+  const samples = sampleState.transactions;
+  const before = JSON.stringify(samples);
+
+  const result = await win.BudgetCloud.replaceSampleTransactions('2026-05', 25, samples);
+
+  assert.strictEqual(result.replacedCount, 6);
+  assert.strictEqual(JSON.stringify(samples), before);
+  assert.strictEqual(fake.calls.length, 1);
+  assert.strictEqual(fake.calls[0].action, 'rpc');
+  assert.strictEqual(fake.calls[0].name, 'replace_budget_samples');
+  assert.strictEqual(fake.calls[0].args.p_period_start, '2026-05-25');
+  assert.strictEqual(fake.calls[0].args.p_period_end, '2026-06-24');
+  assert.strictEqual(fake.calls[0].args.p_transactions.length, 6);
+  assert.strictEqual(fake.calls[0].args.p_transactions.every((transaction) => (
+    transaction.source === 'sample'
+    && !Object.prototype.hasOwnProperty.call(transaction, 'user_id')
+    && win.BudgetStorage.isDateInBudgetMonth(transaction.date, '2026-05', 25)
+  )), true);
+}
+
+async function testCloudSampleRpcErrorsWithoutFallbackWrites() {
+  const rpcError = new Error('replace_budget_samples 함수를 찾지 못했어요.');
+  const fake = createSupabaseFake({ rpcErrors: { replace_budget_samples: rpcError } });
+  const win = createContext({ supabase: fake.supabase });
+  const samples = win.BudgetTransactions.createSampleState(win.BudgetStorage.defaultState(), '2026-05').transactions;
+  const before = JSON.stringify(samples);
+
+  await assert.rejects(
+    win.BudgetCloud.replaceSampleTransactions('2026-05', 1, samples),
+    /replace_budget_samples 함수를 찾지 못했어요/
+  );
+
+  assert.strictEqual(JSON.stringify(samples), before);
+  assert.strictEqual(fake.calls.length, 1);
+  assert.strictEqual(fake.calls[0].action, 'rpc');
+  assert.strictEqual(fake.calls[0].name, 'replace_budget_samples');
+}
+
+function testSupabaseSetupDefinesTransactionalSampleRpc() {
+  const source = fs.readFileSync(path.join(__dirname, '..', 'docs', 'supabase-setup.sql'), 'utf8');
+  assert.match(source, /create or replace function public\.replace_budget_samples\s*\(/i);
+  assert.match(source, /replace_budget_samples[\s\S]*security invoker/i);
+  assert.match(source, /source\s*=\s*'sample'/i);
+  assert.match(source, /grant execute on function public\.replace_budget_samples/i);
+}
+
 const tests = [
   testStorageDefaultsAndIgnoresLocalStorage,
   testSaveDoesNotUseLocalStorage,
   testStrictDateValidation,
   testLocalDateFormatting,
   testNormalizationDropsInvalidRowsAndDeduplicatesIds,
+  testDatabaseIntegerBoundsAreEnforced,
   testCategoryBudgetSaveAndSummary,
   testBudgetMonthStartAndMonthlyBudgets,
   testAddTransactionCanonicalizesBeginnerMoneyInput,
@@ -1144,7 +1357,14 @@ const tests = [
   testSummarizeTransactionsByDateHonorsBudgetPeriod,
   testAppIntegratesTabsCalendarAndRemoteFirstMutations,
   testCloudRejectsInvalidOrStaleTransactionMutations,
-  testCloudMutatesOnlyRequestedTransactionRow
+  testCloudMutatesOnlyRequestedTransactionRow,
+  testCloudReplacesWholeStateWithOneRpc,
+  testCloudWholeStateRpcErrorsBeforeAnyDirectWrite,
+  testSupabaseSetupDefinesTransactionalWholeStateRpc,
+  testAppReplacesSamplesThroughOneCloudRpc,
+  testCloudReplacesSelectedPeriodSamplesWithOneRpc,
+  testCloudSampleRpcErrorsWithoutFallbackWrites,
+  testSupabaseSetupDefinesTransactionalSampleRpc
 ];
 
 async function run() {

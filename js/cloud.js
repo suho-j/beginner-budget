@@ -59,6 +59,33 @@
     };
   }
 
+  function replacementArgsForState(state) {
+    const normalized = window.BudgetStorage.normalizeState(state);
+    return {
+      p_monthly_budget: normalized.monthlyBudget,
+      p_category_budgets: {
+        ...(normalized.categoryBudgets || {}),
+        __month_start_day: normalized.monthStartDay,
+        __monthly_budgets: normalized.monthlyBudgets || {}
+      },
+      p_transactions: normalized.transactions.map((transaction) => ({
+        id: transaction.id,
+        date: transaction.date,
+        type: transaction.type,
+        category: transaction.category,
+        amount: transaction.amount,
+        memo: transaction.memo || '',
+        source: transaction.source === 'sample' ? 'sample' : 'user'
+      }))
+    };
+  }
+
+  function countFromRpcResult(data, field, fallback) {
+    const row = Array.isArray(data) ? data[0] : data;
+    const count = Number(row && row[field]);
+    return Number.isInteger(count) && count >= 0 ? count : fallback;
+  }
+
   async function authenticatedClient() {
     const supabase = getClient();
     if (!supabase) throw new Error('Supabase 설정을 찾지 못했어요.');
@@ -168,23 +195,62 @@
   }
 
   async function uploadState(state) {
-    const supabase = getClient();
-    if (!supabase) throw new Error('Supabase 설정을 찾지 못했어요.');
-    const user = await currentUser();
-    if (!user) throw new Error('먼저 로그인해 주세요.');
-    const remote = stateToRemote(state, user.id);
-
-    let result = await supabase.from('budget_settings').upsert(remote.settings, { onConflict: 'user_id' });
+    const { supabase } = await authenticatedClient();
+    const args = replacementArgsForState(state);
+    const result = await supabase.rpc('replace_budget_state', args);
     if (result.error) throw result.error;
+    return {
+      ok: true,
+      uploadedCount: countFromRpcResult(result.data, 'uploaded_count', args.p_transactions.length)
+    };
+  }
 
-    result = await supabase.from('transactions').delete().eq('user_id', user.id);
-    if (result.error) throw result.error;
-
-    if (remote.transactions.length) {
-      result = await supabase.from('transactions').insert(remote.transactions);
-      if (result.error) throw result.error;
+  async function replaceSampleTransactions(month, startDay, transactions) {
+    if (!window.BudgetStorage.isValidMonthString(month)) {
+      throw new Error('샘플을 저장할 예산월이 올바르지 않아요.');
     }
-    return { ok: true, uploadedCount: remote.transactions.length };
+    const normalizedStartDay = window.BudgetStorage.normalizeMonthStartDay(startDay || 1);
+    if (Number(startDay || 1) !== normalizedStartDay) {
+      throw new Error('월 시작일은 1일부터 31일 사이여야 해요.');
+    }
+    if (!Array.isArray(transactions) || transactions.length !== 6) {
+      throw new Error('저장할 샘플 거래 6건이 필요해요.');
+    }
+
+    const period = window.BudgetStorage.periodRangeForMonth(month, normalizedStartDay);
+    const rows = transactions.map((transaction) => {
+      if (!transaction || transaction.source !== 'sample') {
+        throw new Error('샘플 거래 정보가 올바르지 않아요.');
+      }
+      const normalized = window.BudgetStorage.normalizeState({ transactions: [transaction] }).transactions[0];
+      if (!normalized || normalized.id !== transaction.id || normalized.source !== 'sample') {
+        throw new Error('샘플 거래 정보가 올바르지 않아요.');
+      }
+      if (!window.BudgetStorage.isDateInBudgetMonth(normalized.date, month, normalizedStartDay)) {
+        throw new Error('샘플 거래 날짜가 선택한 예산월 밖에 있어요.');
+      }
+      return {
+        id: normalized.id,
+        date: normalized.date,
+        type: normalized.type,
+        category: normalized.category,
+        amount: normalized.amount,
+        memo: normalized.memo || '',
+        source: 'sample'
+      };
+    });
+
+    const { supabase } = await authenticatedClient();
+    const result = await supabase.rpc('replace_budget_samples', {
+      p_period_start: period.start,
+      p_period_end: period.end,
+      p_transactions: rows
+    });
+    if (result.error) throw result.error;
+    return {
+      ok: true,
+      replacedCount: countFromRpcResult(result.data, 'replaced_count', rows.length)
+    };
   }
 
   async function downloadState() {
@@ -227,6 +293,7 @@
     updateTransaction,
     deleteTransaction,
     uploadState,
+    replaceSampleTransactions,
     downloadState
   };
 })(window);
