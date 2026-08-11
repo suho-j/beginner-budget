@@ -26,7 +26,13 @@ function createContext(options = {}) {
       localStorage,
       crypto: { randomUUID: () => 'test-uuid-' + Math.random().toString(16).slice(2) },
       supabase: options.supabase,
-      location: options.location || { hostname: 'suho-j.github.io', pathname: '/beginner-budget/' },
+      location: options.location || {
+        origin: 'https://suho-j.github.io',
+        protocol: 'https:',
+        hostname: 'suho-j.github.io',
+        port: '',
+        pathname: '/beginner-budget/'
+      },
       console: testConsole
     },
     console: testConsole
@@ -1055,12 +1061,22 @@ async function testCloudRoutesEveryOperationByRuntimeEnvironment() {
     previewCase({ hostname: 'budget-staging.internal', pathname: '/beginner-budget/' }),
     previewCase({ hostname: 'budget.example.com', pathname: '/beginner-budget/' }),
     previewCase({ hostname: 'suho-j.github.io.evil.example', pathname: '/beginner-budget/' }),
+    previewCase({ origin: 'http://suho-j.github.io', protocol: 'http:', hostname: 'suho-j.github.io', pathname: '/beginner-budget/' }),
+    previewCase({ origin: 'null', protocol: 'file:', hostname: 'suho-j.github.io', pathname: '/beginner-budget/' }),
+    previewCase({ origin: 'https://suho-j.github.io:8443', protocol: 'https:', hostname: 'suho-j.github.io', port: '8443', pathname: '/beginner-budget/' }),
+    previewCase({ hostname: 'suho-j.github.io', pathname: '/beginner-budget/' }),
     previewCase({ hostname: 'suho-j.github.io', pathname: '/beginner-budget' }),
     previewCase({ hostname: 'suho-j.github.io', pathname: '/beginner-budget/v1/' }),
     previewCase({ hostname: 'suho-j.github.io', pathname: '/beginner-budget-preview' }),
     previewCase({ hostname: 'suho-j.github.io', pathname: '/beginner-budget-preview/v1/' }),
     {
-      location: { hostname: 'suho-j.github.io', pathname: '/beginner-budget/' },
+      location: {
+        origin: 'https://suho-j.github.io',
+        protocol: 'https:',
+        hostname: 'suho-j.github.io',
+        port: '',
+        pathname: '/beginner-budget/'
+      },
       name: 'production',
       isPreview: false,
       settingsTable: 'budget_settings',

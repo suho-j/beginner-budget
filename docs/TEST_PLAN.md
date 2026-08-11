@@ -39,7 +39,7 @@ git diff --check origin/master..HEAD
 - 설정 `updated_at` 충돌 검사와 로그아웃 시 버전 초기화
 - 가져오기·초기화·샘플의 전체 상태 CAS와 실패 시 로컬 상태 보존
 - SQL의 ID 제약 조건, 단조 증가 트리거, 원자적 RPC·잠금·권한 계약
-- 정확한 `suho-j.github.io/beginner-budget/`만 운영으로 판정하고 file·로컬·LAN·알 수 없는 호스트·잘못된 경로를 모두 preview로 닫는 전체 Supabase 테이블·RPC 라우팅
+- canonical origin `https://suho-j.github.io` + pathname `/beginner-budget/`만 운영으로 판정하고 HTTP·file·비표준 포트·origin 누락·로컬·LAN·알 수 없는 호스트·잘못된 경로를 모두 preview로 닫는 전체 Supabase 테이블·RPC 라우팅
 - 미리보기 SQL의 운영 SELECT/읽기 잠금 전용, 결정적 ID 매핑, 충돌 전체 rollback, 일회 marker·재실행 byte-for-byte 불변, RLS·권한·5인자 CAS 계약
 - 앱 쓰기 잠금, 로딩 실패, 충돌 안내, 로그아웃 후 메모리 제거
 

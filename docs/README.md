@@ -31,7 +31,7 @@ python -m http.server 8765 --bind 127.0.0.1
 
 예산 설정은 DB가 발급한 `updated_at` 버전을 비교합니다. JSON 가져오기·전체 초기화·샘플 교체는 현재 설정 버전과 전체 거래 목록을 함께 비교하는 5인자 RPC로 한 번에 처리합니다. 다른 브라우저에서 먼저 변경했다면 로컬 화면을 확정하지 않고 다시 불러오기를 요구합니다.
 
-정확한 운영 조합 `https://suho-j.github.io/beginner-budget/`만 `budget_settings`, `transactions`, `replace_budget_state`를 사용합니다. `file://`, 로컬호스트, LAN IP, 스테이징·커스텀 호스트, 잘못된 운영 경로를 포함한 그 외 모든 실행 환경은 fail-closed로 `preview_budget_settings`, `preview_transactions`, `replace_preview_budget_state`만 사용합니다.
+정확한 canonical origin `https://suho-j.github.io`와 pathname `/beginner-budget/`가 둘 다 일치할 때만 `budget_settings`, `transactions`, `replace_budget_state`를 사용합니다. HTTP, `file://`, 비표준 포트, origin 누락, 로컬호스트, LAN IP, 스테이징·커스텀 호스트, 잘못된 운영 경로를 포함한 그 외 모든 실행 환경은 fail-closed로 `preview_budget_settings`, `preview_transactions`, `replace_preview_budget_state`만 사용합니다.
 
 로그아웃하면 메모리에 있던 가계부 데이터와 필터를 비우고 모든 쓰기 동작을 잠급니다. 가계부 데이터는 `localStorage`에 저장하지 않습니다.
 

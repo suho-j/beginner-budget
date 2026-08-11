@@ -6,9 +6,9 @@
   const SUPABASE_ANON_KEY = 'sb_publishable_bx0mPHkBtNdbYF8GUn_4Fg_TLKDEY1j';
   const LOGIN_EMAIL = 'ho910728@naver.com';
   const runtimeLocation = window.location || {};
-  const runtimeHostname = String(runtimeLocation.hostname || '').toLowerCase();
+  const runtimeOrigin = String(runtimeLocation.origin || '').toLowerCase();
   const runtimePathname = String(runtimeLocation.pathname || '/');
-  const IS_PRODUCTION = runtimeHostname === 'suho-j.github.io'
+  const IS_PRODUCTION = runtimeOrigin === 'https://suho-j.github.io'
     && runtimePathname === '/beginner-budget/';
   const IS_PREVIEW = !IS_PRODUCTION;
   const SETTINGS_TABLE = IS_PREVIEW ? 'preview_budget_settings' : 'budget_settings';
