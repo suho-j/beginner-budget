@@ -392,7 +392,7 @@ h2[id], h3[id] { scroll-margin-top: 6.5rem; }
 .calendar-date { font-weight: 900; }
 .calendar-expense { color: var(--expense); font-size: 0.78rem; font-weight: 800; }
 .calendar-income { color: var(--income); font-size: 0.78rem; font-weight: 800; }
-.calendar-count { color: var(--muted); font-size: 0.75rem; }
+.calendar-count { color: #475467; font-size: 0.75rem; }
 dialog { width: min(680px, calc(100% - 2rem)); max-height: calc(100vh - 2rem); max-height: calc(100dvh - 2rem); overflow: auto; overscroll-behavior: contain; border: 0; border-radius: 18px; padding: 0; background: var(--panel); color: var(--text); box-shadow: 0 24px 80px rgb(15 23 42 / 0.3); }
 dialog::backdrop { background: rgb(15 23 42 / 0.58); }
 .dialog-form { padding: 1.25rem; }
@@ -405,7 +405,7 @@ dialog::backdrop { background: rgb(15 23 42 / 0.58); }
   .month-toolbar #selected-month-label { text-align: center; }
   .app-tabs { padding-left: 0.75rem; padding-right: 0.75rem; }
   .app-tabs [role="tab"] { padding-left: 0.35rem; padding-right: 0.35rem; }
-  #panel-calendar > .panel { padding: 0.25rem; }
+  .calendar-overview-panel { padding: 0.25rem; }
   .calendar-weekdays, .calendar-grid { gap: 0.1rem; }
   .calendar-day { min-width: 44px; min-height: 68px; padding: 0.3rem; }
   .calendar-expense, .calendar-income { font-size: 0.75rem; overflow-wrap: anywhere; }

@@ -353,7 +353,7 @@ function testAppMarkupProvidesTabsCalendarEditDialogAndPreviewWarning() {
     '<dialog id="edit-dialog"', 'id="edit-transaction-form"'
   ]) assert.ok(source.includes(required), `missing markup: ${required}`);
 
-  const stickyChromeMatches = [...source.matchAll(/<div\b(?=[^>]*\bclass="[^"]*\bapp-sticky-chrome\b[^"]*")(?=[^>]*\brole="region")(?=[^>]*\baria-label="개발 화면 안내와 주요 메뉴")[^>]*>[\s\S]*?<\/nav>\s*<\/div>/g)];
+  const stickyChromeMatches = [...source.matchAll(/<div\b(?=[^>]*\bclass="[^"]*\bapp-sticky-chrome\b[^"]*")(?=[^>]*\brole="region")(?=[^>]*\baria-label="가계부 상태와 주요 메뉴")[^>]*>[\s\S]*?<\/nav>\s*<\/div>/g)];
   assert.strictEqual(stickyChromeMatches.length, 1, 'preview warning and tabs need one named sticky region');
   assert.strictEqual((source.match(/\bapp-sticky-chrome\b/g) || []).length, 1, 'app-sticky-chrome must be unique');
   const stickyChrome = stickyChromeMatches[0][0];
@@ -395,6 +395,17 @@ function testAppMarkupProvidesTabsCalendarEditDialogAndPreviewWarning() {
   assert.strictEqual(calendar.name, 'div');
   assertAttribute(calendar, 'role', 'group');
   assertAttribute(calendar, 'aria-labelledby', 'calendar-title');
+
+  const calendarPanelByLabel = (label) => {
+    const match = source.match(new RegExp(`<section\\b[^>]*\\baria-labelledby="${label}"[^>]*>`, 'i'));
+    assert.ok(match, `missing calendar panel: ${label}`);
+    return match[0];
+  };
+  const overviewPanel = calendarPanelByLabel('calendar-title');
+  const detailPanel = calendarPanelByLabel('calendar-detail-title');
+  assert.match(overviewPanel, /\bclass="[^"]*\bcalendar-overview-panel\b[^"]*"/, 'only the calendar overview panel should be compact on mobile');
+  assert.doesNotMatch(detailPanel, /\bcalendar-overview-panel\b/, 'calendar details must retain normal panel padding');
+  assert.strictEqual((source.match(/\bcalendar-overview-panel\b/g) || []).length, 1, 'calendar-overview-panel must be unique');
 
   const listCount = startTagById('list-count');
   assertAttribute(listCount, 'role', 'status');
@@ -442,6 +453,24 @@ function testAppStylesCoverTabsCalendarDialogAndMobile() {
   assert.match(calendarSelected, /(?:^|;)\s*border-color\s*:\s*[^;]+;/);
   assert.doesNotMatch(calendarSelected, /(?:^|;)\s*outline\s*:/, 'selection must not replace the focus outline');
 
+  const calendarCount = declarations('.calendar-count');
+  const calendarCountColor = calendarCount.match(/(?:^|;)\s*color\s*:\s*#([0-9a-f]{6})\s*;/i);
+  assert.ok(calendarCountColor, '.calendar-count needs an explicit testable text color');
+  const relativeLuminance = (hex) => {
+    const channels = hex.match(/../g).map((part) => parseInt(part, 16) / 255).map((channel) => (
+      channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4
+    ));
+    return (0.2126 * channels[0]) + (0.7152 * channels[1]) + (0.0722 * channels[2]);
+  };
+  const contrastRatio = (foreground, background) => {
+    const lighter = Math.max(relativeLuminance(foreground), relativeLuminance(background));
+    const darker = Math.min(relativeLuminance(foreground), relativeLuminance(background));
+    return (lighter + 0.05) / (darker + 0.05);
+  };
+  for (const background of ['ffffff', 'eef2ff']) {
+    assert.ok(contrastRatio(calendarCountColor[1], background) >= 4.5, `.calendar-count needs 4.5:1 contrast on #${background}`);
+  }
+
   const dialog = declarations('dialog');
   assert.match(dialog, /max-height\s*:\s*calc\(100vh - 2rem\)\s*;[\s\S]*max-height\s*:\s*calc\(100dvh - 2rem\)\s*;/);
   assert.match(dialog, /(?:^|;)\s*overscroll-behavior\s*:\s*contain\s*;/);
@@ -450,7 +479,8 @@ function testAppStylesCoverTabsCalendarDialogAndMobile() {
   const mobileMarkerIndex = source.indexOf(mobileMarker);
   assert.ok(mobileMarkerIndex >= 0, `missing style: ${mobileMarker}`);
   const mobile = source.slice(source.indexOf('{', mobileMarkerIndex) + 1);
-  assert.match(declarations('#panel-calendar > .panel', mobile), /(?:^|;)\s*padding\s*:\s*0\.25rem\s*;/);
+  assert.match(declarations('.calendar-overview-panel', mobile), /(?:^|;)\s*padding\s*:\s*0\.25rem\s*;/);
+  assert.doesNotMatch(mobile, /#panel-calendar\s*>\s*\.panel\s*\{[^}]*\bpadding\s*:/, 'calendar details must not inherit compact mobile padding');
   assert.match(declarations('.calendar-weekdays, .calendar-grid', mobile), /(?:^|;)\s*gap\s*:\s*0\.1rem\s*;/);
   const mobileDay = declarations('.calendar-day', mobile);
   assert.match(mobileDay, /(?:^|;)\s*min-width\s*:\s*44px\s*;/);
