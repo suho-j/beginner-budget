@@ -31,7 +31,7 @@
 - 충돌이나 네트워크 오류 때 로컬 상태를 확정하지 않고 클라우드 다시 불러오기를 안내한다.
 - 거래 ID를 안전한 ASCII 형식으로 제한하고, 비표준 ID를 `old_id`에서 `'tx-migrated-' || md5(user_id::text || ':' || id)`로 결정적으로 바꾸는 적용 전 매핑·보정·제약 SQL을 추가했다.
 - 정확한 `suho-j.github.io/beginner-budget/`만 운영으로 라우팅하고, `file://`·로컬·LAN IP·알 수 없는 호스트·잘못된 경로는 모두 fail-closed로 preview 테이블·RPC를 사용한다.
-- `docs/supabase-preview-setup.sql`은 `REPEATABLE READ`와 운영·preview 잠금, DB 충돌 guard, 두 복사, canonical 양방향 비교, `production_snapshot_v1` marker를 한 트랜잭션으로 실행한다. marker 이후 재실행은 seed를 건너뛰어 preview 편집·삭제·추가를 보존한다.
+- `docs/supabase-preview-setup.sql`은 `READ COMMITTED`에서 최신 marker를 확인한 뒤 운영·preview 모두 transactions→settings 순으로 잠그고, DB 충돌 guard, 두 복사, canonical 양방향 비교, `production_snapshot_v1` marker를 한 트랜잭션으로 실행한다. marker 이후 재실행은 seed를 건너뛰어 preview 편집·삭제·추가를 보존한다.
 - preview 전용 RLS·authenticated 최소 권한·단조 설정 버전 트리거·5인자 전체 상태 CAS를 추가했다.
 
 ### 접근성·모바일
@@ -89,7 +89,7 @@
 
 ### 최초 seed와 최종 운영 승격 하드 게이트
 
-최초 미리보기 seed는 구 운영 writer의 다중 요청 중간 상태를 복사하지 않도록 **짧은 운영 쓰기 중단 창**에서만 수행한다. 모든 운영 탭과 쓰기를 멈춘 뒤 `REPEATABLE READ` seed와 canonical settings·canonical transactions 전체 행/값 양방향 비교를 끝내고, 그 뒤에만 운영 쓰기를 재개한다. marker 삭제를 통한 명시적 reseed는 별도 검토 절차 없이 실행하지 않는다.
+최초 미리보기 seed는 writer의 다중 요청 중간 상태를 복사하지 않도록 **짧은 운영 쓰기 중단 창**에서만 수행한다. 운영·미리보기·로컬 로그인 탭을 모두 닫고 API를 포함한 모든 쓰기를 중단한 뒤 `READ COMMITTED` seed와 canonical settings·canonical transactions 전체 행/값 양방향 비교를 끝낸다. 그 뒤에만 세 환경의 쓰기를 재개하며, marker 삭제를 통한 명시적 reseed는 별도 검토 절차 없이 실행하지 않는다.
 
 사용자가 특정 URL을 승인한 뒤에는 이 짧은 seed 창과 별도로, 운영 SQL 적용 직전에 단일 배타적 쓰기 창을 연다. 모든 기기의 구버전 운영 탭을 닫고 창 안에서 기준 백업, 사용자별 행 수, 결정적 ID 매핑, 매핑 간·기존 ID 충돌 감사를 authoritative 자료로 확정한다. 운영 SQL과 사용자가 선택한 정확한 안전 소스 SHA를 승격하고 운영 URL의 새 다운로드·인증 스모크·QA 정리를 끝낼 때까지 창을 유지한다.
 

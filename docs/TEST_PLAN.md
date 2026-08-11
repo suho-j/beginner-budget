@@ -61,16 +61,16 @@ git diff --check origin/master..HEAD
 
 ## 미리보기 격리 SQL 게이트
 
-미리보기와 로컬 앱은 `preview_budget_settings`, `preview_transactions`, `replace_preview_budget_state`만 사용합니다. 단, 구 운영 writer는 설정과 거래를 여러 요청으로 저장할 수 있어 DB 잠금만으로 요청 중간 상태 복사를 막을 수 없습니다. 따라서 **최초 seed에만 별도의 짧은 운영 쓰기 중단 창**을 적용합니다.
+미리보기와 로컬 앱은 `preview_budget_settings`, `preview_transactions`, `replace_preview_budget_state`만 사용합니다. 단, writer가 설정과 거래를 여러 요청으로 저장할 수 있어 DB 잠금만으로 요청 중간 상태 복사를 막을 수 없습니다. 따라서 **최초 seed에만 별도의 짧은 운영 쓰기 중단 창**을 적용하고, preview/local이 아직 공개되지 않았더라도 자립적 안전성을 위해 세 환경의 writer를 모두 중단합니다.
 
-1. 최초 seed 시작 전 모든 운영 탭을 닫고, API를 포함한 모든 운영 쓰기를 중단해 **짧은 운영 쓰기 중단 창**을 연다.
+1. 최초 seed 시작 전 운영·미리보기·로컬 로그인 탭의 쓰기를 중단하고 모든 탭을 닫는다. API를 포함한 세 환경의 모든 writer도 멈춘 뒤 **짧은 운영 쓰기 중단 창**을 연다.
 2. 창 안에서 운영 `budget_settings`, `transactions`를 읽기 전용 기준본으로 백업하고 사용자별 행 수를 기록한다.
 3. 결정적 ID 매핑, 후보 간 충돌, 기존 preview 행 충돌 사전 조회를 저장한다. 이 조회는 작업자 검토용이며, SQL 내부 DB guard가 실제 안전 게이트다.
-4. `docs/supabase-preview-setup.sql` 전체를 한 번에 적용한다. seed는 `REPEATABLE READ` 트랜잭션에서 운영 두 테이블과 preview 두 테이블을 잠그고, 후보·기존 행 충돌 guard, settings insert, transactions insert, canonical 양방향 비교, `production_snapshot_v1` marker 기록을 한 트랜잭션으로 완료한다. 충돌이나 비교 실패는 예외를 발생시켜 두 insert와 marker를 모두 rollback한다.
+4. `docs/supabase-preview-setup.sql` 전체를 한 번에 적용한다. seed는 `READ COMMITTED` 트랜잭션에서 metadata 잠금 후 최신 marker를 확인하고, 운영·preview 모두 transactions 테이블을 settings 테이블보다 먼저 잠가 RPC와의 lock cycle을 막는다. 잠금 후 최신 스냅샷에서 후보·기존 행 충돌 guard, settings insert, transactions insert, canonical 양방향 비교, `production_snapshot_v1` marker 기록을 한 트랜잭션으로 완료한다. 충돌이나 비교 실패는 예외를 발생시켜 두 insert와 marker를 모두 rollback한다.
 5. preview 두 테이블, canonical ID 제약, RLS 정책, authenticated 최소 DML 권한, 단조 `updated_at` 트리거, 5인자 `replace_preview_budget_state`, preview sample RPC 오버로드 제거를 확인한다.
 6. 창을 유지한 채 SQL 파일의 **canonical settings** 전체 행/값 비교를 실행한다. DB 소유 버전인 preview `updated_at`은 제외하고 `user_id`, `monthly_budget`, `category_budgets`를 양방향 EXCEPT로 비교하며 결과는 0건이어야 한다.
 7. SQL 파일의 **canonical transactions** 전체 행/값 비교를 실행한다. 운영 ID를 같은 규칙으로 매핑한 뒤 `id`, `user_id`, `date`, `type`, `category`, `amount`, `memo`, `source`, `created_at`을 **양방향 EXCEPT**로 비교하며 결과는 0건이어야 한다.
-8. `preview_seed_metadata` 행의 source count와 백업 행 수를 대조하고, 운영 두 테이블의 행·값이 기준본과 같은지 확인한다. **seed와 canonical 전체 비교 완료 후에만 운영 쓰기 재개**를 허용한다.
+8. `preview_seed_metadata` 행의 source count와 백업 행 수를 대조하고, 운영 두 테이블의 행·값이 기준본과 같은지 확인한다. **seed와 canonical 전체 비교 완료 후에만 운영·preview·local 쓰기 재개**를 허용한다.
 9. 운영 쓰기 재개 후 같은 스냅샷 저장은 성공하고 오래된 설정 버전·거래 스냅샷은 `40001`로 거부되는지 인증 상태에서 확인한다.
 
 canonical settings 비교와 canonical transactions 비교는 `docs/supabase-preview-setup.sql`의 `production_minus_preview`, `preview_minus_production` 양방향 EXCEPT 조회를 그대로 재실행합니다. 두 조회의 최종 `differences`가 모두 0건인 결과를 시간과 함께 보존합니다. 행 수만 비교하면 값 차이를 놓칠 수 있으므로 전체 컬럼 비교를 생략하지 않습니다.

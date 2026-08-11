@@ -2285,7 +2285,7 @@ function testPreviewSeedIsGuardedAtomicAndSkippedForeverAfterMarker() {
   const seedEnd = source.indexOf('-- Atomically replace one authenticated user', seedStart);
   assert.ok(seedStart >= 0 && seedEnd > seedStart);
   const seed = source.slice(seedStart, seedEnd).toLowerCase();
-  const begin = seed.indexOf('begin isolation level repeatable read');
+  const begin = seed.indexOf('begin isolation level read committed');
   const metadataLock = seed.indexOf('lock table public.preview_seed_metadata in share row exclusive mode');
   const markerCheck = seed.indexOf("seed_key = 'production_snapshot_v1'");
   const skipReturn = seed.indexOf('return;', markerCheck);
@@ -2304,12 +2304,13 @@ function testPreviewSeedIsGuardedAtomicAndSkippedForeverAfterMarker() {
   const commit = seed.lastIndexOf('commit;');
 
   assert.ok(begin >= 0 && begin < metadataLock);
+  assert.doesNotMatch(seed, /repeatable read/, 'marker check must not freeze a stale snapshot before data locks');
   assert.ok(metadataLock < markerCheck && markerCheck < skipReturn);
-  assert.ok(skipReturn < productionSettingsLock, 'completed marker must skip all source and preview data work');
-  assert.ok(productionSettingsLock < productionTransactionsLock);
-  assert.ok(productionTransactionsLock < previewSettingsLock);
-  assert.ok(previewSettingsLock < previewTransactionsLock);
-  assert.ok(previewTransactionsLock < candidateGuard);
+  assert.ok(skipReturn < productionTransactionsLock, 'completed marker must skip all source and preview data work');
+  assert.ok(productionTransactionsLock < previewTransactionsLock, 'all transaction tables must lock first');
+  assert.ok(previewTransactionsLock < productionSettingsLock, 'settings locks must follow transaction locks');
+  assert.ok(productionSettingsLock < previewSettingsLock);
+  assert.ok(previewSettingsLock < candidateGuard);
   assert.ok(candidateGuard < settingsConflictGuard && settingsConflictGuard < transactionsConflictGuard);
   assert.ok(transactionsConflictGuard < settingsInsert, 'all collision guards must run before the first seed mutation');
   assert.ok(settingsInsert < transactionsInsert);
@@ -2334,14 +2335,19 @@ function testPreviewSeedRunbookRequiresShortWriteFreeGateAndCanonicalComparison(
 
   for (const [name, source] of [['README', readme], ['TEST_PLAN', plan], ['IMPROVEMENT_LOG', log], ['checklist', checklist]]) {
     assert.match(source, /짧은 운영 쓰기 중단 창/, `${name} must name the first-seed gate`);
+    assert.match(
+      source,
+      /운영·미리보기·로컬 로그인 탭[\s\S]{0,40}쓰기를 중단/,
+      `${name} must pause every authenticated writer during the first seed`
+    );
   }
-  assert.match(plan, /모든 운영 탭[\s\S]*운영 쓰기[\s\S]*중단/i);
-  assert.match(plan, /REPEATABLE READ/);
+  assert.match(plan, /API[\s\S]{0,40}세 환경[\s\S]{0,40}모든 writer[\s\S]{0,20}멈춘/i);
+  assert.match(plan, /READ COMMITTED/);
   assert.match(plan, /production_snapshot_v1/);
   assert.match(plan, /canonical settings[\s\S]*canonical transactions/i);
   assert.match(plan, /양방향 EXCEPT/i);
-  assert.match(plan, /비교 완료[\s\S]*운영 쓰기 재개/i);
-  assert.match(checklist, /seed와 canonical 전체 비교가 끝난 뒤 운영 쓰기를 재개/i);
+  assert.match(plan, /비교 완료[\s\S]{0,100}운영·preview·local 쓰기 재개/i);
+  assert.match(checklist, /seed와 canonical 전체 비교가 끝난 뒤 운영·preview·local 쓰기를 재개/i);
   assert.match(readme, /명시적 reseed[\s\S]*별도 검토 절차/i);
 }
 

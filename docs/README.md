@@ -44,10 +44,10 @@ python -m http.server 8765 --bind 127.0.0.1
 - 설정 버전과 전체 거래 스냅샷을 비교하는 5인자 `replace_preview_budget_state` 생성
 - 운영 데이터를 읽어 미리보기 테이블로 한 번만 복사
 - 비표준 운영 거래 ID를 `'tx-migrated-' || md5(user_id::text || ':' || id)`로 결정적으로 매핑
-- `REPEATABLE READ` 트랜잭션에서 운영·미리보기 잠금, DB 충돌 guard, 두 복사, canonical 양방향 비교를 통과한 뒤 `production_snapshot_v1` 완료 marker를 같은 트랜잭션에 기록
+- `READ COMMITTED` 트랜잭션에서 marker를 최신으로 확인하고 운영·미리보기의 transactions→settings 순으로 잠그며, DB 충돌 guard, 두 복사, canonical 양방향 비교를 통과한 뒤 `production_snapshot_v1` 완료 marker를 같은 트랜잭션에 기록
 - marker가 있는 재실행은 seed 전체를 건너뛰어 운영 변경과 미리보기 수정·삭제·추가를 그대로 보존
 
-최초 seed 직전에는 **짧은 운영 쓰기 중단 창**을 열어 모든 운영 탭과 쓰기를 멈춥니다. SQL 내부의 충돌 guard와 canonical settings·canonical transactions 전체 행/값 양방향 비교가 모두 성공한 후에만 운영 쓰기를 재개합니다. 운영 `budget_settings`, `transactions`는 `SELECT`와 읽기 일관성을 위한 `LOCK`의 원본일 뿐이며 update·delete·alter 대상이 아닙니다. **명시적 reseed는 marker를 임의로 지우지 말고 별도 검토 절차로만 수행**합니다.
+최초 seed 직전에는 **짧은 운영 쓰기 중단 창**을 열어 운영·미리보기·로컬 로그인 탭을 모두 닫고 API를 포함한 모든 쓰기를 중단합니다. SQL 내부의 충돌 guard와 canonical settings·canonical transactions 전체 행/값 양방향 비교가 모두 성공한 후에만 세 환경의 쓰기를 재개합니다. 운영 `budget_settings`, `transactions`는 `SELECT`와 읽기 일관성을 위한 `LOCK`의 원본일 뿐이며 update·delete·alter 대상이 아닙니다. **명시적 reseed는 marker를 임의로 지우지 말고 별도 검토 절차로만 수행**합니다.
 
 2026-08-12 현재 이 미리보기 SQL은 저장소에만 있고 Supabase에는 적용하지 않았습니다. 따라서 실제 인증 다운로드·저장, 공개 미리보기 런타임 검증도 아직 대기 상태입니다.
 

@@ -206,9 +206,12 @@ order by candidate.preview_id;
 -- Atomic one-time production snapshot.
 -- Production changes and preview edits, deletions, or additions remain byte-for-byte unchanged on rerun.
 -- Explicit reseed requires a separate reviewed procedure; never remove the marker in this setup file.
--- First application only: pause every production writer before running this file, and resume
--- only after the canonical settings and transaction comparisons have been independently verified.
-begin isolation level repeatable read;
+-- First application only: pause every production, preview, and local authenticated writer
+-- before running this file, and resume only after the canonical settings and transaction
+-- comparisons have been independently verified.
+-- READ COMMITTED lets a waiter see a marker committed by the preceding seed.
+-- After the data locks below, every guard, insert, and comparison reads locked current data.
+begin isolation level read committed;
 
 lock table public.preview_seed_metadata in share row exclusive mode;
 
@@ -225,10 +228,11 @@ begin
     return;
   end if;
 
-  lock table public.budget_settings in share mode;
+  -- Lock transaction tables before settings tables to avoid a cycle with whole-state writers.
   lock table public.transactions in share mode;
-  lock table public.preview_budget_settings in share row exclusive mode;
   lock table public.preview_transactions in share row exclusive mode;
+  lock table public.budget_settings in share mode;
+  lock table public.preview_budget_settings in share row exclusive mode;
 
   if exists (
     with production_candidates as (

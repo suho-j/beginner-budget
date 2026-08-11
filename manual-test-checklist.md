@@ -5,13 +5,13 @@
 ## 미리보기 격리 준비
 
 - [ ] `docs/supabase-preview-setup.sql`이 운영 테이블·함수·정책을 update·delete·alter하지 않는지 확인했다.
-- [ ] 최초 seed 직전 **짧은 운영 쓰기 중단 창**을 열고 모든 운영 탭을 닫아 모든 운영 쓰기를 중단했다.
+- [ ] 최초 seed 직전 **짧은 운영 쓰기 중단 창**을 열고 운영·미리보기·로컬 로그인 탭을 모두 닫아 API를 포함한 모든 쓰기를 중단했다.
 - [ ] 창 안에서 운영 `budget_settings`, `transactions`를 백업하고 사용자별 행 수를 읽기 전용 기준으로 기록했다.
 - [ ] 비표준 ID의 결정적 매핑과 후보 간·기존 preview 행 충돌 감사를 실행했고 충돌이 0건이다.
-- [ ] preview SQL을 적용하고 `REPEATABLE READ`, 운영·preview 잠금, DB 충돌 guard, 두 seed insert, `production_snapshot_v1` marker가 한 트랜잭션인지 확인했다.
+- [ ] preview SQL을 적용하고 `READ COMMITTED`, metadata 잠금 후 최신 marker 확인, 운영·preview transactions→settings 잠금, DB 충돌 guard, 두 seed insert, `production_snapshot_v1` marker가 한 트랜잭션인지 확인했다.
 - [ ] preview 두 테이블·RLS·최소 권한·단조 트리거·5인자 CAS·sample RPC 제거를 확인했다.
 - [ ] canonical settings와 canonical transactions의 전체 행·값을 양방향 `EXCEPT`로 대조했고 차이가 0건이며 운영 두 테이블은 바뀌지 않았다.
-- [ ] seed와 canonical 전체 비교가 끝난 뒤 운영 쓰기를 재개했다.
+- [ ] seed와 canonical 전체 비교가 끝난 뒤 운영·preview·local 쓰기를 재개했다.
 - [ ] marker 생성 후 운영 변경과 preview 수정·삭제·추가를 만든 뒤 SQL을 재실행해도 preview 행·값이 byte-for-byte 불변이다.
 - [ ] 명시적 reseed는 marker를 지우지 않고 별도 검토 절차로만 수행한다.
 - [ ] 미리보기에서 원래 선택 월의 총예산과 네 카테고리 예산을 기록했다.
