@@ -2,7 +2,7 @@
 
 ## 현재 검증 상태
 
-- 2026-08-12 자동 검증: JavaScript 문법 검사 통과, `60 tests passed`, `git diff --check` 통과
+- 2026-08-12 자동 검증 (`eaad4ba` 앱·SQL 소스): JavaScript 문법 검사 통과, `60 tests passed`, 커밋 범위와 작업 트리 diff check 통과
 - 로컬 비로그인 브라우저 스모크: 통과 (`http://127.0.0.1:8765/`)
 - 운영 Supabase SQL 적용: 대기
 - 인증 저장 브라우저 스모크: 대기 (사용 가능한 로그인 세션·비밀번호 없음)
@@ -23,6 +23,7 @@ node --check js/app.js
 node --check tests/run-tests.cjs
 node tests/run-tests.cjs
 git diff --check
+git diff --check origin/master..HEAD
 ```
 
 주요 범위:
@@ -54,50 +55,109 @@ git diff --check
 
 로그인 세션이나 비밀번호를 사용하지 않았으므로 클라우드 다운로드, 거래 추가·수정·삭제, 예산 저장·복원은 검증하지 않았습니다. SQL 런타임과 공개 미리보기 스모크도 아직 대기 상태이며, 이 검증에서 운영 데이터는 변경하지 않았습니다.
 
+## 단일 배타적 쓰기 창
+
+공유 운영 DB를 사용할 때는 배타적 쓰기 창을 한 번만 열고 중간에 해제하지 않습니다.
+
+- 시작: 읽기 전용 백업·감사·충돌 검사를 마친 뒤, 운영 Supabase에 SQL을 적용하기 **직전**
+- 유지: SQL 적용, DB 런타임 검증, 미리보기 배포·검수, 사용자가 선택한 정확한 안전 소스 SHA의 운영 승격 전체 기간
+- 종료: 승격된 운영 URL을 새로 열어 클라우드 데이터를 다시 다운로드하고 인증 스모크·QA 정리를 모두 완료한 뒤
+
+창이 열려 있는 동안 모든 기기의 구버전 운영 탭을 닫고 운영 URL의 모든 쓰기를 금지합니다. 공유 DB 쓰기는 마이그레이션과 검증된 후보 소스의 통제된 QA에만 허용합니다. 이 상태를 운영 승격과 운영 URL 최종 스모크까지 계속 보장할 수 없다면 공유 운영 DB에는 SQL을 적용하거나 미리보기를 연결하지 않고 격리 Supabase만 사용합니다.
+
 ## 운영 Supabase SQL 선행 게이트
 
 `docs/supabase-setup.sql` 변경은 저장소에만 있으며 2026-08-12 현재 운영 DB에는 적용하지 않았습니다. 공유 운영 데이터 미리보기 전에 다음을 모두 완료합니다.
 
-1. `budget_settings`, `transactions` 전체를 복구 가능한 형식으로 백업하고 사용자별 행 수를 기록한다.
-2. 아래 감사 쿼리로 비표준 ID와 중복·행 수를 기록한다.
+1. `budget_settings`, `transactions` 전체를 복구 가능한 형식으로 백업한다.
+2. 아래 사용자별 행 수를 각각 CSV로 저장한다. SQL 적용 후 같은 쿼리를 다시 실행해 사용자별로 대조한다.
 
    ```sql
-   select count(*) as transaction_count from public.transactions;
-   select id from public.transactions where id !~ '^[A-Za-z0-9._:-]+$';
-   select id, count(*) from public.transactions group by id having count(*) > 1;
+   select user_id, count(*) as settings_count
+   from public.budget_settings
+   group by user_id
+   order by user_id;
+
+   select user_id, count(*) as transaction_count
+   from public.transactions
+   group by user_id
+   order by user_id;
    ```
 
-3. Supabase SQL Editor에서 `docs/supabase-setup.sql`을 적용한다.
-4. 적용 전후 거래 행 수가 같고, 비표준 ID가 0건인지 확인한다. 보정된 ID가 있다면 이전 ID와 새 ID의 대응 기록을 보관한다.
-5. `transactions_id_canonical` 제약 조건과 `set_budget_settings_updated_at` 트리거가 활성화됐는지 확인한다.
-6. 5개 인자를 받는 `replace_budget_state`만 존재하고, 3개 인자 구버전과 `replace_budget_samples` 오버로드가 제거됐는지 확인한다.
-7. `replace_budget_state`가 `authenticated`에만 실행 허용되고 `anon`에는 허용되지 않았는지 확인한다.
-8. 격리 환경 또는 별도 테스트 계정에서 정상 전체 교체가 한 번에 완료되고, 오래된 설정 버전이나 거래 스냅샷은 `40001` 충돌로 거부되는지 확인한다.
-9. 설정을 연속 저장했을 때 `updated_at`이 매번 증가하는지 확인하고, 마지막으로 백업과 현재 행 수를 다시 대조한다.
+3. 비표준 거래 ID의 **적용 전 결정적 매핑**을 아래 쿼리로 내보내 CSV를 보관한다. 설정 SQL의 update도 정확히 같은 식을 사용한다.
+
+   ```sql
+   select
+     user_id,
+     id AS old_id,
+     'tx-migrated-' || md5(user_id::text || ':' || id) AS new_id
+   from public.transactions
+   where id !~ '^[A-Za-z0-9._:-]+$'
+   order by user_id, id;
+   ```
+
+4. SQL 적용 전에 매핑끼리 같은 `new_id`를 만드는 경우와 기존 행 ID에 부딪히는 경우를 모두 감사한다. 두 결과가 0건이어야 하며 결과도 CSV로 보관한다.
+
+   ```sql
+   with id_mapping as (
+     select
+       user_id,
+       id AS old_id,
+       'tx-migrated-' || md5(user_id::text || ':' || id) AS new_id
+     from public.transactions
+     where id !~ '^[A-Za-z0-9._:-]+$'
+   )
+   select new_id, count(*) as mapped_count
+   from id_mapping
+   group by new_id
+   having count(*) > 1;
+
+   with id_mapping as (
+     select
+       user_id,
+       id AS old_id,
+       'tx-migrated-' || md5(user_id::text || ':' || id) AS new_id
+     from public.transactions
+     where id !~ '^[A-Za-z0-9._:-]+$'
+   )
+   select m.user_id, m.old_id, m.new_id, t.user_id as existing_user_id
+   from id_mapping m
+   join public.transactions t on t.id = m.new_id;
+   ```
+
+5. 1~4단계의 읽기 전용 준비가 끝나면 단일 배타적 쓰기 창을 열고 Supabase SQL Editor에서 `docs/supabase-setup.sql`을 적용한다.
+6. 사용자별 `budget_settings`와 `transactions` 행 수가 적용 전 CSV와 모두 같고, 비표준 ID가 0건인지 확인한다. 매핑 결과는 3단계 CSV와 정확히 일치해야 한다.
+7. `transactions_id_canonical` 제약 조건과 `set_budget_settings_updated_at` 트리거가 활성화됐는지 확인한다.
+8. 5개 인자를 받는 `replace_budget_state`만 존재하고, 3개 인자 구버전과 `replace_budget_samples` 오버로드가 제거됐는지 확인한다.
+9. `replace_budget_state`가 `authenticated`에만 실행 허용되고 `anon`에는 허용되지 않았는지 확인한다.
+10. 격리 환경 또는 별도 테스트 계정에서 정상 전체 교체가 한 번에 완료되고, 오래된 설정 버전이나 거래 스냅샷은 `40001` 충돌로 거부되는지 확인한다.
+11. 설정을 연속 저장했을 때 `updated_at`이 매번 증가하는지 확인하고, 백업·매핑 CSV·사용자별 행 수를 다시 대조한다.
 
 실패가 하나라도 있으면 공유 운영 데이터 미리보기를 중단하고 백업을 보존합니다. 가장 안전한 선택은 별도 Supabase 프로젝트에서 먼저 같은 절차를 수행하는 것입니다.
 
 ## 공유 운영 데이터 미리보기 하드 게이트
 
-기존 운영 버전은 저장 시 오래된 전체 상태를 비원자적으로 쓸 수 있습니다. 따라서 공유 운영 데이터로 새 미리보기를 검증하는 동안에는 다음 조건을 강제합니다.
+기존 운영 버전은 저장 시 오래된 전체 상태를 비원자적으로 쓸 수 있습니다. 따라서 위 단일 배타적 쓰기 창이 열려 있는 동안 다음 조건을 강제합니다.
 
-- 모든 기기에서 기존 운영 사이트 탭을 닫는다.
-- 운영 URL에서 거래·예산·샘플·가져오기·초기화 저장을 하지 않는다.
-- 다른 사용자가 동시에 운영 화면을 쓰고 있지 않은 시간에만 검증한다.
-- 조건을 보장할 수 없으면 공유 운영 DB를 쓰지 않고 격리 Supabase로 검증한다.
+- 모든 기기에서 기존 운영 사이트 탭을 닫고 다시 열지 않는다.
+- 운영 URL에서 거래·예산·샘플·가져오기·초기화를 포함한 모든 쓰기를 금지한다.
+- 검증된 후보 소스의 통제된 QA 외에는 공유 DB를 변경하지 않는다.
+- 사용자가 선택한 정확한 안전 소스 SHA를 운영에 승격하고 운영 URL의 새 다운로드·인증 스모크가 끝날 때까지 창을 닫지 않는다.
+- 전체 기간을 보장할 수 없으면 공유 운영 DB를 쓰지 않고 격리 Supabase에서만 검증한다.
 
 ## 미리보기 운영 데이터 안전 절차
 
 1. 시작 직전 앱의 JSON 내보내기와 Supabase 테이블 백업을 모두 받아 시각·행 수·선택 예산 월을 기록한다.
 2. 선택 월의 총예산과 네 카테고리 예산을 별도 메모에 스냅샷으로 남긴다.
-3. QA 메모는 `$qaMemo = 'QA-V1-' + (Get-Date -Format 'yyyyMMdd-HHmmss')`로 만들며 `QA-V1-<timestamp>` 형식을 사용한다. 예: `QA-V1-20260812-153045`.
-4. QA 거래 한 건을 쉼표 금액으로 추가하고 같은 ID를 수정한다. 날짜·카테고리·금액·메모를 바꾸되 ID는 유지한다.
+3. 변경하지 않을 QA 접두사는 `$qaMarker = 'QA-V1-' + (Get-Date -Format 'yyyyMMdd-HHmmss')`로 만든다. 예: `QA-V1-20260812-153045`. 최초 메모는 `<marker>-추가`, 수정 메모는 `<marker>-수정`처럼 항상 같은 접두사를 유지한다.
+4. QA 거래 한 건을 쉼표 금액으로 추가한 즉시 생성된 거래 ID를 기록한다. 같은 ID의 날짜·카테고리·금액·메모를 수정하되 ID와 QA 접두사는 바꾸지 않는다.
 5. 내역 탭에서 수정한 카테고리를 선택해 정확히 한 건이 보이는지 확인한다.
 6. 캘린더에서 수정한 날짜의 합계·건수와 상세 거래를 확인한다.
-7. 같은 QA 거래를 삭제하고 내역·캘린더·Supabase에서 해당 ID와 메모가 0건인지 확인한다. DB에서는 `select count(*) from public.transactions where memo = '<QA 메모>';` 결과가 0이어야 한다.
-8. 예산 저장을 검증했다면 즉시 2단계의 총예산과 카테고리 예산으로 복원한다. 충돌 메시지가 나오면 재시도하지 말고 클라우드를 다시 불러온 뒤 현재 값을 대조한다.
-9. 마지막으로 클라우드 데이터를 다시 다운로드하고 모든 월에서 QA 메모가 0건이며 예산이 원래 값과 일치하는지 확인한다.
-10. 검증 로그에 시작·종료 시각, QA ID·메모, 원복 값, 콘솔 오류 수를 남긴다.
+7. 같은 QA 거래를 삭제하고 브라우저에서 최종 클라우드 다운로드 후 JSON 내보내기를 새로 받는다. 모든 월의 거래를 대상으로 기록한 ID 또는 QA 접두사가 남아 있지 않아야 한다.
+8. DB에서도 `select count(*) from public.transactions where id = '<QA ID>' or memo like '<marker>%';` 결과가 0인지 확인한다.
+9. 예산 저장을 검증했다면 즉시 2단계의 총예산과 카테고리 예산으로 복원한다. 충돌 메시지가 나오면 재시도하지 말고 클라우드를 다시 불러온 뒤 현재 값을 대조한다.
+10. 마지막으로 클라우드 데이터를 다시 다운로드하고 브라우저·DB 모두에서 QA ID와 접두사가 0건이며 예산이 원래 값과 일치하는지 확인한다.
+11. 검증 로그에 시작·종료 시각, 불변 QA 접두사, QA ID, 원복 값, 콘솔 오류 수를 남긴다.
 
 공유 운영 데이터 스모크에서는 **JSON 가져오기와 전체 초기화를 절대 실행하지 않습니다.** 샘플 데이터도 전체 상태를 바꾸므로 브라우저 스모크 대상에서 제외합니다. 백업은 복구용이며 스모크 중 다시 가져오지 않습니다.
 
@@ -110,9 +170,9 @@ git diff --check
 -> 로그인
 -> 클라우드 다운로드
 -> 이전 달 / 다음 달 / 이번 달
--> 홈에서 QA 거래 추가(쉼표 금액)
+-> 홈에서 <marker>-추가 거래 추가(쉼표 금액) 후 QA ID 즉시 기록
 -> 내역에서 유형 + 검색어 + 카테고리 필터
--> 같은 QA 거래 수정(다른 예산 월 이동 안내 포함)
+-> 같은 QA ID 거래를 <marker>-수정 메모로 수정(다른 예산 월 이동 안내 포함)
 -> 캘린더에서 수정 날짜와 상세 확인
 -> QA 거래 삭제
 -> 설정 예산 저장 후 원래 값 복원
@@ -125,7 +185,7 @@ git diff --check
 - 다른 브라우저 충돌은 명확한 메시지를 보이고 클라우드 다시 불러오기를 요구한다.
 - 로그아웃하면 금액·거래·필터가 화면에서 제거되고 쓰기 버튼이 잠긴다.
 - 콘솔 오류가 0건이다.
-- 종료 후 QA 거래 0건, 예산 원상 복원 상태다.
+- 종료 후 브라우저 전체 월과 DB에서 QA ID 또는 불변 접두사가 0건이고 예산이 원상 복원됐다.
 
 ## 키보드·스크린리더·360px 스모크
 
@@ -141,4 +201,4 @@ git diff --check
 
 V1 목표 주소는 `https://suho-j.github.io/beginner-budget-preview/v1/`입니다. 배포 폴더의 매니페스트에서 원본 저장소, `guardian/budget-preview-v1` 브랜치, 검증된 소스 SHA를 확인합니다. HTTP 200 뒤 위 브라우저 스모크를 다시 수행합니다.
 
-사용자 승인 전에는 운영 `master`를 변경하지 않습니다. 승인된 URL의 매니페스트가 가리키는 정확한 소스 SHA만 fast-forward 승격하며, 운영 URL에서 경고가 숨겨지는지 포함해 같은 스모크를 다시 실행합니다.
+사용자 승인 전에는 운영 `master`를 변경하지 않습니다. 승인된 URL의 매니페스트가 가리키는 정확한 안전 소스 SHA만 fast-forward 승격합니다. 승격 뒤 운영 URL을 새로 열어 클라우드 데이터를 다시 다운로드하고 인증 스모크·QA 0건·예산 원복·경고 숨김까지 확인한 뒤에만 단일 배타적 쓰기 창을 닫습니다.
