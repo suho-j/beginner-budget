@@ -197,6 +197,7 @@
   }
 
   function summarizeTransactionsByDate(transactions, month, monthStartDay = 1) {
+    if (!window.BudgetStorage.isValidMonthString(month)) return {};
     const rows = filterTransactions(transactions, {
       month,
       monthStartDay,

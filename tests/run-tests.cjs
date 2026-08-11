@@ -384,6 +384,8 @@ function testSummarizeTransactionsByDateHonorsBudgetPeriod() {
     { id: 'c', date: '2026-06-24', type: 'expense', category: '배달비', amount: 2000, memo: '' },
     { id: 'd', date: '2026-06-25', type: 'expense', category: '생활비', amount: 9000, memo: '' }
   ];
+  assert.strictEqual(JSON.stringify(win.BudgetTransactions.summarizeTransactionsByDate(transactions, '', 25)), '{}');
+  assert.strictEqual(JSON.stringify(win.BudgetTransactions.summarizeTransactionsByDate(transactions, '2026-13', 25)), '{}');
   const byDate = win.BudgetTransactions.summarizeTransactionsByDate(transactions, '2026-05', 25);
   assert.strictEqual(JSON.stringify(Object.keys(byDate)), JSON.stringify(['2026-05-25', '2026-06-24']));
   assert.strictEqual(byDate['2026-05-25'].expense, 1000);
