@@ -4,22 +4,95 @@
 
   let state = window.BudgetStorage.loadState();
   let elements;
+  let cloudReadiness = 'signed-out';
+  let signedInUser = null;
+  let mutationInFlight = false;
   const viewState = { tab: 'home', month: '', selectedDate: '' };
   const MAX_IMPORT_BYTES = 1024 * 1024;
 
-  async function persistRemoteFirst(nextState, remoteAction, messageElement, busyButton = null) {
-    if (busyButton) busyButton.disabled = true;
+  function syncMutationAvailability() {
+    if (!elements) return;
+    const writeDisabled = cloudReadiness !== 'ready' || mutationInFlight;
+    document.querySelectorAll('[data-cloud-write]').forEach((control) => {
+      control.disabled = writeDisabled;
+    });
+    const canReadCloud = Boolean(signedInUser)
+      && ['ready', 'load-error'].includes(cloudReadiness)
+      && !mutationInFlight;
+    elements.cloudDownloadButton.disabled = !canReadCloud;
+    elements.cloudLogoutButton.disabled = !canReadCloud;
+  }
+
+  function setCloudReadiness(readiness, user = signedInUser) {
+    cloudReadiness = readiness;
+    signedInUser = user || null;
+    window.BudgetUI.updateCloudStatus(elements, signedInUser, cloudReadiness);
+    syncMutationAvailability();
+  }
+
+  function setGlobalMessage(message, kind = 'error') {
+    window.BudgetUI.setMessage(elements.globalMessage, message, kind);
+  }
+
+  function refuseMutation() {
+    if (cloudReadiness !== 'ready') {
+      const message = cloudReadiness === 'load-error'
+        ? '클라우드 데이터를 다시 불러온 뒤 저장해 주세요.'
+        : cloudReadiness === 'signed-out'
+          ? '로그인하고 클라우드 데이터를 불러온 뒤 저장해 주세요.'
+          : '클라우드 데이터를 불러온 뒤 저장해 주세요.';
+      setGlobalMessage(message, 'error');
+      return true;
+    }
+    if (mutationInFlight) {
+      setGlobalMessage('다른 저장 작업이 진행 중이에요. 완료된 뒤 다시 시도해 주세요.', 'error');
+      return true;
+    }
+    return false;
+  }
+
+  function beginMutation() {
+    if (refuseMutation()) return false;
+    mutationInFlight = true;
+    syncMutationAvailability();
+    return true;
+  }
+
+  function endMutation() {
+    mutationInFlight = false;
+    syncMutationAvailability();
+  }
+
+  async function runExclusiveMutation(action, messageElement, failurePrefix) {
+    if (!beginMutation()) return { ok: false, blocked: true, value: null };
     try {
+      return { ok: true, blocked: false, value: await action() };
+    } catch (error) {
+      window.BudgetUI.setMessage(
+        messageElement || elements.globalMessage,
+        `${failurePrefix}: ${error.message}`,
+        'error'
+      );
+      return { ok: false, blocked: false, value: null };
+    } finally {
+      endMutation();
+    }
+  }
+
+  async function persistRemoteFirst(
+    nextState,
+    remoteAction,
+    messageElement,
+    busyButton = null,
+    failurePrefix = 'Supabase 저장 실패'
+  ) {
+    const result = await runExclusiveMutation(async () => {
       await remoteAction();
       state = window.BudgetStorage.saveState(nextState).state;
       render();
       return true;
-    } catch (error) {
-      window.BudgetUI.setMessage(messageElement || elements.toolMessage, `Supabase 저장 실패: ${error.message}`, 'error');
-      return false;
-    } finally {
-      if (busyButton) busyButton.disabled = false;
-    }
+    }, messageElement, failurePrefix);
+    return result.ok;
   }
 
   function replaceAllRemoteFirst(nextState, messageElement, busyButton) {
@@ -84,6 +157,7 @@
     window.BudgetUI.renderCalendarDetails(elements, viewState.selectedDate, selectedRows);
     window.BudgetUI.setActiveTab(elements, viewState.tab);
     elements.calendarPeriodLabel.textContent = `${period.start} ~ ${period.end}`;
+    syncMutationAvailability();
   }
 
   async function handleBudgetSubmit(event) {
@@ -210,11 +284,11 @@
     const saved = await persistRemoteFirst(
       nextState,
       () => window.BudgetCloud.deleteTransaction(transaction.id),
-      elements.toolMessage,
+      elements.globalMessage,
       button
     );
     if (saved) {
-      window.BudgetUI.setMessage(elements.toolMessage, '거래를 삭제했어요.', 'ok');
+      window.BudgetUI.setMessage(elements.globalMessage, '거래를 삭제했어요.', 'ok');
     }
   }
 
@@ -241,14 +315,14 @@
     const saved = await persistRemoteFirst(
       result.state,
       () => window.BudgetCloud.updateTransaction(result.transaction),
-      elements.editMessage,
+      elements.globalMessage,
       elements.editSave
     );
     if (!saved) return;
 
     window.BudgetUI.closeEditDialog(elements);
     window.BudgetUI.setMessage(
-      elements.toolMessage,
+      elements.globalMessage,
       movedOutsideSelectedMonth
         ? '수정했어요. 날짜가 바뀌어 현재 월 목록에서는 보이지 않아요.'
         : '거래를 수정했어요.',
@@ -293,22 +367,19 @@
     const newSampleRows = preparedState.transactions.filter((transaction) => (
       transaction.source === 'sample' && !existingIds.has(transaction.id)
     ));
-    const button = event.currentTarget;
-    button.disabled = true;
-
-    try {
-      await window.BudgetCloud.replaceSampleTransactions(month, monthStartDay, newSampleRows);
-      state = window.BudgetStorage.saveState(preparedState).state;
-      render();
+    const saved = await persistRemoteFirst(
+      preparedState,
+      () => window.BudgetCloud.replaceSampleTransactions(month, monthStartDay, newSampleRows),
+      elements.toolMessage,
+      event.currentTarget,
+      '샘플 저장 실패'
+    );
+    if (saved) {
       window.BudgetUI.setMessage(
         elements.toolMessage,
         hasSample ? '선택한 달의 샘플 데이터를 교체했어요.' : '선택한 달에 샘플 데이터를 추가했어요.',
         'ok'
       );
-    } catch (error) {
-      window.BudgetUI.setMessage(elements.toolMessage, `샘플 저장 실패: ${error.message}`, 'error');
-    } finally {
-      button.disabled = false;
     }
   }
 
@@ -387,28 +458,30 @@
     render();
   }
 
-  async function refreshCloudStatus() {
-    try {
-      const user = await window.BudgetCloud.currentUser();
-      window.BudgetUI.updateCloudStatus(elements, user);
-      return user;
-    } catch (error) {
-      window.BudgetUI.updateCloudStatus(elements, null);
-      window.BudgetUI.setMessage(elements.cloudMessage, `로그인 상태 확인 실패: ${error.message}`, 'error');
-      return null;
-    }
-  }
-
   async function loadCloudStateForSignedInUser() {
-    const user = await refreshCloudStatus();
-    if (!user) return false;
+    let user;
+    try {
+      user = await window.BudgetCloud.currentUser();
+    } catch (error) {
+      setCloudReadiness('signed-out', null);
+      window.BudgetUI.setMessage(elements.cloudMessage, `로그인 상태 확인 실패: ${error.message}`, 'error');
+      return false;
+    }
+    if (!user) {
+      setCloudReadiness('signed-out', null);
+      return false;
+    }
+
+    setCloudReadiness('loading', user);
     try {
       const cloudState = await window.BudgetCloud.downloadState();
       applyDownloadedState(cloudState);
+      setCloudReadiness('ready', user);
       window.BudgetUI.setMessage(elements.cloudMessage, '클라우드 데이터를 불러왔어요.', 'ok');
       return true;
     } catch (error) {
-      window.BudgetUI.setMessage(elements.cloudMessage, `클라우드 불러오기 실패: ${error.message}`, 'error');
+      setCloudReadiness('load-error', user);
+      window.BudgetUI.setMessage(elements.cloudMessage, `클라우드 데이터를 불러오지 못했어요: ${error.message}`, 'error');
       return false;
     }
   }
@@ -423,56 +496,124 @@
     }
     try {
       await window.BudgetCloud.signInWithPassword(password);
-      elements.cloudPassword.value = '';
-      await refreshCloudStatus();
+    } catch (error) {
+      setCloudReadiness('signed-out', null);
+      window.BudgetUI.setMessage(elements.cloudMessage, `로그인 실패: ${error.message}`, 'error');
+      elements.cloudPassword.focus();
+      return;
+    }
+
+    elements.cloudPassword.value = '';
+    let user = { id: 'signed-in' };
+    setCloudReadiness('loading', user);
+    try {
+      const currentUser = await window.BudgetCloud.currentUser();
+      if (!currentUser) throw new Error('로그인 정보를 확인하지 못했어요.');
+      user = currentUser;
+      setCloudReadiness('loading', user);
       const cloudState = await window.BudgetCloud.downloadState();
       applyDownloadedState(cloudState);
+      setCloudReadiness('ready', user);
       window.BudgetUI.setMessage(elements.cloudMessage, '로그인하고 클라우드 데이터를 불러왔어요.', 'ok');
     } catch (error) {
-      window.BudgetUI.setMessage(elements.cloudMessage, `로그인 실패: ${error.message}`, 'error');
+      setCloudReadiness('load-error', user);
+      window.BudgetUI.setMessage(
+        elements.cloudMessage,
+        `로그인은 됐지만 클라우드 데이터를 불러오지 못했어요: ${error.message}`,
+        'error'
+      );
     }
   }
 
   async function handleCloudUpload(event) {
-    const button = event.currentTarget;
-    button.disabled = true;
-    try {
-      const result = await window.BudgetCloud.uploadState(state);
-      window.BudgetUI.setMessage(elements.cloudMessage, `클라우드에 저장했어요. 거래 ${result.uploadedCount}건`, 'ok');
-    } catch (error) {
-      window.BudgetUI.setMessage(elements.cloudMessage, `클라우드 저장 실패: ${error.message}`, 'error');
-    } finally {
-      button.disabled = false;
+    const operation = await runExclusiveMutation(
+      () => window.BudgetCloud.uploadState(state),
+      elements.cloudMessage,
+      '클라우드 저장 실패'
+    );
+    if (operation.ok) {
+      window.BudgetUI.setMessage(
+        elements.cloudMessage,
+        `클라우드에 저장했어요. 거래 ${operation.value.uploadedCount}건`,
+        'ok'
+      );
     }
   }
 
   async function handleCloudDownload(event) {
+    if (mutationInFlight) {
+      setGlobalMessage('저장 작업이 진행 중이라 지금은 클라우드 데이터를 불러올 수 없어요.', 'error');
+      return;
+    }
+    if (!signedInUser || !['ready', 'load-error'].includes(cloudReadiness)) {
+      setGlobalMessage('클라우드 데이터 불러오기를 시작할 수 없는 상태예요.', 'error');
+      return;
+    }
     if (!window.confirm('현재 화면을 최신 클라우드 데이터로 다시 불러올까요?')) return;
-    const button = event.currentTarget;
-    button.disabled = true;
+    const user = signedInUser;
+    setCloudReadiness('loading', user);
     try {
       const cloudState = await window.BudgetCloud.downloadState();
       applyDownloadedState(cloudState);
+      setCloudReadiness('ready', user);
       window.BudgetUI.setMessage(elements.cloudMessage, '클라우드 데이터를 불러왔어요.', 'ok');
     } catch (error) {
-      window.BudgetUI.setMessage(elements.cloudMessage, `클라우드 불러오기 실패: ${error.message}`, 'error');
-    } finally {
-      button.disabled = false;
+      setCloudReadiness('load-error', user);
+      window.BudgetUI.setMessage(elements.cloudMessage, `클라우드 데이터를 불러오지 못했어요: ${error.message}`, 'error');
     }
   }
 
   async function handleCloudLogout(event) {
-    const button = event.currentTarget;
-    button.disabled = true;
+    if (mutationInFlight) {
+      setGlobalMessage('저장 작업이 진행 중이라 지금은 로그아웃할 수 없어요.', 'error');
+      return;
+    }
+    if (!signedInUser || !['ready', 'load-error'].includes(cloudReadiness)) {
+      setGlobalMessage('지금은 로그아웃을 시작할 수 없는 상태예요.', 'error');
+      return;
+    }
+    const previousReadiness = cloudReadiness;
+    const previousUser = signedInUser;
+    setCloudReadiness('loading', previousUser);
     try {
       await window.BudgetCloud.signOut();
-      await refreshCloudStatus();
-      window.BudgetUI.setMessage(elements.cloudMessage, '로그아웃했어요.', 'ok');
     } catch (error) {
+      setCloudReadiness(previousReadiness, previousUser);
       window.BudgetUI.setMessage(elements.cloudMessage, `로그아웃 실패: ${error.message}`, 'error');
-    } finally {
-      button.disabled = false;
+      return;
     }
+
+    state = window.BudgetStorage.defaultState();
+    viewState.tab = 'home';
+    viewState.selectedDate = '';
+    elements.filterType.value = 'all';
+    window.BudgetUI.fillFilterCategoryOptions(elements.filterCategory, 'all', 'all');
+    elements.filterQuery.value = '';
+    elements.typeSelect.value = 'expense';
+    elements.amountInput.value = '';
+    elements.memoInput.value = '';
+    elements.editId.value = '';
+    elements.editDate.value = '';
+    elements.editAmount.value = '';
+    elements.editMemo.value = '';
+    if (elements.editDialog.open) window.BudgetUI.closeEditDialog(elements);
+    elements.categoryBudgetFields.innerHTML = '';
+    window.BudgetUI.initDefaults(elements, state);
+    viewState.month = currentBudgetMonth();
+    for (const messageElement of [
+      elements.globalMessage,
+      elements.toolMessage,
+      elements.formMessage,
+      elements.budgetMessage,
+      elements.categoryBudgetMessage,
+      elements.monthStartMessage,
+      elements.editMessage
+    ]) window.BudgetUI.setMessage(messageElement, '', null);
+    setCloudReadiness('signed-out', null);
+    render();
+    window.BudgetUI.setMessage(elements.cloudMessage, '로그아웃했어요.', 'ok');
+    elements.cloudPassword.value = '';
+    elements.cloudPassword.focus();
   }
 
   function bindEvents() {
@@ -559,9 +700,10 @@
     const previewPath = window.location.pathname.startsWith('/beginner-budget-preview/');
     elements.previewDataWarning.hidden = !previewPath;
     document.body.classList.toggle('has-preview-warning', previewPath);
+    setCloudReadiness('loading', null);
     bindEvents();
-    const loaded = await loadCloudStateForSignedInUser();
-    if (!loaded) render();
+    render();
+    await loadCloudStateForSignedInUser();
   }
 
   document.addEventListener('DOMContentLoaded', init);

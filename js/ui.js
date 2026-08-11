@@ -284,6 +284,7 @@
       editButton.dataset.id = tx.id;
       editButton.dataset.action = 'edit';
       editButton.textContent = '수정';
+      editButton.setAttribute('data-cloud-write', '');
       editButton.setAttribute('aria-label', `${tx.date} ${typeLabels[tx.type]} ${tx.category} ${formatWon(tx.amount)} 수정`);
 
       const deleteButton = document.createElement('button');
@@ -292,6 +293,7 @@
       deleteButton.dataset.id = tx.id;
       deleteButton.dataset.action = 'delete';
       deleteButton.textContent = '삭제';
+      deleteButton.setAttribute('data-cloud-write', '');
       deleteButton.setAttribute('aria-label', `${tx.date} ${typeLabels[tx.type]} ${tx.category} ${formatWon(tx.amount)} 삭제`);
       actions.append(editButton, deleteButton);
 
@@ -410,7 +412,7 @@
     elements.calendarDetailCount.textContent = `${selectedDate} · ${transactions.length}건`;
   }
 
-  function updateCloudStatus(elements, user) {
+  function updateCloudStatus(elements, user, readiness = 'signed-out') {
     if (!window.BudgetCloud || !window.BudgetCloud.isConfigured()) {
       elements.cloudStatus.textContent = 'Supabase 클라이언트를 불러오지 못했어요. 네트워크를 확인해 주세요.';
       elements.cloudPanel.hidden = false;
@@ -423,14 +425,21 @@
       return;
     }
     const signedIn = Boolean(user);
-    elements.cloudStatus.textContent = signedIn ? '' : '공용 비밀번호로 로그인해 주세요.';
-    elements.cloudPanel.hidden = signedIn;
+    const status = signedIn ? readiness : 'signed-out';
+    const statusMessages = {
+      'signed-out': '공용 비밀번호로 로그인해 주세요.',
+      loading: '클라우드 데이터를 불러오는 중이에요.',
+      ready: '',
+      'load-error': '클라우드 데이터를 불러오지 못했어요. 다시 불러오거나 로그아웃할 수 있어요.'
+    };
+    elements.cloudStatus.textContent = statusMessages[status] || statusMessages['signed-out'];
+    elements.cloudPanel.hidden = status === 'ready';
     elements.cloudLoginForm.hidden = signedIn;
-    elements.cloudUploadButton.disabled = !signedIn;
-    elements.cloudDownloadButton.hidden = true;
-    elements.cloudDownloadButton.disabled = true;
+    elements.cloudUploadButton.disabled = status !== 'ready';
+    elements.cloudDownloadButton.hidden = status !== 'load-error';
+    elements.cloudDownloadButton.disabled = status !== 'load-error';
     elements.cloudLogoutButton.hidden = !signedIn;
-    elements.cloudLogoutButton.disabled = !signedIn;
+    elements.cloudLogoutButton.disabled = !signedIn || status === 'loading';
   }
 
   function downloadText(filename, content) {
@@ -498,6 +507,7 @@
       monthInput: $('#filter-month'),
       filterType: $('#filter-type'),
       filterQuery: $('#filter-query'),
+      globalMessage: $('#global-message'),
       toolMessage: $('#tool-message'),
       sampleButton: $('#sample-button'),
       exportButton: $('#export-button'),

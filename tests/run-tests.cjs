@@ -147,6 +147,10 @@ function createUiContext() {
       if (name === 'class') this.className = normalized;
       if (name === 'tabindex') this.tabIndex = Number(normalized);
       if (name === 'hidden') this.hidden = true;
+      if (name.startsWith('data-')) {
+        const key = name.slice(5).replace(/-([a-z])/g, (_, letter) => letter.toUpperCase());
+        this.dataset[key] = normalized;
+      }
     }
 
     getAttribute(name) {
@@ -302,6 +306,288 @@ function createSupabaseFake(options = {}) {
     }
   };
   return { calls, supabase: { createClient: () => client } };
+}
+
+function createDeferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
+function createAppHarness(options = {}) {
+  let document;
+  const documentListeners = new Map();
+  const writeControls = [];
+  const dynamicControls = [];
+
+  function createElement(tagName = 'div') {
+    const listeners = new Map();
+    const attributes = new Map();
+    const classes = new Set();
+    const element = {
+      tagName: String(tagName).toUpperCase(),
+      id: '',
+      name: '',
+      value: '',
+      valueAsNumber: NaN,
+      textContent: '',
+      hidden: false,
+      disabled: false,
+      open: false,
+      checked: false,
+      dataset: {},
+      style: {},
+      children: [],
+      focusCount: 0,
+      clickCount: 0,
+      classList: {
+        add(...names) { names.forEach((name) => classes.add(name)); },
+        remove(...names) { names.forEach((name) => classes.delete(name)); },
+        toggle(name, force) {
+          const enabled = force === undefined ? !classes.has(name) : Boolean(force);
+          if (enabled) classes.add(name);
+          else classes.delete(name);
+          return enabled;
+        },
+        contains(name) { return classes.has(name); }
+      },
+      addEventListener(type, listener) {
+        if (!listeners.has(type)) listeners.set(type, []);
+        listeners.get(type).push(listener);
+      },
+      async dispatch(type, extras = {}) {
+        const event = {
+          type,
+          target: element,
+          currentTarget: element,
+          submitter: null,
+          key: '',
+          defaultPrevented: false,
+          preventDefault() { this.defaultPrevented = true; },
+          ...extras
+        };
+        const results = (listeners.get(type) || []).map((listener) => listener(event));
+        await Promise.all(results);
+        return event;
+      },
+      setAttribute(name, value) {
+        attributes.set(name, String(value));
+        if (name === 'data-cloud-write' && !writeControls.includes(element)) writeControls.push(element);
+        if (name.startsWith('data-')) {
+          const key = name.slice(5).replace(/-([a-z])/g, (_, letter) => letter.toUpperCase());
+          element.dataset[key] = String(value);
+        }
+      },
+      getAttribute(name) { return attributes.has(name) ? attributes.get(name) : null; },
+      removeAttribute(name) { attributes.delete(name); },
+      querySelectorAll() { return []; },
+      querySelector() { return null; },
+      append(...children) { element.children.push(...children); },
+      contains(target) { return target === element || element.children.includes(target); },
+      closest() { return null; },
+      focus() { element.focusCount += 1; document.activeElement = element; },
+      click() { element.clickCount += 1; return element.dispatch('click'); },
+      reset() { return element.dispatch('reset'); },
+      showModal() { element.open = true; },
+      close() { element.open = false; }
+    };
+    Object.defineProperty(element, 'innerHTML', {
+      get() { return ''; },
+      set(value) { if (value === '') element.children = []; }
+    });
+    return element;
+  }
+
+  document = {
+    activeElement: null,
+    addEventListener(type, listener) {
+      if (!documentListeners.has(type)) documentListeners.set(type, []);
+      documentListeners.get(type).push(listener);
+    },
+    async dispatch(type) {
+      const results = (documentListeners.get(type) || []).map((listener) => listener());
+      await Promise.all(results);
+    },
+    querySelectorAll(selector) {
+      if (selector === '[data-cloud-write]') return writeControls.slice();
+      if (selector === '[data-action="edit"]') {
+        return dynamicControls.filter((control) => control.dataset.action === 'edit');
+      }
+      return [];
+    },
+    querySelector() { return null; },
+    createElement,
+    contains() { return true; }
+  };
+  document.body = createElement('body');
+
+  const window = {
+    document,
+    console: { ...console, error() {}, warn() {} },
+    crypto: { randomUUID: () => `harness-${Math.random().toString(16).slice(2)}` },
+    location: { pathname: '/' },
+    confirm: () => true,
+    setTimeout(callback) { callback(); return 1; },
+    clearTimeout() {}
+  };
+  window.window = window;
+  const context = { window, document, console: window.console, FileReader: function FileReader() {} };
+  vm.createContext(context);
+  for (const file of ['js/storage.js', 'js/transactions.js']) {
+    vm.runInContext(fs.readFileSync(path.join(__dirname, '..', file), 'utf8'), context, { filename: file });
+  }
+
+  const elements = {};
+  for (const name of [
+    'previousMonthButton', 'currentMonthButton', 'nextMonthButton', 'filterCategory',
+    'calendarPeriodLabel', 'calendarGrid', 'calendarDetailList', 'calendarDetailEmpty',
+    'calendarDetailCount', 'previewDataWarning', 'editDialog', 'editForm', 'editId',
+    'editDate', 'editType', 'editCategory', 'editAmount', 'editMemo', 'editMessage',
+    'editClose', 'editCancel', 'editSave', 'monthStartForm', 'monthStartInput',
+    'monthStartMessage', 'budgetForm', 'budgetInput', 'budgetMessage', 'categoryBudgetForm',
+    'categoryBudgetFields', 'categoryBudgetMessage', 'cloudPanel', 'cloudLoginForm',
+    'cloudPassword', 'cloudUploadButton', 'cloudDownloadButton', 'cloudLogoutButton',
+    'cloudStatus', 'cloudMessage', 'transactionForm', 'dateInput', 'typeSelect',
+    'categorySelect', 'amountInput', 'memoInput', 'formMessage', 'monthInput',
+    'filterType', 'filterQuery', 'globalMessage', 'toolMessage', 'sampleButton',
+    'exportButton', 'importButton', 'importFile', 'resetButton', 'list', 'emptyState',
+    'listCount', 'selectedMonthLabel', 'summaryIncome', 'summaryExpense', 'summaryBalance',
+    'summaryBudgetRemaining', 'budgetStatusText', 'balanceHelp', 'budgetCard', 'balanceCard',
+    'budgetRateLabel', 'budgetMeter', 'budgetMeterFill', 'dailyAllowance',
+    'dailyAllowanceHelp', 'topCategory', 'topCategoryHelp', 'categoryBreakdownList',
+    'categoryBudgetStatusList'
+  ]) elements[name] = createElement(name.includes('Form') ? 'form' : 'div');
+
+  for (const name of ['monthStartSave', 'budgetSave', 'categoryBudgetSave', 'transactionSave']) {
+    elements[name] = createElement('button');
+  }
+
+  elements.tabs = ['home', 'history', 'calendar', 'settings'].map((tabName) => {
+    const tab = createElement('button');
+    tab.dataset.tab = tabName;
+    return tab;
+  });
+  elements.tabPanels = ['home', 'history', 'calendar', 'settings'].map((tabName) => {
+    const panel = createElement('section');
+    panel.id = `panel-${tabName}`;
+    return panel;
+  });
+  elements.filterType.value = 'all';
+  elements.filterCategory.value = 'all';
+  elements.filterQuery.value = '';
+  elements.typeSelect.value = 'expense';
+  elements.categorySelect.value = '생활비';
+  elements.editType.value = 'expense';
+  elements.editCategory.value = '생활비';
+  elements.cloudPassword.value = 'secret';
+  for (const control of [
+    elements.monthStartSave, elements.budgetSave, elements.categoryBudgetSave, elements.transactionSave,
+    elements.sampleButton, elements.importButton, elements.resetButton,
+    elements.cloudUploadButton, elements.editSave
+  ]) control.setAttribute('data-cloud-write', '');
+
+  const records = {
+    cloudStatuses: [],
+    renderedLists: [],
+    renderedSummaries: [],
+    activeTabs: [],
+    downloads: [],
+    closeEditCount: 0
+  };
+  window.BudgetUI = {
+    getElements: () => elements,
+    initDefaults(target, state) {
+      const month = window.BudgetStorage.monthKeyForDate(
+        window.BudgetStorage.localDateString(),
+        state.monthStartDay || 1
+      ) || window.BudgetStorage.localMonthString();
+      const budget = window.BudgetStorage.budgetForMonth(state, month);
+      target.dateInput.value = window.BudgetStorage.localDateString();
+      target.monthInput.value = month;
+      target.monthStartInput.value = String(state.monthStartDay || 1);
+      target.monthStartInput.valueAsNumber = state.monthStartDay || 1;
+      target.budgetInput.value = String(budget.monthlyBudget);
+      target.budgetInput.valueAsNumber = budget.monthlyBudget;
+      target.typeSelect.value = 'expense';
+      target.categorySelect.value = '생활비';
+    },
+    fillFilterCategoryOptions(select) { select.value = 'all'; },
+    fillCategoryOptions(select, type) { select.value = type === 'income' ? '월급' : '생활비'; },
+    syncCategoryBudgetInputs() {},
+    readCategoryBudgetInputs() { return {}; },
+    renderSummary(target, summary) { records.renderedSummaries.push(summary); },
+    renderList(target, transactions) { records.renderedLists.push(JSON.parse(JSON.stringify(transactions))); },
+    renderCalendar() {},
+    renderCalendarDetails() {},
+    setActiveTab(target, tab) { records.activeTabs.push(tab); },
+    clearFieldErrors() {},
+    showValidationErrors(scope, messageElement, errors) {
+      this.setMessage(messageElement, errors.map((item) => item.message).join(' '), 'error');
+    },
+    setMessage(element, text, kind) {
+      element.textContent = text || '';
+      element.messageKind = kind || null;
+    },
+    openEditDialog() {},
+    closeEditDialog() { records.closeEditCount += 1; elements.editDialog.open = false; },
+    formatWon(amount) { return `${amount}원`; },
+    downloadText(filename, content) { records.downloads.push({ filename, content }); },
+    updateCloudStatus(target, user, readiness) {
+      records.cloudStatuses.push({ user, readiness });
+      const signedIn = Boolean(user);
+      target.cloudPanel.hidden = readiness === 'ready';
+      target.cloudLoginForm.hidden = signedIn;
+      target.cloudDownloadButton.hidden = readiness !== 'load-error';
+      target.cloudLogoutButton.hidden = !signedIn;
+      target.cloudStatus.textContent = readiness || '';
+    }
+  };
+
+  const cloudCalls = {
+    currentUser: [], downloadState: [], signInWithPassword: [], signOut: [],
+    saveSettings: [], insertTransaction: [], updateTransaction: [], deleteTransaction: [],
+    uploadState: [], replaceSampleTransactions: []
+  };
+  const cloudBehaviors = options.cloud || {};
+  async function runCloudBehavior(name, args, fallback) {
+    cloudCalls[name].push(args);
+    const behavior = cloudBehaviors[name];
+    if (typeof behavior === 'function') return behavior(...args);
+    if (behavior instanceof Error) throw behavior;
+    if (behavior !== undefined) return behavior;
+    return fallback;
+  }
+  const defaultUser = Object.prototype.hasOwnProperty.call(options, 'user') ? options.user : { id: 'user-1' };
+  window.BudgetCloud = {
+    isConfigured: () => true,
+    currentUser: () => runCloudBehavior('currentUser', [], defaultUser),
+    downloadState: () => runCloudBehavior('downloadState', [], options.cloudState || window.BudgetStorage.defaultState()),
+    signInWithPassword: (password) => runCloudBehavior('signInWithPassword', [password], { ok: true }),
+    signOut: () => runCloudBehavior('signOut', [], { ok: true }),
+    saveSettings: (nextState) => runCloudBehavior('saveSettings', [nextState], { ok: true }),
+    insertTransaction: (transaction) => runCloudBehavior('insertTransaction', [transaction], { ok: true }),
+    updateTransaction: (transaction) => runCloudBehavior('updateTransaction', [transaction], { ok: true }),
+    deleteTransaction: (id) => runCloudBehavior('deleteTransaction', [id], { ok: true }),
+    uploadState: (nextState) => runCloudBehavior('uploadState', [nextState], { ok: true, uploadedCount: nextState.transactions.length }),
+    replaceSampleTransactions: (...args) => runCloudBehavior('replaceSampleTransactions', args, { ok: true, replacedCount: 6 })
+  };
+
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'js/app.js'), 'utf8'), context, { filename: 'js/app.js' });
+  return {
+    window,
+    document,
+    elements,
+    records,
+    cloudCalls,
+    writeControls,
+    dynamicControls,
+    createElement,
+    init: () => document.dispatch('DOMContentLoaded')
+  };
 }
 
 function testStorageDefaultsAndIgnoresLocalStorage() {
@@ -672,8 +958,22 @@ function testAppMarkupProvidesTabsCalendarEditDialogAndPreviewWarning() {
     'id="preview-data-warning"', 'role="tablist"', 'id="tab-home"', 'id="tab-history"',
     'id="tab-calendar"', 'id="tab-settings"', 'id="month-previous"', 'id="month-next"',
     'id="filter-category"', 'id="calendar-grid"', 'id="calendar-detail-list"',
-    '<dialog id="edit-dialog"', 'id="edit-transaction-form"'
+    '<dialog id="edit-dialog"', 'id="edit-transaction-form"', 'id="global-message"'
   ]) assert.ok(source.includes(required), `missing markup: ${required}`);
+
+  const globalMessage = startTagById('global-message');
+  assert.strictEqual(globalMessage.name, 'p');
+  assertAttribute(globalMessage, 'role', 'status');
+  assertAttribute(globalMessage, 'aria-live', 'polite');
+  assertAttribute(globalMessage, 'aria-atomic', 'true');
+  assert.ok(source.indexOf(globalMessage.source) < source.indexOf('<main'), 'global feedback must stay outside tab panels');
+
+  for (const id of [
+    'month-start-save', 'budget-save', 'category-budget-save', 'transaction-save',
+    'sample-button', 'import-button', 'reset-button', 'cloud-upload-button', 'edit-save'
+  ]) {
+    assertBooleanAttribute(startTagById(id), 'data-cloud-write');
+  }
 
   const stickyChromeMatches = [...source.matchAll(/<div\b(?=[^>]*\bclass="[^"]*\bapp-sticky-chrome\b[^"]*")(?=[^>]*\brole="region")(?=[^>]*\baria-label="가계부 상태와 주요 메뉴")[^>]*>[\s\S]*?<\/nav>\s*<\/div>/g)];
   assert.strictEqual(stickyChromeMatches.length, 1, 'preview warning and tabs need one named sticky region');
@@ -738,6 +1038,9 @@ function testAppMarkupProvidesTabsCalendarEditDialogAndPreviewWarning() {
   assertAttribute(calendarDetailCount, 'role', 'status');
   assertAttribute(calendarDetailCount, 'aria-live', 'polite');
   assertAttribute(calendarDetailCount, 'aria-atomic', 'true');
+
+  const cloudDownload = startTagById('cloud-download-button');
+  assert.doesNotMatch(cloudDownload.source, /\bvisually-hidden\b/, 'load-error retry must be visibly available');
 }
 
 function testAppStylesCoverTabsCalendarDialogAndMobile() {
@@ -760,6 +1063,11 @@ function testAppStylesCoverTabsCalendarDialogAndMobile() {
     assert.doesNotMatch(block, /(?:^|;)\s*position\s*:\s*sticky\s*;/);
   }
   assert.doesNotMatch(source, /\.has-preview-warning\s+\.app-tabs\s*\{[^}]*\btop\s*:\s*44px\s*;/, 'tab offset must not depend on a hard-coded warning height');
+
+  assert.match(declarations('.global-message:empty'), /(?:^|;)\s*display\s*:\s*none\s*;/);
+  const visibleGlobalMessage = declarations('.global-message:not(:empty)');
+  assert.match(visibleGlobalMessage, /(?:^|;)\s*padding\s*:\s*[^;]+;/);
+  assert.match(visibleGlobalMessage, /(?:^|;)\s*background\s*:\s*[^;]+;/);
 
   for (const selector of ['.app-tabs [role="tab"]:hover', '.app-tabs [role="tab"][aria-selected="true"]:hover']) {
     const block = declarations(selector);
@@ -1030,6 +1338,8 @@ function testUiTransactionActionLabelsIncludeType() {
   assert.strictEqual(deleteButtons[0].getAttribute('aria-label'), `2026-05-02 지출 생활비 ${window.BudgetUI.formatWon(1000)} 삭제`);
   assert.strictEqual(editButtons[1].getAttribute('aria-label'), `2026-05-02 수입 급여 ${window.BudgetUI.formatWon(1000)} 수정`);
   assert.strictEqual(deleteButtons[1].getAttribute('aria-label'), `2026-05-02 수입 급여 ${window.BudgetUI.formatWon(1000)} 삭제`);
+  assert.strictEqual(editButtons.every((button) => button.getAttribute('data-cloud-write') === ''), true);
+  assert.strictEqual(deleteButtons.every((button) => button.getAttribute('data-cloud-write') === ''), true);
 }
 
 function testCategoryFilterCombinesWithMonthTypeAndQuery() {
@@ -1326,6 +1636,214 @@ function testSupabaseSetupDefinesTransactionalSampleRpc() {
   assert.match(source, /grant execute on function public\.replace_budget_samples/i);
 }
 
+function testUiCloudStatusShowsLoadingRetryAndSignedOutStates() {
+  const { window, document } = createUiContext();
+  window.BudgetCloud = { isConfigured: () => true };
+  const elements = {
+    cloudStatus: document.createElement('p'),
+    cloudPanel: document.createElement('section'),
+    cloudLoginForm: document.createElement('form'),
+    cloudUploadButton: document.createElement('button'),
+    cloudDownloadButton: document.createElement('button'),
+    cloudLogoutButton: document.createElement('button'),
+    cloudMessage: document.createElement('p')
+  };
+  const user = { id: 'user-1' };
+
+  window.BudgetUI.updateCloudStatus(elements, user, 'loading');
+  assert.strictEqual(elements.cloudPanel.hidden, false);
+  assert.strictEqual(elements.cloudLoginForm.hidden, true);
+  assert.strictEqual(elements.cloudDownloadButton.hidden, true);
+  assert.strictEqual(elements.cloudLogoutButton.hidden, false);
+
+  elements.cloudMessage.textContent = '불러오기 오류를 유지해야 해요.';
+  window.BudgetUI.updateCloudStatus(elements, user, 'load-error');
+  assert.strictEqual(elements.cloudPanel.hidden, false);
+  assert.strictEqual(elements.cloudLoginForm.hidden, true);
+  assert.strictEqual(elements.cloudDownloadButton.hidden, false);
+  assert.strictEqual(elements.cloudLogoutButton.hidden, false);
+  assert.strictEqual(elements.cloudMessage.textContent, '불러오기 오류를 유지해야 해요.');
+
+  window.BudgetUI.updateCloudStatus(elements, user, 'ready');
+  assert.strictEqual(elements.cloudPanel.hidden, true);
+
+  window.BudgetUI.updateCloudStatus(elements, null, 'signed-out');
+  assert.strictEqual(elements.cloudPanel.hidden, false);
+  assert.strictEqual(elements.cloudLoginForm.hidden, false);
+  assert.strictEqual(elements.cloudLogoutButton.hidden, true);
+}
+
+async function testAppReadinessBlocksWritesAfterLoadErrorAndEnablesAfterSuccess() {
+  const failed = createAppHarness({
+    cloud: { downloadState: async () => { throw new Error('offline'); } }
+  });
+  await failed.init();
+  assert.strictEqual(failed.records.cloudStatuses.at(-1).readiness, 'load-error');
+  assert.strictEqual(failed.writeControls.every((control) => control.disabled), true);
+  assert.match(failed.elements.cloudMessage.textContent, /클라우드 데이터를 불러오지 못했어요|클라우드 불러오기 실패/);
+
+  failed.elements.budgetInput.valueAsNumber = 700000;
+  await failed.elements.budgetForm.dispatch('submit', { submitter: failed.elements.budgetSave });
+  assert.strictEqual(failed.cloudCalls.saveSettings.length, 0);
+  await failed.elements.cloudUploadButton.dispatch('click');
+  assert.strictEqual(failed.cloudCalls.uploadState.length, 0);
+  assert.match(failed.elements.globalMessage.textContent, /불러온 뒤|다시 불러온 뒤/);
+
+  const loaded = createAppHarness();
+  await loaded.init();
+  assert.strictEqual(loaded.records.cloudStatuses.at(-1).readiness, 'ready');
+  assert.strictEqual(loaded.writeControls.every((control) => !control.disabled), true);
+}
+
+async function testAppDisablesWritesDuringInitialSessionLookup() {
+  const gate = createDeferred();
+  const harness = createAppHarness({
+    cloud: { currentUser: () => gate.promise }
+  });
+  const initializing = harness.init();
+  await Promise.resolve();
+
+  assert.strictEqual(harness.records.cloudStatuses.at(-1).readiness, 'loading');
+  assert.strictEqual(harness.writeControls.every((control) => control.disabled), true);
+
+  gate.resolve({ id: 'user-1' });
+  await initializing;
+  assert.strictEqual(harness.records.cloudStatuses.at(-1).readiness, 'ready');
+  assert.strictEqual(harness.writeControls.every((control) => !control.disabled), true);
+}
+
+async function testAppSerializesMutationsAndRemoteFailureUnlocksWithoutCommit() {
+  const gate = createDeferred();
+  const overlapping = createAppHarness({
+    cloud: { saveSettings: () => gate.promise }
+  });
+  await overlapping.init();
+  overlapping.elements.budgetInput.valueAsNumber = 700000;
+  const first = overlapping.elements.budgetForm.dispatch('submit', { submitter: overlapping.elements.budgetSave });
+  await Promise.resolve();
+  await overlapping.elements.cloudUploadButton.dispatch('click');
+  await overlapping.elements.cloudDownloadButton.dispatch('click');
+  await overlapping.elements.cloudLogoutButton.dispatch('click');
+  assert.strictEqual(overlapping.cloudCalls.uploadState.length, 0);
+  assert.strictEqual(overlapping.cloudCalls.downloadState.length, 1);
+  assert.strictEqual(overlapping.cloudCalls.signOut.length, 0);
+  overlapping.elements.budgetInput.valueAsNumber = 800000;
+  const second = overlapping.elements.budgetForm.dispatch('submit', { submitter: overlapping.elements.budgetSave });
+  await second;
+
+  assert.strictEqual(overlapping.cloudCalls.saveSettings.length, 1);
+  assert.match(overlapping.elements.globalMessage.textContent, /저장 작업이 진행 중/);
+  gate.resolve({ ok: true });
+  await first;
+  await overlapping.elements.exportButton.dispatch('click');
+  const firstOwnedState = JSON.parse(overlapping.records.downloads.at(-1).content);
+  assert.strictEqual(
+    overlapping.window.BudgetStorage.budgetForMonth(firstOwnedState, overlapping.elements.monthInput.value).monthlyBudget,
+    700000
+  );
+
+  const failed = createAppHarness({
+    cloudState: { ...createContext().BudgetStorage.defaultState(), monthlyBudget: 600000 },
+    cloud: { saveSettings: async () => { throw new Error('write failed'); } }
+  });
+  await failed.init();
+  failed.elements.budgetInput.valueAsNumber = 900000;
+  await failed.elements.budgetForm.dispatch('submit', { submitter: failed.elements.budgetSave });
+  assert.strictEqual(failed.cloudCalls.saveSettings.length, 1);
+  assert.strictEqual(failed.writeControls.every((control) => !control.disabled), true);
+  assert.match(failed.elements.budgetMessage.textContent, /Supabase 저장 실패: write failed/);
+  await failed.elements.exportButton.dispatch('click');
+  const unchangedState = JSON.parse(failed.records.downloads.at(-1).content);
+  assert.strictEqual(
+    failed.window.BudgetStorage.budgetForMonth(unchangedState, failed.elements.monthInput.value).monthlyBudget,
+    600000
+  );
+}
+
+async function testAppRoutesDeleteAndMovedEditFeedbackToGlobalMessage() {
+  const transaction = {
+    id: 'tx-a', date: '2026-05-02', type: 'expense', category: '생활비', amount: 1000, memo: '', source: 'user'
+  };
+  const deleted = createAppHarness({
+    cloudState: { ...createContext().BudgetStorage.defaultState(), transactions: [transaction] }
+  });
+  await deleted.init();
+  const deleteButton = deleted.createElement('button');
+  deleteButton.dataset.action = 'delete';
+  deleteButton.dataset.id = 'tx-a';
+  deleteButton.setAttribute('data-cloud-write', '');
+  deleteButton.closest = () => deleteButton;
+  await deleted.elements.list.dispatch('click', { target: deleteButton });
+  assert.strictEqual(deleted.elements.globalMessage.textContent, '거래를 삭제했어요.');
+  assert.strictEqual(deleted.elements.toolMessage.textContent, '');
+
+  const deleteFailed = createAppHarness({
+    cloudState: { ...createContext().BudgetStorage.defaultState(), transactions: [transaction] },
+    cloud: { deleteTransaction: async () => { throw new Error('delete failed'); } }
+  });
+  await deleteFailed.init();
+  const failingButton = deleteFailed.createElement('button');
+  failingButton.dataset.action = 'delete';
+  failingButton.dataset.id = 'tx-a';
+  failingButton.setAttribute('data-cloud-write', '');
+  failingButton.closest = () => failingButton;
+  await deleteFailed.elements.list.dispatch('click', { target: failingButton });
+  assert.match(deleteFailed.elements.globalMessage.textContent, /Supabase 저장 실패: delete failed/);
+  assert.strictEqual(deleteFailed.elements.toolMessage.textContent, '');
+
+  const edited = createAppHarness({
+    cloudState: { ...createContext().BudgetStorage.defaultState(), transactions: [transaction] }
+  });
+  await edited.init();
+  edited.elements.editId.value = 'tx-a';
+  edited.elements.editDate.value = '1900-01-01';
+  edited.elements.editType.value = 'expense';
+  edited.elements.editCategory.value = '생활비';
+  edited.elements.editAmount.value = '2000';
+  edited.elements.editMemo.value = '';
+  await edited.elements.editForm.dispatch('submit', { submitter: edited.elements.editSave });
+  assert.strictEqual(
+    edited.elements.globalMessage.textContent,
+    '수정했어요. 날짜가 바뀌어 현재 월 목록에서는 보이지 않아요.'
+  );
+  assert.strictEqual(edited.elements.toolMessage.textContent, '');
+}
+
+async function testAppLogoutClearsPrivateStateAndFocusesLogin() {
+  const base = createContext().BudgetStorage.defaultState();
+  const harness = createAppHarness({
+    cloudState: {
+      ...base,
+      monthlyBudget: 900000,
+      transactions: [
+        { id: 'private', date: '2026-05-02', type: 'expense', category: '생활비', amount: 45000, memo: '비공개', source: 'user' }
+      ]
+    }
+  });
+  await harness.init();
+  harness.elements.filterType.value = 'expense';
+  harness.elements.filterCategory.value = '생활비';
+  harness.elements.filterQuery.value = '비공개';
+
+  await harness.elements.cloudLogoutButton.dispatch('click');
+  await harness.elements.exportButton.dispatch('click');
+  const exported = JSON.parse(harness.records.downloads.at(-1).content);
+
+  assert.strictEqual(harness.cloudCalls.signOut.length, 1);
+  assert.strictEqual(exported.monthlyBudget, harness.window.BudgetStorage.DEFAULT_BUDGET);
+  assert.strictEqual(exported.transactions.length, 0);
+  assert.strictEqual(harness.records.renderedLists.at(-1).length, 0);
+  assert.strictEqual(harness.records.cloudStatuses.at(-1).readiness, 'signed-out');
+  assert.strictEqual(harness.records.activeTabs.at(-1), 'home');
+  assert.strictEqual(harness.elements.filterType.value, 'all');
+  assert.strictEqual(harness.elements.filterCategory.value, 'all');
+  assert.strictEqual(harness.elements.filterQuery.value, '');
+  assert.strictEqual(harness.writeControls.every((control) => control.disabled), true);
+  assert.strictEqual(harness.elements.cloudPanel.hidden, false);
+  assert.strictEqual(harness.elements.cloudLoginForm.hidden, false);
+  assert.ok(harness.elements.cloudPassword.focusCount > 0);
+}
+
 const tests = [
   testStorageDefaultsAndIgnoresLocalStorage,
   testSaveDoesNotUseLocalStorage,
@@ -1364,7 +1882,13 @@ const tests = [
   testAppReplacesSamplesThroughOneCloudRpc,
   testCloudReplacesSelectedPeriodSamplesWithOneRpc,
   testCloudSampleRpcErrorsWithoutFallbackWrites,
-  testSupabaseSetupDefinesTransactionalSampleRpc
+  testSupabaseSetupDefinesTransactionalSampleRpc,
+  testUiCloudStatusShowsLoadingRetryAndSignedOutStates,
+  testAppDisablesWritesDuringInitialSessionLookup,
+  testAppReadinessBlocksWritesAfterLoadErrorAndEnablesAfterSuccess,
+  testAppSerializesMutationsAndRemoteFailureUnlocksWithoutCommit,
+  testAppRoutesDeleteAndMovedEditFeedbackToGlobalMessage,
+  testAppLogoutClearsPrivateStateAndFocusesLogin
 ];
 
 async function run() {

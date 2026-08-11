@@ -41,6 +41,8 @@
     <p id="selected-month-label" class="muted" aria-live="polite">선택한 달 기준</p>
   </section>
 
+  <p id="global-message" class="container message global-message" role="status" aria-live="polite" aria-atomic="true"></p>
+
   <main id="main-content" class="container layout">
     <section id="panel-home" class="tab-panel" role="tabpanel" aria-labelledby="tab-home">
     <section id="cloud-panel" class="panel cloud-panel" aria-labelledby="cloud-title">
@@ -57,8 +59,8 @@
         </div>
         <button type="submit">로그인</button>
       </form>
-      <button id="cloud-upload-button" type="button" class="visually-hidden" hidden>클라우드에 저장</button>
-      <button id="cloud-download-button" type="button" class="visually-hidden" hidden>클라우드에서 불러오기</button>
+      <button id="cloud-upload-button" type="button" class="visually-hidden" data-cloud-write hidden>클라우드에 저장</button>
+      <button id="cloud-download-button" type="button" class="secondary" hidden>클라우드에서 불러오기</button>
       <p id="cloud-message" class="message" role="status" aria-live="polite"></p>
     </section>
 
@@ -151,7 +153,7 @@
           <input id="tx-memo" name="memo" type="text" maxlength="80" placeholder="예: 점심, 버스비" aria-describedby="form-message">
         </div>
         <div class="form-actions full">
-          <button type="submit" class="primary">기록 추가</button>
+          <button id="transaction-save" type="submit" class="primary" data-cloud-write>기록 추가</button>
           <button type="reset" class="secondary">입력 비우기</button>
         </div>
       </form>
@@ -209,7 +211,7 @@
           <input id="month-start-day" name="monthStartDay" type="number" inputmode="numeric" min="1" max="31" step="1" required aria-describedby="month-start-help month-start-message">
           <small id="month-start-help" class="hint">예: 1일이면 매월 1일~말일, 25일이면 25일~다음달 24일로 계산해요.</small>
         </div>
-        <button type="submit">시작일 저장</button>
+        <button id="month-start-save" type="submit" data-cloud-write>시작일 저장</button>
       </form>
       <p id="month-start-message" class="message" role="status" aria-live="polite"></p>
       <form id="budget-form" class="inline-form" novalidate>
@@ -218,7 +220,7 @@
           <input id="monthly-budget" name="monthlyBudget" type="number" inputmode="numeric" min="1" step="1" required aria-describedby="budget-help budget-message">
           <small id="budget-help" class="hint">월별 보기에서 선택한 달에만 적용됩니다. 예: 500000</small>
         </div>
-        <button type="submit">이번 기간 예산 저장</button>
+        <button id="budget-save" type="submit" data-cloud-write>이번 기간 예산 저장</button>
       </form>
       <p id="budget-message" class="message" role="status" aria-live="polite"></p>
     </section>
@@ -232,7 +234,7 @@
       <form id="category-budget-form" novalidate>
         <div id="category-budget-fields" class="category-budget-fields"></div>
         <div class="form-actions category-budget-actions">
-          <button type="submit">항목별 예산 저장</button>
+          <button id="category-budget-save" type="submit" data-cloud-write>항목별 예산 저장</button>
         </div>
       </form>
       <p id="category-budget-message" class="message" role="status" aria-live="polite"></p>
@@ -244,10 +246,10 @@
         <a class="back-to-top" href="#top">위로 ↑</a>
       </div>
       <div class="data-actions">
-        <button id="sample-button" type="button" class="secondary">샘플 데이터 채우기</button>
+        <button id="sample-button" type="button" class="secondary" data-cloud-write>샘플 데이터 채우기</button>
         <button id="export-button" type="button" class="secondary">JSON 내보내기</button>
-        <button id="import-button" type="button" class="secondary" aria-describedby="tool-message">JSON 가져오기</button>
-        <button id="reset-button" type="button" class="danger">전체 초기화</button>
+        <button id="import-button" type="button" class="secondary" aria-describedby="tool-message" data-cloud-write>JSON 가져오기</button>
+        <button id="reset-button" type="button" class="danger" data-cloud-write>전체 초기화</button>
       </div>
       <input id="import-file" class="visually-hidden" type="file" accept="application/json,.json">
       <p id="tool-message" class="message" role="status" aria-live="polite"></p>
@@ -265,7 +267,7 @@
       <div class="field"><label for="edit-amount">금액</label><input id="edit-amount" name="amount" type="text" inputmode="numeric" pattern="[0-9,]*" required aria-describedby="edit-message"></div>
       <div class="field full"><label for="edit-memo">메모 <span class="optional">선택</span></label><input id="edit-memo" name="memo" type="text" maxlength="80" aria-describedby="edit-message"></div>
       <p id="edit-message" class="message full" role="status" aria-live="polite"></p>
-      <div class="form-actions full"><button id="edit-save" type="submit" class="primary">수정 저장</button><button id="edit-cancel" type="button" class="secondary">취소</button></div>
+      <div class="form-actions full"><button id="edit-save" type="submit" class="primary" data-cloud-write>수정 저장</button><button id="edit-cancel" type="button" class="secondary">취소</button></div>
     </form>
   </dialog>
 
