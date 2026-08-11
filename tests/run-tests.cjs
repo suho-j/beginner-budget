@@ -40,14 +40,22 @@ function createContext(options = {}) {
   return context.window;
 }
 
-function createSupabaseFake() {
+function createSupabaseFake(options = {}) {
   const calls = [];
+  const emptyActions = new Set(options.emptyActions || []);
   function filteredQuery(table, action, payload) {
-    const call = { table, action, payload, filters: [] };
+    const call = { table, action, payload, filters: [], select: null };
     calls.push(call);
     const query = {
       eq(column, value) { call.filters.push([column, value]); return query; },
-      then(resolve, reject) { return Promise.resolve({ data: null, error: null }).then(resolve, reject); }
+      select(columns) { call.select = columns; return query; },
+      then(resolve, reject) {
+        const idFilter = call.filters.find(([column]) => column === 'id');
+        const data = call.select
+          ? (emptyActions.has(action) ? [] : [{ id: idFilter && idFilter[1] }])
+          : null;
+        return Promise.resolve({ data, error: null }).then(resolve, reject);
+      }
     };
     return query;
   }
@@ -433,10 +441,39 @@ async function testCloudMutatesOnlyRequestedTransactionRow() {
   assert.strictEqual(fake.calls[0].payload.user_id, 'user-1');
   assert.strictEqual(fake.calls[1].action, 'update');
   assert.strictEqual(JSON.stringify(fake.calls[1].filters), JSON.stringify([['id', 'tx-a'], ['user_id', 'user-1']]));
+  assert.strictEqual(fake.calls[1].select, 'id');
   assert.strictEqual(fake.calls[2].action, 'delete');
   assert.strictEqual(JSON.stringify(fake.calls[2].filters), JSON.stringify([['id', 'tx-a'], ['user_id', 'user-1']]));
+  assert.strictEqual(fake.calls[2].select, 'id');
   assert.strictEqual(fake.calls[3].table, 'budget_settings');
   assert.strictEqual(fake.calls[3].action, 'upsert');
+  assert.strictEqual(fake.calls[3].payload.user_id, 'user-1');
+  assert.strictEqual(fake.calls[3].options.onConflict, 'user_id');
+}
+
+async function testCloudRejectsInvalidOrStaleTransactionMutations() {
+  const transaction = { id: 'tx-a', date: '2026-05-02', type: 'expense', category: '생활비', amount: 12000, memo: '마트', source: 'user' };
+
+  const invalidFake = createSupabaseFake();
+  const invalidWin = createContext({ supabase: invalidFake.supabase });
+  await assert.rejects(
+    invalidWin.BudgetCloud.updateTransaction({ ...transaction, id: '   ' }),
+    /거래 ID가 올바르지 않아요/
+  );
+  assert.strictEqual(invalidFake.calls.filter((call) => call.action === 'update').length, 0);
+
+  const staleFake = createSupabaseFake({ emptyActions: ['update', 'delete'] });
+  const staleWin = createContext({ supabase: staleFake.supabase });
+  await assert.rejects(
+    staleWin.BudgetCloud.updateTransaction(transaction),
+    /거래가 이미 변경되었거나 삭제되었어요/
+  );
+  await assert.rejects(
+    staleWin.BudgetCloud.deleteTransaction('tx-a'),
+    /거래가 이미 변경되었거나 삭제되었어요/
+  );
+  assert.strictEqual(staleFake.calls[0].select, 'id');
+  assert.strictEqual(staleFake.calls[1].select, 'id');
 }
 
 const tests = [
@@ -459,6 +496,7 @@ const tests = [
   testUpdateTransactionValidatesAndPreservesIdentity,
   testCalendarDaysCoverBudgetPeriodByWholeWeeks,
   testSummarizeTransactionsByDateHonorsBudgetPeriod,
+  testCloudRejectsInvalidOrStaleTransactionMutations,
   testCloudMutatesOnlyRequestedTransactionRow
 ];
 

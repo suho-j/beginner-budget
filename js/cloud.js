@@ -125,8 +125,11 @@
   }
 
   async function updateTransaction(transaction) {
+    if (!transaction || typeof transaction.id !== 'string' || !transaction.id.trim()) {
+      throw new Error('거래 ID가 올바르지 않아요.');
+    }
     const { supabase, user } = await authenticatedClient();
-    const row = transactionToRemote(transaction, user.id);
+    const row = transactionToRemote({ ...transaction, id: transaction.id.trim() }, user.id);
     const patch = {
       date: row.date,
       type: row.type,
@@ -135,16 +138,32 @@
       memo: row.memo,
       source: row.source
     };
-    const result = await supabase.from('transactions').update(patch).eq('id', row.id).eq('user_id', user.id);
+    const result = await supabase
+      .from('transactions')
+      .update(patch)
+      .eq('id', row.id)
+      .eq('user_id', user.id)
+      .select('id');
     if (result.error) throw result.error;
+    if (!Array.isArray(result.data) || result.data.length !== 1 || result.data[0].id !== row.id) {
+      throw new Error('거래가 이미 변경되었거나 삭제되었어요. 새로고침 후 다시 시도해 주세요.');
+    }
     return { ok: true, id: row.id };
   }
 
   async function deleteTransaction(id) {
     if (typeof id !== 'string' || !id) throw new Error('삭제할 거래 ID가 올바르지 않아요.');
     const { supabase, user } = await authenticatedClient();
-    const result = await supabase.from('transactions').delete().eq('id', id).eq('user_id', user.id);
+    const result = await supabase
+      .from('transactions')
+      .delete()
+      .eq('id', id)
+      .eq('user_id', user.id)
+      .select('id');
     if (result.error) throw result.error;
+    if (!Array.isArray(result.data) || result.data.length !== 1 || result.data[0].id !== id) {
+      throw new Error('거래가 이미 변경되었거나 삭제되었어요. 새로고침 후 다시 시도해 주세요.');
+    }
     return { ok: true, id };
   }
 
