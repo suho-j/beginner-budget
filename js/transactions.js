@@ -196,6 +196,30 @@
       .sort((a, b) => (b.date + b.id).localeCompare(a.date + a.id));
   }
 
+  function summarizeTransactionsByDate(transactions, month, monthStartDay = 1) {
+    const rows = filterTransactions(transactions, {
+      month,
+      monthStartDay,
+      type: 'all',
+      category: 'all',
+      query: ''
+    });
+    const byDate = {};
+    rows.forEach((tx) => {
+      if (!byDate[tx.date]) {
+        byDate[tx.date] = { date: tx.date, expense: 0, income: 0, count: 0, transactions: [] };
+      }
+      const day = byDate[tx.date];
+      day[tx.type] += tx.amount;
+      day.count += 1;
+      day.transactions.push(tx);
+    });
+    return Object.keys(byDate).sort().reduce((sorted, date) => {
+      sorted[date] = byDate[date];
+      return sorted;
+    }, {});
+  }
+
   function typeLabelsForSearch(type) {
     return type === 'income' ? '수입 income' : type === 'expense' ? '지출 expense' : '';
   }
@@ -336,6 +360,7 @@
     setMonthStartDay,
     setCategoryBudgets,
     filterTransactions,
+    summarizeTransactionsByDate,
     summarize,
     hasSampleForMonth,
     createSampleState,

@@ -73,6 +73,24 @@
     return { start: localDateString(start), end: localDateString(end) };
   }
 
+  function calendarDaysForBudgetMonth(month, startDay = DEFAULT_MONTH_START_DAY) {
+    if (!isValidMonthString(month)) return [];
+    const range = periodRangeForMonth(month, startDay);
+    const [startYear, startMonth, startDate] = range.start.split('-').map(Number);
+    const [endYear, endMonth, endDate] = range.end.split('-').map(Number);
+    const first = new Date(startYear, startMonth - 1, startDate);
+    const last = new Date(endYear, endMonth - 1, endDate);
+    first.setDate(first.getDate() - first.getDay());
+    last.setDate(last.getDate() + (6 - last.getDay()));
+
+    const days = [];
+    for (const cursor = new Date(first); cursor <= last; cursor.setDate(cursor.getDate() + 1)) {
+      const date = localDateString(cursor);
+      days.push({ date, day: cursor.getDate(), inPeriod: date >= range.start && date <= range.end });
+    }
+    return days;
+  }
+
   function monthKeyForDate(dateString, startDay = DEFAULT_MONTH_START_DAY) {
     if (!isValidDateString(dateString)) return '';
     const normalizedStartDay = normalizeMonthStartDay(startDay);
@@ -233,6 +251,7 @@
     normalizeMonthStartDay,
     budgetForMonth,
     periodRangeForMonth,
+    calendarDaysForBudgetMonth,
     monthKeyForDate,
     isDateInBudgetMonth,
     loadState,

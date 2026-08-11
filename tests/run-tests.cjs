@@ -365,6 +365,33 @@ function testUpdateTransactionValidatesAndPreservesIdentity() {
   assert.strictEqual(missing.errors[0].field, 'transaction');
 }
 
+function testCalendarDaysCoverBudgetPeriodByWholeWeeks() {
+  const win = createContext();
+  const days = win.BudgetStorage.calendarDaysForBudgetMonth('2026-05', 25);
+  assert.strictEqual(days[0].date, '2026-05-24');
+  assert.strictEqual(days[days.length - 1].date, '2026-06-27');
+  assert.strictEqual(days.length % 7, 0);
+  assert.strictEqual(days.filter((day) => day.inPeriod).length, 31);
+  assert.strictEqual(days.find((day) => day.date === '2026-05-25').inPeriod, true);
+  assert.strictEqual(days.find((day) => day.date === '2026-06-25').inPeriod, false);
+}
+
+function testSummarizeTransactionsByDateHonorsBudgetPeriod() {
+  const win = createContext();
+  const transactions = [
+    { id: 'a', date: '2026-05-25', type: 'expense', category: '생활비', amount: 1000, memo: '' },
+    { id: 'b', date: '2026-05-25', type: 'income', category: '급여', amount: 5000, memo: '' },
+    { id: 'c', date: '2026-06-24', type: 'expense', category: '배달비', amount: 2000, memo: '' },
+    { id: 'd', date: '2026-06-25', type: 'expense', category: '생활비', amount: 9000, memo: '' }
+  ];
+  const byDate = win.BudgetTransactions.summarizeTransactionsByDate(transactions, '2026-05', 25);
+  assert.strictEqual(JSON.stringify(Object.keys(byDate)), JSON.stringify(['2026-05-25', '2026-06-24']));
+  assert.strictEqual(byDate['2026-05-25'].expense, 1000);
+  assert.strictEqual(byDate['2026-05-25'].income, 5000);
+  assert.strictEqual(byDate['2026-05-25'].count, 2);
+  assert.strictEqual(JSON.stringify(byDate['2026-05-25'].transactions.map((tx) => tx.id)), JSON.stringify(['b', 'a']));
+}
+
 const tests = [
   testStorageDefaultsAndIgnoresLocalStorage,
   testSaveDoesNotUseLocalStorage,
@@ -382,7 +409,9 @@ const tests = [
   testCloudUsesSharedLoginEmail,
   testCategoryBudgetDetailShowsSpentBeforeBudget,
   testCategoryFilterCombinesWithMonthTypeAndQuery,
-  testUpdateTransactionValidatesAndPreservesIdentity
+  testUpdateTransactionValidatesAndPreservesIdentity,
+  testCalendarDaysCoverBudgetPeriodByWholeWeeks,
+  testSummarizeTransactionsByDateHonorsBudgetPeriod
 ];
 
 for (const test of tests) {
