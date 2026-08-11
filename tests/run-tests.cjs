@@ -335,10 +335,17 @@ function testUpdateTransactionValidatesAndPreservesIdentity() {
     date: '2026-04-30', type: 'expense', category: '배달비', amount: '25,000', memo: '  저녁 배달  '
   });
   assert.strictEqual(updated.ok, true);
+  assert.notStrictEqual(updated.state, original);
+  assert.notStrictEqual(updated.state.transactions, original.transactions);
+  assert.strictEqual(updated.state.transactions[0], updated.transaction);
   assert.strictEqual(updated.transaction.id, 'tx-a');
   assert.strictEqual(updated.transaction.amount, 25000);
   assert.strictEqual(updated.transaction.memo, '저녁 배달');
   assert.strictEqual(updated.transaction.source, 'user');
+  assert.strictEqual(updated.state.transactions[0].id, 'tx-a');
+  assert.strictEqual(updated.state.transactions[0].amount, 25000);
+  assert.strictEqual(updated.state.transactions[0].memo, '저녁 배달');
+  assert.strictEqual(updated.state.transactions[0].source, 'user');
   assert.strictEqual(original.transactions[0].amount, 12000);
 
   const invalid = win.BudgetTransactions.updateTransaction(original, 'tx-a', {
@@ -346,11 +353,15 @@ function testUpdateTransactionValidatesAndPreservesIdentity() {
   });
   assert.strictEqual(invalid.ok, false);
   assert.strictEqual(invalid.state, original);
+  assert.strictEqual(invalid.transaction, null);
+  assert.strictEqual(invalid.errors[0].field, 'amount');
 
   const missing = win.BudgetTransactions.updateTransaction(original, 'tx-missing', {
     date: '2026-04-30', type: 'expense', category: '배달비', amount: '1000', memo: ''
   });
   assert.strictEqual(missing.ok, false);
+  assert.strictEqual(missing.state, original);
+  assert.strictEqual(missing.transaction, null);
   assert.strictEqual(missing.errors[0].field, 'transaction');
 }
 
