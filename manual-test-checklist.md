@@ -4,10 +4,12 @@
 
 ## 시작 전 안전 확인
 
-- [ ] 운영 Supabase를 백업하고 `budget_settings`, `transactions`의 사용자별 `group by user_id` 행 수를 각각 CSV로 기록했다.
-- [ ] 비표준 ID의 `old_id`와 `'tx-migrated-' || md5(user_id::text || ':' || id) AS new_id` 결정적 매핑을 적용 전에 CSV로 보관했다.
-- [ ] 매핑끼리와 기존 ID 사이 충돌이 모두 0건인지 감사했고, 결과 CSV도 보관했다.
-- [ ] SQL 적용 직전에 단일 배타적 쓰기 창을 열고 모든 기기의 구버전 운영 탭을 닫았으며 운영 URL 쓰기를 금지했다.
+- [ ] 창을 열기 전에 만든 백업·감사 자료가 있다면 예비 자료로 표시했고 마이그레이션 기준으로 사용하지 않는다.
+- [ ] 실제 SQL 적용 직전 절차의 첫 단계로 단일 배타적 쓰기 창부터 열고 모든 기기의 구버전 운영 탭을 닫았으며 운영 URL 쓰기를 금지했다.
+- [ ] 창 안에서 운영 Supabase를 다시 백업하고 `budget_settings`, `transactions`의 사용자별 `group by user_id` 행 수를 각각 authoritative CSV로 확정했다.
+- [ ] 창 안에서 비표준 ID의 `old_id`와 `'tx-migrated-' || md5(user_id::text || ':' || id) AS new_id` 결정적 매핑을 다시 실행해 authoritative CSV로 보관했다.
+- [ ] 창 안에서 매핑끼리와 기존 ID 사이 충돌을 다시 감사했고, 모두 0건인 authoritative 결과 CSV를 보관했다.
+- [ ] 창을 유지한 채 위 자료를 확정한 직후 SQL을 적용했으며 구버전 운영 탭이나 쓰기를 중간에 허용하지 않았다.
 - [ ] 운영 승격과 운영 URL 새 다운로드·인증 스모크까지 이 창을 유지할 수 없다면 공유 운영 DB 대신 격리 Supabase를 선택했다.
 - [ ] 원래 선택 월의 총예산과 네 카테고리 예산을 기록했다.
 - [ ] JSON 내보내기 백업을 받았다.

@@ -59,18 +59,22 @@ git diff --check origin/master..HEAD
 
 공유 운영 DB를 사용할 때는 배타적 쓰기 창을 한 번만 열고 중간에 해제하지 않습니다.
 
-- 시작: 읽기 전용 백업·감사·충돌 검사를 마친 뒤, 운영 Supabase에 SQL을 적용하기 **직전**
+- 시작: 실제 SQL 적용 작업에 들어갈 때 가장 먼저, 최종 백업·행 수·ID 매핑·충돌 감사 자료를 확정하기 **직전**
 - 유지: SQL 적용, DB 런타임 검증, 미리보기 배포·검수, 사용자가 선택한 정확한 안전 소스 SHA의 운영 승격 전체 기간
 - 종료: 승격된 운영 URL을 새로 열어 클라우드 데이터를 다시 다운로드하고 인증 스모크·QA 정리를 모두 완료한 뒤
 
-창이 열려 있는 동안 모든 기기의 구버전 운영 탭을 닫고 운영 URL의 모든 쓰기를 금지합니다. 공유 DB 쓰기는 마이그레이션과 검증된 후보 소스의 통제된 QA에만 허용합니다. 이 상태를 운영 승격과 운영 URL 최종 스모크까지 계속 보장할 수 없다면 공유 운영 DB에는 SQL을 적용하거나 미리보기를 연결하지 않고 격리 Supabase만 사용합니다.
+창을 열 때 모든 기기의 구버전 운영 탭을 닫고 운영 URL의 모든 쓰기를 금지합니다. 그 뒤 **창 안에서** 최종 백업, 두 테이블 사용자별 행 수, 결정적 ID 매핑, 두 종류 충돌 감사를 다시 실행해 authoritative CSV로 확정하고 곧바로 SQL을 적용합니다. 창 밖에서 미리 받은 백업·감사 자료는 예비 자료일 뿐 마이그레이션 기준으로 사용할 수 없습니다.
+
+창이 열린 뒤 공유 DB 쓰기는 마이그레이션과 검증된 후보 소스의 통제된 QA에만 허용합니다. 이 상태를 운영 승격과 운영 URL 최종 스모크까지 계속 보장할 수 없다면 공유 운영 DB에는 SQL을 적용하거나 미리보기를 연결하지 않고 격리 Supabase만 사용합니다.
 
 ## 운영 Supabase SQL 선행 게이트
 
 `docs/supabase-setup.sql` 변경은 저장소에만 있으며 2026-08-12 현재 운영 DB에는 적용하지 않았습니다. 공유 운영 데이터 미리보기 전에 다음을 모두 완료합니다.
 
-1. `budget_settings`, `transactions` 전체를 복구 가능한 형식으로 백업한다.
-2. 아래 사용자별 행 수를 각각 CSV로 저장한다. SQL 적용 후 같은 쿼리를 다시 실행해 사용자별로 대조한다.
+1. 필요하면 창을 열기 전에 예비 백업·감사를 수행할 수 있다. 단, 이 결과는 참고용이며 SQL 적용의 기준 자료가 아니다.
+2. 실제 SQL 적용 작업을 시작할 때 **먼저** 단일 배타적 쓰기 창을 열고 모든 기기의 구버전 운영 탭을 닫으며 운영 URL 쓰기를 금지한다.
+3. 창 안에서 `budget_settings`, `transactions` 전체를 다시 백업해 이 백업을 마이그레이션 기준본으로 확정한다.
+4. 창 안에서 아래 사용자별 행 수를 각각 다시 실행해 authoritative CSV로 저장한다. SQL 적용 후 같은 쿼리를 다시 실행해 사용자별로 대조한다.
 
    ```sql
    select user_id, count(*) as settings_count
@@ -84,7 +88,7 @@ git diff --check origin/master..HEAD
    order by user_id;
    ```
 
-3. 비표준 거래 ID의 **적용 전 결정적 매핑**을 아래 쿼리로 내보내 CSV를 보관한다. 설정 SQL의 update도 정확히 같은 식을 사용한다.
+5. 창 안에서 비표준 거래 ID의 **적용 전 결정적 매핑**을 다시 실행해 authoritative CSV로 보관한다. 설정 SQL의 update도 정확히 같은 식을 사용한다.
 
    ```sql
    select
@@ -96,7 +100,7 @@ git diff --check origin/master..HEAD
    order by user_id, id;
    ```
 
-4. SQL 적용 전에 매핑끼리 같은 `new_id`를 만드는 경우와 기존 행 ID에 부딪히는 경우를 모두 감사한다. 두 결과가 0건이어야 하며 결과도 CSV로 보관한다.
+6. 창 안에서 매핑끼리 같은 `new_id`를 만드는 경우와 기존 행 ID에 부딪히는 경우를 모두 다시 감사한다. 두 결과가 0건이어야 하며 authoritative 결과 CSV도 보관한다.
 
    ```sql
    with id_mapping as (
@@ -125,13 +129,13 @@ git diff --check origin/master..HEAD
    join public.transactions t on t.id = m.new_id;
    ```
 
-5. 1~4단계의 읽기 전용 준비가 끝나면 단일 배타적 쓰기 창을 열고 Supabase SQL Editor에서 `docs/supabase-setup.sql`을 적용한다.
-6. 사용자별 `budget_settings`와 `transactions` 행 수가 적용 전 CSV와 모두 같고, 비표준 ID가 0건인지 확인한다. 매핑 결과는 3단계 CSV와 정확히 일치해야 한다.
-7. `transactions_id_canonical` 제약 조건과 `set_budget_settings_updated_at` 트리거가 활성화됐는지 확인한다.
-8. 5개 인자를 받는 `replace_budget_state`만 존재하고, 3개 인자 구버전과 `replace_budget_samples` 오버로드가 제거됐는지 확인한다.
-9. `replace_budget_state`가 `authenticated`에만 실행 허용되고 `anon`에는 허용되지 않았는지 확인한다.
-10. 격리 환경 또는 별도 테스트 계정에서 정상 전체 교체가 한 번에 완료되고, 오래된 설정 버전이나 거래 스냅샷은 `40001` 충돌로 거부되는지 확인한다.
-11. 설정을 연속 저장했을 때 `updated_at`이 매번 증가하는지 확인하고, 백업·매핑 CSV·사용자별 행 수를 다시 대조한다.
+7. 3~6단계의 authoritative 자료를 확정한 뒤 창을 유지한 채 Supabase SQL Editor에서 `docs/supabase-setup.sql`을 곧바로 적용한다. 중간에 운영 쓰기를 허용하거나 탭을 다시 열지 않는다.
+8. 사용자별 `budget_settings`와 `transactions` 행 수가 적용 전 authoritative CSV와 모두 같고, 비표준 ID가 0건인지 확인한다. 매핑 결과는 5단계 CSV와 정확히 일치해야 한다.
+9. `transactions_id_canonical` 제약 조건과 `set_budget_settings_updated_at` 트리거가 활성화됐는지 확인한다.
+10. 5개 인자를 받는 `replace_budget_state`만 존재하고, 3개 인자 구버전과 `replace_budget_samples` 오버로드가 제거됐는지 확인한다.
+11. `replace_budget_state`가 `authenticated`에만 실행 허용되고 `anon`에는 허용되지 않았는지 확인한다.
+12. 격리 환경 또는 별도 테스트 계정에서 정상 전체 교체가 한 번에 완료되고, 오래된 설정 버전이나 거래 스냅샷은 `40001` 충돌로 거부되는지 확인한다.
+13. 설정을 연속 저장했을 때 `updated_at`이 매번 증가하는지 확인하고, 기준 백업·매핑 CSV·사용자별 행 수를 다시 대조한다.
 
 실패가 하나라도 있으면 공유 운영 데이터 미리보기를 중단하고 백업을 보존합니다. 가장 안전한 선택은 별도 Supabase 프로젝트에서 먼저 같은 절차를 수행하는 것입니다.
 
