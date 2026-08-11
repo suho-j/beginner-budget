@@ -173,23 +173,19 @@
   async function saveSettings(state) {
     const { supabase, user } = await authenticatedClient();
     const settings = stateToRemote(state, user.id).settings;
-    const priorTime = Date.parse(settingsVersion || '');
-    const nextTime = Number.isFinite(priorTime) ? Math.max(Date.now(), priorTime + 1) : Date.now();
-    const nextVersion = new Date(nextTime).toISOString();
     const result = settingsVersion
       ? await supabase
         .from('budget_settings')
         .update({
           monthly_budget: settings.monthly_budget,
-          category_budgets: settings.category_budgets,
-          updated_at: nextVersion
+          category_budgets: settings.category_budgets
         })
         .eq('user_id', user.id)
         .eq('updated_at', settingsVersion)
         .select('updated_at')
       : await supabase
         .from('budget_settings')
-        .insert({ ...settings, updated_at: nextVersion })
+        .insert(settings)
         .select('updated_at');
     if (result.error) {
       if (result.error.code === '23505') throw conflictError(SETTINGS_CONFLICT_MESSAGE);
@@ -277,7 +273,7 @@
     };
   }
 
-  async function replaceSampleTransactions(month, startDay, transactions) {
+  async function replaceSampleTransactions(month, startDay, transactions, expectedSamples) {
     if (!window.BudgetStorage.isValidMonthString(month)) {
       throw new Error('샘플을 저장할 예산월이 올바르지 않아요.');
     }
@@ -288,9 +284,12 @@
     if (!Array.isArray(transactions) || transactions.length !== 6) {
       throw new Error('저장할 샘플 거래 6건이 필요해요.');
     }
+    if (!Array.isArray(expectedSamples)) {
+      throw new Error('비교할 기존 샘플 거래 정보가 필요해요.');
+    }
 
     const period = window.BudgetStorage.periodRangeForMonth(month, normalizedStartDay);
-    const rows = transactions.map((transaction) => {
+    const normalizeSamples = (sampleRows) => sampleRows.map((transaction) => {
       if (!transaction || transaction.source !== 'sample') {
         throw new Error('샘플 거래 정보가 올바르지 않아요.');
       }
@@ -311,12 +310,15 @@
         source: 'sample'
       };
     });
+    const rows = normalizeSamples(transactions);
+    const expectedRows = normalizeSamples(expectedSamples);
 
     const { supabase } = await authenticatedClient();
     const result = await supabase.rpc('replace_budget_samples', {
       p_period_start: period.start,
       p_period_end: period.end,
-      p_transactions: rows
+      p_transactions: rows,
+      p_expected_samples: expectedRows
     });
     if (result.error) throw result.error;
     return {

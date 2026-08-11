@@ -20,6 +20,31 @@ create table if not exists public.transactions (
   created_at timestamptz not null default now()
 );
 
+create or replace function public.set_budget_settings_updated_at()
+returns trigger
+language plpgsql
+security invoker
+set search_path = pg_catalog, public
+as $function$
+begin
+  if tg_op = 'INSERT' then
+    new.updated_at := clock_timestamp();
+  else
+    new.updated_at := greatest(
+      clock_timestamp(),
+      old.updated_at + interval '1 microsecond'
+    );
+  end if;
+  return new;
+end;
+$function$;
+
+drop trigger if exists set_budget_settings_updated_at on public.budget_settings;
+create trigger set_budget_settings_updated_at
+before insert or update on public.budget_settings
+for each row
+execute function public.set_budget_settings_updated_at();
+
 alter table public.budget_settings enable row level security;
 alter table public.transactions enable row level security;
 
@@ -96,7 +121,7 @@ declare
   v_current_updated_at timestamptz;
   v_expected_transactions jsonb;
   v_current_transactions jsonb;
-  v_new_updated_at timestamptz := clock_timestamp();
+  v_new_updated_at timestamptz;
 begin
   if v_user_id is null then
     raise exception 'authentication required' using errcode = '42501';
@@ -147,6 +172,7 @@ begin
     where jsonb_typeof(transaction_row) <> 'object'
       or jsonb_typeof(transaction_row -> 'id') <> 'string'
       or nullif(btrim(transaction_row ->> 'id'), '') is null
+      or btrim(transaction_row ->> 'id') <> transaction_row ->> 'id'
       or jsonb_typeof(transaction_row -> 'date') <> 'string'
       or coalesce(transaction_row ->> 'date', '') !~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
       or to_char(to_date(transaction_row ->> 'date', 'YYYY-MM-DD'), 'YYYY-MM-DD') <> transaction_row ->> 'date'
@@ -250,27 +276,26 @@ begin
     update public.budget_settings as settings
     set
       monthly_budget = p_monthly_budget,
-      category_budgets = p_category_budgets,
-      updated_at = v_new_updated_at
+      category_budgets = p_category_budgets
     where settings.user_id = v_user_id
-      and settings.updated_at = p_expected_updated_at;
+      and settings.updated_at = p_expected_updated_at
+    returning settings.updated_at into v_new_updated_at;
     if not found then
       raise exception '다른 브라우저에서 가계부 데이터가 변경됐어요. 클라우드 데이터를 다시 불러와 주세요.'
         using errcode = '40001';
     end if;
   else
-    insert into public.budget_settings (
+    insert into public.budget_settings as settings (
       user_id,
       monthly_budget,
-      category_budgets,
-      updated_at
+      category_budgets
     ) values (
       v_user_id,
       p_monthly_budget,
-      p_category_budgets,
-      v_new_updated_at
+      p_category_budgets
     )
-    on conflict (user_id) do nothing;
+    on conflict (user_id) do nothing
+    returning settings.updated_at into v_new_updated_at;
     if not found then
       raise exception '다른 브라우저에서 가계부 데이터가 변경됐어요. 클라우드 데이터를 다시 불러와 주세요.'
         using errcode = '40001';
@@ -318,10 +343,13 @@ revoke all on function public.replace_budget_state(integer, jsonb, jsonb, timest
 grant execute on function public.replace_budget_state(integer, jsonb, jsonb, timestamptz, jsonb) to authenticated;
 
 -- Atomically replace sample rows inside one validated budget period.
+drop function if exists public.replace_budget_samples(date, date, jsonb);
+
 create or replace function public.replace_budget_samples(
   p_period_start date,
   p_period_end date,
-  p_transactions jsonb
+  p_transactions jsonb,
+  p_expected_samples jsonb
 )
 returns table (replaced_count integer)
 language plpgsql
@@ -330,6 +358,8 @@ set search_path = pg_catalog, public
 as $function$
 declare
   v_user_id uuid := auth.uid();
+  v_expected_samples jsonb;
+  v_current_samples jsonb;
 begin
   if v_user_id is null then
     raise exception 'authentication required' using errcode = '42501';
@@ -346,13 +376,17 @@ begin
     or jsonb_array_length(p_transactions) <> 6 then
     raise exception 'exactly six sample transactions are required' using errcode = '22023';
   end if;
+  if p_expected_samples is null or jsonb_typeof(p_expected_samples) <> 'array' then
+    raise exception 'expected sample transactions must be a JSON array' using errcode = '22023';
+  end if;
 
   if exists (
     select 1
-    from jsonb_array_elements(p_transactions) as transaction_row
+    from jsonb_array_elements(p_transactions || p_expected_samples) as transaction_row
     where jsonb_typeof(transaction_row) <> 'object'
       or jsonb_typeof(transaction_row -> 'id') <> 'string'
       or nullif(btrim(transaction_row ->> 'id'), '') is null
+      or btrim(transaction_row ->> 'id') <> transaction_row ->> 'id'
       or jsonb_typeof(transaction_row -> 'date') <> 'string'
       or coalesce(transaction_row ->> 'date', '') !~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
       or to_char(to_date(transaction_row ->> 'date', 'YYYY-MM-DD'), 'YYYY-MM-DD') <> transaction_row ->> 'date'
@@ -379,6 +413,67 @@ begin
     having count(*) > 1
   ) then
     raise exception 'duplicate transaction ids are not allowed' using errcode = '22023';
+  end if;
+
+  if exists (
+    select 1
+    from jsonb_array_elements(p_expected_samples) as transaction_row
+    group by transaction_row ->> 'id'
+    having count(*) > 1
+  ) then
+    raise exception 'duplicate expected sample transaction ids are not allowed' using errcode = '22023';
+  end if;
+
+  select coalesce(
+    jsonb_agg(
+      jsonb_build_object(
+        'id', transaction_row.id,
+        'date', to_char(transaction_row.date, 'YYYY-MM-DD'),
+        'type', transaction_row.type,
+        'category', transaction_row.category,
+        'amount', transaction_row.amount,
+        'memo', coalesce(transaction_row.memo, ''),
+        'source', coalesce(transaction_row.source, 'sample')
+      ) order by transaction_row.id collate "C"
+    ),
+    '[]'::jsonb
+  )
+  into v_expected_samples
+  from jsonb_to_recordset(p_expected_samples) as transaction_row(
+    id text,
+    date date,
+    type text,
+    category text,
+    amount integer,
+    memo text,
+    source text
+  );
+
+  lock table public.transactions in share row exclusive mode;
+
+  select coalesce(
+    jsonb_agg(
+      jsonb_build_object(
+        'id', transaction_row.id,
+        'date', to_char(transaction_row.date, 'YYYY-MM-DD'),
+        'type', transaction_row.type,
+        'category', transaction_row.category,
+        'amount', transaction_row.amount,
+        'memo', coalesce(transaction_row.memo, ''),
+        'source', coalesce(transaction_row.source, 'sample')
+      ) order by transaction_row.id collate "C"
+    ),
+    '[]'::jsonb
+  )
+  into v_current_samples
+  from public.transactions as transaction_row
+  where transaction_row.user_id = v_user_id
+    and transaction_row.source = 'sample'
+    and transaction_row.date between p_period_start and p_period_end;
+
+  if v_current_samples is distinct from v_expected_samples then
+    raise exception '다른 브라우저에서 샘플 데이터가 변경됐어요. 클라우드 데이터를 다시 불러와 주세요.'
+      using errcode = '40001';
   end if;
 
   delete from public.transactions
@@ -419,6 +514,6 @@ begin
 end;
 $function$;
 
-revoke all on function public.replace_budget_samples(date, date, jsonb) from public;
-revoke all on function public.replace_budget_samples(date, date, jsonb) from anon;
-grant execute on function public.replace_budget_samples(date, date, jsonb) to authenticated;
+revoke all on function public.replace_budget_samples(date, date, jsonb, jsonb) from public;
+revoke all on function public.replace_budget_samples(date, date, jsonb, jsonb) from anon;
+grant execute on function public.replace_budget_samples(date, date, jsonb, jsonb) to authenticated;

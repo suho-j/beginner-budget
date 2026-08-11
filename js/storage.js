@@ -135,6 +135,7 @@
     const rawCategory = typeof tx.category === 'string' ? tx.category.trim() : '';
     const category = type === 'expense' ? normalizeExpenseCategory(rawCategory) : rawCategory;
     const amount = Number(tx.amount);
+    const id = typeof tx.id === 'string' ? tx.id.trim() : '';
 
     if (!type || !isValidDateString(date) || !categoriesFor(type).includes(category) || !isPositiveInteger(amount)) {
       return null;
@@ -144,7 +145,7 @@
     const source = tx.source === 'sample' ? 'sample' : 'user';
 
     return {
-      id: typeof tx.id === 'string' && tx.id ? tx.id : createId(),
+      id: id || createId(),
       date,
       type,
       category,
