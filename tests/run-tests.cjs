@@ -332,6 +332,16 @@ function testCategoryBudgetDetailShowsSpentBeforeBudget() {
   assert.ok(!source.includes('`예산 ${formatWon(item.budget)} / 사용 ${formatWon(item.spent)}`'));
 }
 
+function testAppMarkupProvidesTabsCalendarEditDialogAndPreviewWarning() {
+  const source = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+  for (const required of [
+    'id="preview-data-warning"', 'role="tablist"', 'id="tab-home"', 'id="tab-history"',
+    'id="tab-calendar"', 'id="tab-settings"', 'id="month-previous"', 'id="month-next"',
+    'id="filter-category"', 'id="calendar-grid"', 'id="calendar-detail-list"',
+    '<dialog id="edit-dialog"', 'id="edit-transaction-form"'
+  ]) assert.ok(source.includes(required), `missing markup: ${required}`);
+}
+
 function testCategoryFilterCombinesWithMonthTypeAndQuery() {
   const win = createContext();
   const transactions = [
@@ -492,6 +502,7 @@ const tests = [
   testCloudStateMappingKeepsBudgetAndTransactions,
   testCloudUsesSharedLoginEmail,
   testCategoryBudgetDetailShowsSpentBeforeBudget,
+  testAppMarkupProvidesTabsCalendarEditDialogAndPreviewWarning,
   testCategoryFilterCombinesWithMonthTypeAndQuery,
   testUpdateTransactionValidatesAndPreservesIdentity,
   testCalendarDaysCoverBudgetPeriodByWholeWeeks,

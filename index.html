@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>처음 가계부</title>
-  <link rel="stylesheet" href="css/style.css">
+  <link rel="stylesheet" href="css/style.css?v=20260811a">
 </head>
 <body id="top">
   <a class="skip-link" href="#main-content">본문으로 바로가기</a>
@@ -19,18 +19,29 @@
     </div>
   </header>
 
-  <nav class="container quick-nav" aria-label="바로가기">
-    <div class="quick-nav-tabs">
-      <a href="#summary-title">이번 달 요약</a>
-      <a href="#form-title">수입/지출 입력</a>
-      <a href="#list-title">거래 내역</a>
-      <a href="#budget-title">월 예산 설정</a>
-      <a href="#category-budget-title">항목별 잔액</a>
-      <a href="#tools-title">보기와 데이터 도구</a>
+  <div id="preview-data-warning" class="preview-data-warning" role="status" hidden>
+    개발 화면 · 운영 데이터 사용 중
+  </div>
+  <section class="container month-toolbar" aria-labelledby="month-toolbar-title">
+    <h2 id="month-toolbar-title" class="visually-hidden">조회 월 선택</h2>
+    <button id="month-previous" type="button" class="secondary" aria-label="이전 달 보기">← 이전 달</button>
+    <label class="month-picker" for="filter-month"><span>조회 월</span><input id="filter-month" name="filterMonth" type="month"></label>
+    <button id="month-current" type="button" class="secondary">이번 달</button>
+    <button id="month-next" type="button" class="secondary" aria-label="다음 달 보기">다음 달 →</button>
+    <p id="selected-month-label" class="muted" aria-live="polite">선택한 달 기준</p>
+  </section>
+
+  <nav class="container app-tabs" aria-label="주요 메뉴">
+    <div role="tablist" aria-label="가계부 화면">
+      <button id="tab-home" type="button" role="tab" aria-selected="true" aria-controls="panel-home" data-tab="home">홈</button>
+      <button id="tab-history" type="button" role="tab" aria-selected="false" aria-controls="panel-history" data-tab="history" tabindex="-1">내역</button>
+      <button id="tab-calendar" type="button" role="tab" aria-selected="false" aria-controls="panel-calendar" data-tab="calendar" tabindex="-1">캘린더</button>
+      <button id="tab-settings" type="button" role="tab" aria-selected="false" aria-controls="panel-settings" data-tab="settings" tabindex="-1">설정</button>
     </div>
   </nav>
 
   <main id="main-content" class="container layout">
+    <section id="panel-home" class="tab-panel" role="tabpanel" aria-labelledby="tab-home">
     <section id="cloud-panel" class="panel cloud-panel" aria-labelledby="cloud-title">
       <div class="cloud-heading">
         <div>
@@ -53,7 +64,6 @@
     <section class="summary-section" aria-labelledby="summary-title">
       <div class="section-heading section-heading-spread">
         <h2 id="summary-title">이번 달 요약</h2>
-        <p id="selected-month-label" class="muted">선택한 달 기준</p>
         <a class="back-to-top" href="#top">위로 ↑</a>
       </div>
       <div class="summary-grid" aria-live="polite">
@@ -146,6 +156,17 @@
       </form>
       <p id="form-message" class="message" role="status" aria-live="polite"></p>
     </section>
+    </section>
+
+    <section id="panel-history" class="tab-panel" role="tabpanel" aria-labelledby="tab-history" hidden>
+    <div class="panel filters" aria-labelledby="history-filter-title">
+      <h2 id="history-filter-title">사용 내역 찾기</h2>
+      <div class="filter-grid">
+        <div class="field"><label for="filter-type">유형</label><select id="filter-type" name="filterType"><option value="all">전체</option><option value="income">수입만</option><option value="expense">지출만</option></select></div>
+        <div class="field"><label for="filter-category">카테고리</label><select id="filter-category" name="filterCategory"><option value="all">전체</option></select></div>
+        <div class="field full"><label for="filter-query">검색</label><input id="filter-query" name="filterQuery" type="search" placeholder="예: 생활비, 마트, 2026-05-02"></div>
+      </div>
+    </div>
 
     <section class="panel transactions-panel" aria-labelledby="list-title">
       <div class="section-heading section-heading-spread">
@@ -159,6 +180,22 @@
       </div>
       <ul id="transaction-list" class="transaction-list"></ul>
     </section>
+    </section>
+
+    <section id="panel-calendar" class="tab-panel" role="tabpanel" aria-labelledby="tab-calendar" hidden>
+    <section class="panel" aria-labelledby="calendar-title">
+      <div class="section-heading section-heading-spread"><h2 id="calendar-title">월간 사용 캘린더</h2><p id="calendar-period-label" class="muted"></p></div>
+      <div class="calendar-weekdays" aria-hidden="true"><span>일</span><span>월</span><span>화</span><span>수</span><span>목</span><span>금</span><span>토</span></div>
+      <div id="calendar-grid" class="calendar-grid" role="grid" aria-labelledby="calendar-title"></div>
+    </section>
+    <section class="panel" aria-labelledby="calendar-detail-title">
+      <div class="section-heading section-heading-spread"><h2 id="calendar-detail-title">날짜별 상세</h2><p id="calendar-detail-count" class="muted">날짜를 선택해 주세요.</p></div>
+      <div id="calendar-detail-empty" class="empty-state">날짜를 누르면 거래 내역을 보여드려요.</div>
+      <ul id="calendar-detail-list" class="transaction-list"></ul>
+    </section>
+    </section>
+
+    <section id="panel-settings" class="tab-panel" role="tabpanel" aria-labelledby="tab-settings" hidden>
 
     <section class="panel" aria-labelledby="budget-title">
       <div class="section-heading section-heading-spread">
@@ -205,24 +242,6 @@
         <h2 id="tools-title">보기와 데이터 도구</h2>
         <a class="back-to-top" href="#top">위로 ↑</a>
       </div>
-      <div class="filters">
-        <div class="field">
-          <label for="filter-month">월별 보기</label>
-          <input id="filter-month" name="filterMonth" type="month">
-        </div>
-        <div class="field">
-          <label for="filter-type">유형 보기</label>
-          <select id="filter-type" name="filterType">
-            <option value="all">전체</option>
-            <option value="income">수입만</option>
-            <option value="expense">지출만</option>
-          </select>
-        </div>
-        <div class="field full">
-          <label for="filter-query">검색</label>
-          <input id="filter-query" name="filterQuery" type="search" placeholder="예: 생활비, 마트, 2026-05-02">
-        </div>
-      </div>
       <div class="data-actions">
         <button id="sample-button" type="button" class="secondary">샘플 데이터 채우기</button>
         <button id="export-button" type="button" class="secondary">JSON 내보내기</button>
@@ -232,7 +251,22 @@
       <input id="import-file" class="visually-hidden" type="file" accept="application/json,.json">
       <p id="tool-message" class="message" role="status" aria-live="polite"></p>
     </section>
+    </section>
   </main>
+
+  <dialog id="edit-dialog" aria-labelledby="edit-dialog-title">
+    <form id="edit-transaction-form" class="transaction-form dialog-form" method="dialog" novalidate>
+      <div class="dialog-heading full"><h2 id="edit-dialog-title">사용 내역 수정</h2><button id="edit-close" type="button" class="secondary" aria-label="수정 창 닫기">닫기</button></div>
+      <input id="edit-id" name="transaction" type="hidden">
+      <div class="field"><label for="edit-date">날짜</label><input id="edit-date" name="date" type="date" required aria-describedby="edit-message"></div>
+      <div class="field"><label for="edit-type">유형</label><select id="edit-type" name="type" required aria-describedby="edit-message"><option value="expense">지출</option><option value="income">수입</option></select></div>
+      <div class="field"><label for="edit-category">카테고리</label><select id="edit-category" name="category" required aria-describedby="edit-message"></select></div>
+      <div class="field"><label for="edit-amount">금액</label><input id="edit-amount" name="amount" type="text" inputmode="numeric" pattern="[0-9,]*" required aria-describedby="edit-message"></div>
+      <div class="field full"><label for="edit-memo">메모 <span class="optional">선택</span></label><input id="edit-memo" name="memo" type="text" maxlength="80" aria-describedby="edit-message"></div>
+      <p id="edit-message" class="message full" role="status" aria-live="polite"></p>
+      <div class="form-actions full"><button id="edit-save" type="submit" class="primary">수정 저장</button><button id="edit-cancel" type="button" class="secondary">취소</button></div>
+    </form>
+  </dialog>
 
   <footer class="site-footer">
     <div class="container">데이터는 Supabase에 저장됩니다. 로그인 전 변경은 새로고침하면 사라질 수 있으니 먼저 로그인하세요.</div>
@@ -241,8 +275,8 @@
   <script src="js/storage.js"></script>
   <script src="js/transactions.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="js/cloud.js?v=20260601d"></script>
-  <script src="js/ui.js?v=20260601d"></script>
-  <script src="js/app.js?v=20260601d"></script>
+  <script src="js/cloud.js?v=20260811a"></script>
+  <script src="js/ui.js?v=20260811a"></script>
+  <script src="js/app.js?v=20260811a"></script>
 </body>
 </html>
