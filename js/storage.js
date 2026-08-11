@@ -252,6 +252,7 @@
     budgetForMonth,
     periodRangeForMonth,
     calendarDaysForBudgetMonth,
+    addMonthsToMonth,
     monthKeyForDate,
     isDateInBudgetMonth,
     loadState,

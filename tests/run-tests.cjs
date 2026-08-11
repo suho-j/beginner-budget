@@ -1020,6 +1020,23 @@ function testSummarizeTransactionsByDateHonorsBudgetPeriod() {
   assert.strictEqual(JSON.stringify(byDate['2026-05-25'].transactions.map((tx) => tx.id)), JSON.stringify(['b', 'a']));
 }
 
+function testAppIntegratesTabsCalendarAndRemoteFirstMutations() {
+  const source = fs.readFileSync(path.join(__dirname, '..', 'js', 'app.js'), 'utf8');
+  [
+    'BudgetCloud.insertTransaction',
+    'BudgetCloud.updateTransaction',
+    'BudgetCloud.deleteTransaction',
+    'BudgetCloud.saveSettings',
+    'BudgetUI.setActiveTab',
+    'BudgetUI.renderCalendar',
+    'filterCategory'
+  ].forEach((token) => assert.ok(source.includes(token), `app.js must integrate ${token}`));
+  assert.ok(
+    !source.includes('persist(window.BudgetTransactions.deleteTransaction'),
+    'transaction deletion must not update local state before Supabase succeeds'
+  );
+}
+
 async function testCloudMutatesOnlyRequestedTransactionRow() {
   const fake = createSupabaseFake();
   const win = createContext({ supabase: fake.supabase });
@@ -1095,6 +1112,7 @@ const tests = [
   testUpdateTransactionValidatesAndPreservesIdentity,
   testCalendarDaysCoverBudgetPeriodByWholeWeeks,
   testSummarizeTransactionsByDateHonorsBudgetPeriod,
+  testAppIntegratesTabsCalendarAndRemoteFirstMutations,
   testCloudRejectsInvalidOrStaleTransactionMutations,
   testCloudMutatesOnlyRequestedTransactionRow
 ];
