@@ -109,8 +109,10 @@ using (auth.uid() = user_id);
 
 revoke all on table public.preview_budget_settings from public;
 revoke all on table public.preview_budget_settings from anon;
+revoke all on table public.preview_budget_settings from authenticated;
 revoke all on table public.preview_transactions from public;
 revoke all on table public.preview_transactions from anon;
+revoke all on table public.preview_transactions from authenticated;
 grant select, insert, update on table public.preview_budget_settings to authenticated;
 grant select, insert, update, delete on table public.preview_transactions to authenticated;
 

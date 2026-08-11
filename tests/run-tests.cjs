@@ -2171,10 +2171,25 @@ function testPreviewSupabaseSetupCreatesIsolatedTablesRlsAndPermissions() {
       new RegExp(`create policy "Preview users can ${operation} own transactions"[\\s\\S]*?for ${operation}[\\s\\S]*?auth\\.uid\\(\\) = user_id`, 'i')
     );
   }
+  assert.match(source, /revoke all on table public\.preview_budget_settings from public/i);
   assert.match(source, /revoke all on table public\.preview_budget_settings from anon/i);
+  assert.match(source, /revoke all on table public\.preview_transactions from public/i);
   assert.match(source, /revoke all on table public\.preview_transactions from anon/i);
-  assert.match(source, /grant select, insert, update on table public\.preview_budget_settings to authenticated/i);
-  assert.match(source, /grant select, insert, update, delete on table public\.preview_transactions to authenticated/i);
+
+  const settingsAuthenticatedRevoke = source.search(/revoke all on table public\.preview_budget_settings from authenticated/i);
+  const transactionsAuthenticatedRevoke = source.search(/revoke all on table public\.preview_transactions from authenticated/i);
+  const settingsGrant = source.search(/grant select, insert, update on table public\.preview_budget_settings to authenticated/i);
+  const transactionsGrant = source.search(/grant select, insert, update, delete on table public\.preview_transactions to authenticated/i);
+  assert.ok(settingsAuthenticatedRevoke >= 0 && settingsAuthenticatedRevoke < settingsGrant);
+  assert.ok(transactionsAuthenticatedRevoke >= 0 && transactionsAuthenticatedRevoke < transactionsGrant);
+  assert.deepStrictEqual(
+    source.match(/grant [^;]+ on table public\.preview_budget_settings to authenticated;/gi),
+    ['grant select, insert, update on table public.preview_budget_settings to authenticated;']
+  );
+  assert.deepStrictEqual(
+    source.match(/grant [^;]+ on table public\.preview_transactions to authenticated;/gi),
+    ['grant select, insert, update, delete on table public.preview_transactions to authenticated;']
+  );
 }
 
 function testPreviewSupabaseSetupCopiesProductionOnceWithoutMutatingIt() {
