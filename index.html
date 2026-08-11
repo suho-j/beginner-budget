@@ -171,7 +171,7 @@
     <section class="panel transactions-panel" aria-labelledby="list-title">
       <div class="section-heading section-heading-spread">
         <h2 id="list-title">거래 내역</h2>
-        <p id="list-count" class="muted">0건</p>
+        <p id="list-count" class="muted" role="status" aria-live="polite" aria-atomic="true">0건</p>
         <a class="back-to-top" href="#top">위로 ↑</a>
       </div>
       <div id="empty-state" class="empty-state">
@@ -186,7 +186,7 @@
     <section class="panel" aria-labelledby="calendar-title">
       <div class="section-heading section-heading-spread"><h2 id="calendar-title">월간 사용 캘린더</h2><p id="calendar-period-label" class="muted"></p></div>
       <div class="calendar-weekdays" aria-hidden="true"><span>일</span><span>월</span><span>화</span><span>수</span><span>목</span><span>금</span><span>토</span></div>
-      <div id="calendar-grid" class="calendar-grid" role="grid" aria-labelledby="calendar-title"></div>
+      <div id="calendar-grid" class="calendar-grid" role="group" aria-labelledby="calendar-title"></div>
     </section>
     <section class="panel" aria-labelledby="calendar-detail-title">
       <div class="section-heading section-heading-spread"><h2 id="calendar-detail-title">날짜별 상세</h2><p id="calendar-detail-count" class="muted">날짜를 선택해 주세요.</p></div>

@@ -334,12 +334,62 @@ function testCategoryBudgetDetailShowsSpentBeforeBudget() {
 
 function testAppMarkupProvidesTabsCalendarEditDialogAndPreviewWarning() {
   const source = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+  const startTagById = (id) => {
+    const match = source.match(new RegExp(`<([a-z][\\w-]*)\\b[^>]*\\bid="${id}"[^>]*>`, 'i'));
+    assert.ok(match, `missing element: ${id}`);
+    return { name: match[1].toLowerCase(), source: match[0] };
+  };
+  const assertAttribute = (tag, name, value) => {
+    assert.match(tag.source, new RegExp(`\\b${name}="${value}"(?:\\s|>)`), `${tag.source} missing ${name}="${value}"`);
+  };
+  const assertBooleanAttribute = (tag, name) => {
+    assert.match(tag.source, new RegExp(`(?:\\s)${name}(?:\\s|>)`), `${tag.source} missing ${name}`);
+  };
+
   for (const required of [
     'id="preview-data-warning"', 'role="tablist"', 'id="tab-home"', 'id="tab-history"',
     'id="tab-calendar"', 'id="tab-settings"', 'id="month-previous"', 'id="month-next"',
     'id="filter-category"', 'id="calendar-grid"', 'id="calendar-detail-list"',
     '<dialog id="edit-dialog"', 'id="edit-transaction-form"'
   ]) assert.ok(source.includes(required), `missing markup: ${required}`);
+
+  const ids = [...source.matchAll(/\bid="([^"]+)"/g)].map((match) => match[1]);
+  assert.strictEqual(new Set(ids).size, ids.length, 'all element IDs must be unique');
+
+  for (const [tabId, panelId, selected, inactive] of [
+    ['tab-home', 'panel-home', 'true', false],
+    ['tab-history', 'panel-history', 'false', true],
+    ['tab-calendar', 'panel-calendar', 'false', true],
+    ['tab-settings', 'panel-settings', 'false', true]
+  ]) {
+    const tab = startTagById(tabId);
+    assert.strictEqual(tab.name, 'button');
+    assertAttribute(tab, 'role', 'tab');
+    assertAttribute(tab, 'aria-controls', panelId);
+    assertAttribute(tab, 'aria-selected', selected);
+    if (inactive) assertAttribute(tab, 'tabindex', '-1');
+
+    const panel = startTagById(panelId);
+    assert.strictEqual(panel.name, 'section');
+    assertAttribute(panel, 'role', 'tabpanel');
+    assertAttribute(panel, 'aria-labelledby', tabId);
+    if (inactive) assertBooleanAttribute(panel, 'hidden');
+    else assert.doesNotMatch(panel.source, /(?:\s)hidden(?:\s|>)/);
+  }
+
+  const dialog = startTagById('edit-dialog');
+  assert.strictEqual(dialog.name, 'dialog');
+  assertAttribute(dialog, 'aria-labelledby', 'edit-dialog-title');
+
+  const calendar = startTagById('calendar-grid');
+  assert.strictEqual(calendar.name, 'div');
+  assertAttribute(calendar, 'role', 'group');
+  assertAttribute(calendar, 'aria-labelledby', 'calendar-title');
+
+  const listCount = startTagById('list-count');
+  assertAttribute(listCount, 'role', 'status');
+  assertAttribute(listCount, 'aria-live', 'polite');
+  assertAttribute(listCount, 'aria-atomic', 'true');
 }
 
 function testCategoryFilterCombinesWithMonthTypeAndQuery() {
