@@ -40,6 +40,220 @@ function createContext(options = {}) {
   return context.window;
 }
 
+function createUiContext() {
+  let document;
+
+  class FakeClassList {
+    constructor(element) {
+      this.element = element;
+    }
+
+    values() {
+      return new Set(this.element.className.split(/\s+/).filter(Boolean));
+    }
+
+    write(values) {
+      this.element.className = Array.from(values).join(' ');
+    }
+
+    add(...names) {
+      const values = this.values();
+      names.forEach((name) => values.add(name));
+      this.write(values);
+    }
+
+    remove(...names) {
+      const values = this.values();
+      names.forEach((name) => values.delete(name));
+      this.write(values);
+    }
+
+    toggle(name, force) {
+      const values = this.values();
+      const enabled = force === undefined ? !values.has(name) : Boolean(force);
+      if (enabled) values.add(name);
+      else values.delete(name);
+      this.write(values);
+      return enabled;
+    }
+
+    contains(name) {
+      return this.values().has(name);
+    }
+  }
+
+  class FakeElement {
+    constructor(tagName) {
+      this.tagName = String(tagName).toUpperCase();
+      this.children = [];
+      this.parentNode = null;
+      this.ownerDocument = document;
+      this.attributes = new Map();
+      this.dataset = {};
+      this.className = '';
+      this.classList = new FakeClassList(this);
+      this.hidden = false;
+      this.disabled = false;
+      this.value = '';
+      this.id = '';
+      this.name = '';
+      this.tabIndex = 0;
+      this._textContent = '';
+      this._innerHTML = '';
+      this.focusCount = 0;
+      this.open = false;
+    }
+
+    set textContent(value) {
+      this._textContent = String(value);
+    }
+
+    get textContent() {
+      return this._textContent;
+    }
+
+    set innerHTML(value) {
+      this._innerHTML = String(value);
+      if (value === '') {
+        this.children.forEach((child) => { child.parentNode = null; });
+        this.children = [];
+      }
+    }
+
+    get innerHTML() {
+      return this._innerHTML;
+    }
+
+    append(...children) {
+      children.forEach((child) => {
+        child.parentNode = this;
+        child.ownerDocument = this.ownerDocument;
+        this.children.push(child);
+      });
+    }
+
+    remove() {
+      if (!this.parentNode) return;
+      const index = this.parentNode.children.indexOf(this);
+      if (index >= 0) this.parentNode.children.splice(index, 1);
+      this.parentNode = null;
+    }
+
+    setAttribute(name, value) {
+      const normalized = String(value);
+      this.attributes.set(name, normalized);
+      if (name === 'id') this.id = normalized;
+      if (name === 'name') this.name = normalized;
+      if (name === 'class') this.className = normalized;
+      if (name === 'tabindex') this.tabIndex = Number(normalized);
+      if (name === 'hidden') this.hidden = true;
+    }
+
+    getAttribute(name) {
+      if (name === 'id' && this.id) return this.id;
+      if (name === 'name' && this.name) return this.name;
+      if (name === 'class' && this.className) return this.className;
+      if (name === 'hidden') return this.hidden ? '' : null;
+      if (name.startsWith('data-')) {
+        const key = name.slice(5).replace(/-([a-z])/g, (_, letter) => letter.toUpperCase());
+        return Object.prototype.hasOwnProperty.call(this.dataset, key) ? String(this.dataset[key]) : null;
+      }
+      return this.attributes.has(name) ? this.attributes.get(name) : null;
+    }
+
+    matches(selector) {
+      const tag = selector.match(/^[a-z][\w-]*/i);
+      if (tag && this.tagName !== tag[0].toUpperCase()) return false;
+      const id = selector.match(/#([\w-]+)/);
+      if (id && this.id !== id[1]) return false;
+      const attributes = [...selector.matchAll(/\[([\w-]+)(?:="([^"]*)")?\]/g)];
+      return attributes.every((match) => {
+        const actual = this.getAttribute(match[1]);
+        return match[2] === undefined ? actual !== null : actual === match[2];
+      });
+    }
+
+    querySelectorAll(selector) {
+      const matches = [];
+      const visit = (node) => {
+        node.children.forEach((child) => {
+          if (child.matches(selector)) matches.push(child);
+          visit(child);
+        });
+      };
+      visit(this);
+      return matches;
+    }
+
+    querySelector(selector) {
+      return this.querySelectorAll(selector)[0] || null;
+    }
+
+    closest(selector) {
+      let current = this;
+      while (current) {
+        if (current.matches(selector)) return current;
+        current = current.parentNode;
+      }
+      return null;
+    }
+
+    contains(node) {
+      if (node === this) return true;
+      return this.children.some((child) => child.contains(node));
+    }
+
+    focus() {
+      this.ownerDocument.activeElement = this;
+      this.focusCount += 1;
+    }
+
+    showModal() {
+      this.open = true;
+    }
+
+    close() {
+      this.open = false;
+    }
+  }
+
+  document = {
+    activeElement: null,
+    createElement(tagName) {
+      const element = new FakeElement(tagName);
+      element.ownerDocument = document;
+      return element;
+    },
+    querySelectorAll(selector) {
+      return document.body.querySelectorAll(selector);
+    },
+    querySelector(selector) {
+      return document.body.querySelector(selector);
+    },
+    contains(node) {
+      return document.body.contains(node);
+    }
+  };
+  document.body = document.createElement('body');
+
+  const window = {
+    BudgetTransactions: {
+      EXPENSE_CATEGORIES: ['생활비', '배달비', '공통'],
+      INCOME_CATEGORIES: ['급여', '공통'],
+      categoriesFor(type) {
+        return type === 'income' ? this.INCOME_CATEGORIES : this.EXPENSE_CATEGORIES;
+      }
+    }
+  };
+  window.window = window;
+  window.document = document;
+  const context = { window, document, console };
+  vm.createContext(context);
+  const source = fs.readFileSync(path.join(__dirname, '..', 'js/ui.js'), 'utf8');
+  vm.runInContext(source, context, { filename: 'js/ui.js' });
+  return { window, document };
+}
+
 function createSupabaseFake(options = {}) {
   const calls = [];
   const emptyActions = new Set(options.emptyActions || []);
@@ -411,6 +625,11 @@ function testAppMarkupProvidesTabsCalendarEditDialogAndPreviewWarning() {
   assertAttribute(listCount, 'role', 'status');
   assertAttribute(listCount, 'aria-live', 'polite');
   assertAttribute(listCount, 'aria-atomic', 'true');
+
+  const calendarDetailCount = startTagById('calendar-detail-count');
+  assertAttribute(calendarDetailCount, 'role', 'status');
+  assertAttribute(calendarDetailCount, 'aria-live', 'polite');
+  assertAttribute(calendarDetailCount, 'aria-atomic', 'true');
 }
 
 function testAppStylesCoverTabsCalendarDialogAndMobile() {
@@ -509,6 +728,200 @@ function testUiExportsTabEditAndCalendarRenderers() {
     assert.ok(source.includes(`function ${name}`), `missing UI function: ${name}`);
     assert.ok(source.includes(`${name},`), `missing UI export: ${name}`);
   }
+}
+
+function testUiTabsAndFilterOptionsBehave() {
+  const { window, document } = createUiContext();
+  const homeTab = document.createElement('button');
+  homeTab.dataset.tab = 'home';
+  const historyTab = document.createElement('button');
+  historyTab.dataset.tab = 'history';
+  const homePanel = document.createElement('section');
+  homePanel.id = 'panel-home';
+  const historyPanel = document.createElement('section');
+  historyPanel.id = 'panel-history';
+
+  window.BudgetUI.setActiveTab({
+    tabs: [homeTab, historyTab],
+    tabPanels: [homePanel, historyPanel]
+  }, 'history', true);
+
+  assert.strictEqual(homeTab.getAttribute('aria-selected'), 'false');
+  assert.strictEqual(homeTab.tabIndex, -1);
+  assert.strictEqual(historyTab.getAttribute('aria-selected'), 'true');
+  assert.strictEqual(historyTab.tabIndex, 0);
+  assert.strictEqual(homePanel.hidden, true);
+  assert.strictEqual(historyPanel.hidden, false);
+  assert.strictEqual(document.activeElement, historyTab);
+
+  const select = document.createElement('select');
+  window.BudgetUI.fillFilterCategoryOptions(select, 'all', '공통');
+  assert.strictEqual(JSON.stringify(select.children.map((option) => option.value)), JSON.stringify(['all', '생활비', '배달비', '공통', '급여']));
+  assert.strictEqual(select.value, '공통');
+
+  window.BudgetUI.fillFilterCategoryOptions(select, 'income', '생활비');
+  assert.strictEqual(JSON.stringify(select.children.map((option) => option.value)), JSON.stringify(['all', '급여', '공통']));
+  assert.strictEqual(select.value, 'all');
+}
+
+function testUiValidationAndEditDialogFocusFlow() {
+  const { window, document } = createUiContext();
+  const globalAmount = document.createElement('input');
+  globalAmount.id = 'tx-amount';
+  const form = document.createElement('form');
+  const scopedAmount = document.createElement('input');
+  scopedAmount.name = 'amount';
+  const message = document.createElement('p');
+  form.append(scopedAmount);
+  document.body.append(globalAmount, form, message);
+
+  window.BudgetUI.showValidationErrors(form, message, [{ field: 'amount', message: '금액을 확인해 주세요.' }]);
+  assert.strictEqual(scopedAmount.getAttribute('aria-invalid'), 'true');
+  assert.strictEqual(globalAmount.getAttribute('aria-invalid'), null);
+  assert.strictEqual(document.activeElement, scopedAmount);
+
+  const dialog = document.createElement('dialog');
+  const editForm = document.createElement('form');
+  const editId = document.createElement('input');
+  const editDate = document.createElement('input');
+  editDate.name = 'date';
+  const editType = document.createElement('select');
+  editType.name = 'type';
+  const editCategory = document.createElement('select');
+  editCategory.name = 'category';
+  const editAmount = document.createElement('input');
+  editAmount.name = 'amount';
+  const editMemo = document.createElement('input');
+  editMemo.name = 'memo';
+  const editMessage = document.createElement('p');
+  editForm.append(editId, editDate, editType, editCategory, editAmount, editMemo, editMessage);
+  dialog.append(editForm);
+
+  const panel = document.createElement('section');
+  panel.id = 'panel-calendar';
+  panel.setAttribute('role', 'tabpanel');
+  const trigger = document.createElement('button');
+  trigger.dataset.action = 'edit';
+  trigger.dataset.id = 'tx-a';
+  panel.append(trigger);
+  const historyTab = document.createElement('button');
+  historyTab.dataset.tab = 'history';
+  const calendarTab = document.createElement('button');
+  calendarTab.dataset.tab = 'calendar';
+  document.body.append(dialog, panel, historyTab, calendarTab);
+
+  const elements = {
+    editDialog: dialog,
+    editForm,
+    editId,
+    editDate,
+    editType,
+    editCategory,
+    editAmount,
+    editMemo,
+    editMessage,
+    tabs: [historyTab, calendarTab]
+  };
+  const transaction = {
+    id: 'tx-a', date: '2026-05-02', type: 'expense', category: '배달비', amount: 25000, memo: '저녁'
+  };
+
+  window.BudgetUI.openEditDialog(elements, transaction, trigger);
+  assert.strictEqual(editId.value, 'tx-a');
+  assert.strictEqual(editDate.value, '2026-05-02');
+  assert.strictEqual(editType.value, 'expense');
+  assert.strictEqual(editCategory.value, '배달비');
+  assert.strictEqual(editAmount.value, '25000');
+  assert.strictEqual(editMemo.value, '저녁');
+  assert.strictEqual(dialog.open, true);
+  assert.strictEqual(document.activeElement, editDate);
+  assert.strictEqual(dialog.returnTab, 'calendar');
+  window.BudgetUI.closeEditDialog(elements);
+  assert.strictEqual(document.activeElement, trigger);
+
+  window.BudgetUI.openEditDialog(elements, transaction, trigger);
+  trigger.remove();
+  const replacement = document.createElement('button');
+  replacement.dataset.action = 'edit';
+  replacement.dataset.id = 'tx-a';
+  panel.append(replacement);
+  window.BudgetUI.closeEditDialog(elements);
+  assert.strictEqual(document.activeElement, replacement);
+
+  window.BudgetUI.openEditDialog(elements, transaction, replacement);
+  replacement.remove();
+  window.BudgetUI.closeEditDialog(elements);
+  assert.strictEqual(document.activeElement, calendarTab);
+}
+
+function testUiCalendarRenderingPreservesFocusAndExplainsEmptyDates() {
+  const { window, document } = createUiContext();
+  const calendarGrid = document.createElement('div');
+  document.body.append(calendarGrid);
+  const previous = document.createElement('button');
+  previous.dataset.action = 'select-date';
+  previous.dataset.date = '2026-05-01';
+  calendarGrid.append(previous);
+  previous.focus();
+
+  const days = [
+    { date: '2026-04-30', day: 30, inPeriod: false },
+    { date: '2026-05-01', day: 1, inPeriod: true },
+    { date: '2026-05-02', day: 2, inPeriod: true }
+  ];
+  const byDate = {
+    '2026-05-02': { expense: 12000, income: 50000, count: 2 }
+  };
+  window.BudgetUI.renderCalendar({ calendarGrid }, days, byDate, '2026-05-02');
+
+  assert.strictEqual(calendarGrid.children.every((button) => button.tagName === 'BUTTON'), true);
+  const outside = calendarGrid.children.find((button) => button.dataset.date === '2026-04-30');
+  const selected = calendarGrid.children.find((button) => button.dataset.date === '2026-05-02');
+  assert.strictEqual(outside.disabled, true);
+  assert.strictEqual(outside.getAttribute('role'), null);
+  assert.strictEqual(selected.getAttribute('aria-pressed'), 'true');
+  assert.strictEqual(selected.getAttribute('aria-label'), `2026-05-02, 지출 ${window.BudgetUI.formatWon(12000)}, 수입 ${window.BudgetUI.formatWon(50000)}, 2건`);
+  assert.strictEqual(document.activeElement, selected);
+
+  const elsewhere = document.createElement('button');
+  document.body.append(elsewhere);
+  elsewhere.focus();
+  window.BudgetUI.renderCalendar({ calendarGrid }, days, byDate, '2026-05-01');
+  assert.strictEqual(document.activeElement, elsewhere);
+
+  const detailElements = {
+    calendarDetailList: document.createElement('ul'),
+    calendarDetailEmpty: document.createElement('p'),
+    calendarDetailCount: document.createElement('p')
+  };
+  window.BudgetUI.renderCalendarDetails(detailElements, '', []);
+  assert.strictEqual(detailElements.calendarDetailEmpty.hidden, false);
+  assert.strictEqual(detailElements.calendarDetailEmpty.textContent, '날짜를 누르면 거래 내역을 보여드려요.');
+  assert.strictEqual(detailElements.calendarDetailCount.textContent, '날짜를 선택해 주세요.');
+
+  window.BudgetUI.renderCalendarDetails(detailElements, '2026-05-03', []);
+  assert.strictEqual(detailElements.calendarDetailEmpty.textContent, '선택한 날짜에 거래가 없어요.');
+  assert.strictEqual(detailElements.calendarDetailCount.textContent, '2026-05-03 · 0건');
+}
+
+function testUiTransactionActionLabelsIncludeType() {
+  const { window, document } = createUiContext();
+  const elements = {
+    list: document.createElement('ul'),
+    listCount: document.createElement('p'),
+    emptyState: document.createElement('p')
+  };
+  window.BudgetUI.renderList(elements, [
+    { id: 'expense-a', date: '2026-05-02', type: 'expense', category: '생활비', amount: 1000, memo: '' },
+    { id: 'income-a', date: '2026-05-02', type: 'income', category: '급여', amount: 1000, memo: '' }
+  ]);
+
+  const editButtons = elements.list.querySelectorAll('[data-action="edit"]');
+  const deleteButtons = elements.list.querySelectorAll('[data-action="delete"]');
+  assert.strictEqual(editButtons[0].getAttribute('aria-label'), `2026-05-02 지출 생활비 ${window.BudgetUI.formatWon(1000)} 수정`);
+  assert.strictEqual(deleteButtons[0].getAttribute('aria-label'), `2026-05-02 지출 생활비 ${window.BudgetUI.formatWon(1000)} 삭제`);
+  assert.strictEqual(editButtons[1].getAttribute('aria-label'), `2026-05-02 수입 급여 ${window.BudgetUI.formatWon(1000)} 수정`);
+  assert.strictEqual(deleteButtons[1].getAttribute('aria-label'), `2026-05-02 수입 급여 ${window.BudgetUI.formatWon(1000)} 삭제`);
 }
 
 function testCategoryFilterCombinesWithMonthTypeAndQuery() {
@@ -671,9 +1084,13 @@ const tests = [
   testCloudStateMappingKeepsBudgetAndTransactions,
   testCloudUsesSharedLoginEmail,
   testCategoryBudgetDetailShowsSpentBeforeBudget,
+  testUiExportsTabEditAndCalendarRenderers,
+  testUiTabsAndFilterOptionsBehave,
+  testUiValidationAndEditDialogFocusFlow,
+  testUiCalendarRenderingPreservesFocusAndExplainsEmptyDates,
+  testUiTransactionActionLabelsIncludeType,
   testAppMarkupProvidesTabsCalendarEditDialogAndPreviewWarning,
   testAppStylesCoverTabsCalendarDialogAndMobile,
-  testUiExportsTabEditAndCalendarRenderers,
   testCategoryFilterCombinesWithMonthTypeAndQuery,
   testUpdateTransactionValidatesAndPreservesIdentity,
   testCalendarDaysCoverBudgetPeriodByWholeWeeks,

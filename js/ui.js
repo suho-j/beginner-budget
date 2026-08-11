@@ -284,7 +284,7 @@
       editButton.dataset.id = tx.id;
       editButton.dataset.action = 'edit';
       editButton.textContent = '수정';
-      editButton.setAttribute('aria-label', `${tx.date} ${tx.category} ${formatWon(tx.amount)} 수정`);
+      editButton.setAttribute('aria-label', `${tx.date} ${typeLabels[tx.type]} ${tx.category} ${formatWon(tx.amount)} 수정`);
 
       const deleteButton = document.createElement('button');
       deleteButton.type = 'button';
@@ -292,7 +292,7 @@
       deleteButton.dataset.id = tx.id;
       deleteButton.dataset.action = 'delete';
       deleteButton.textContent = '삭제';
-      deleteButton.setAttribute('aria-label', `${tx.date} ${tx.category} ${formatWon(tx.amount)} 삭제`);
+      deleteButton.setAttribute('aria-label', `${tx.date} ${typeLabels[tx.type]} ${tx.category} ${formatWon(tx.amount)} 삭제`);
       actions.append(editButton, deleteButton);
 
       item.append(main, amount, actions);
@@ -333,6 +333,14 @@
   }
 
   function renderCalendar(elements, days, byDate, selectedDate) {
+    const focusedButton = document.activeElement;
+    const calendarOwnedFocus = Boolean(
+      focusedButton
+      && focusedButton.tagName === 'BUTTON'
+      && focusedButton.dataset.action === 'select-date'
+      && elements.calendarGrid.contains(focusedButton)
+    );
+    const focusedDate = calendarOwnedFocus ? focusedButton.dataset.date : '';
     elements.calendarGrid.innerHTML = '';
     days.forEach((day) => {
       const summary = byDate[day.date];
@@ -375,11 +383,22 @@
       button.setAttribute('aria-label', accessible);
       elements.calendarGrid.append(button);
     });
+    if (calendarOwnedFocus) {
+      const buttons = Array.from(elements.calendarGrid.querySelectorAll('[data-action="select-date"]'));
+      const focusDates = Array.from(new Set([selectedDate, focusedDate].filter(Boolean)));
+      const replacement = focusDates
+        .map((date) => buttons.find((button) => button.dataset.date === date && !button.disabled))
+        .find(Boolean);
+      if (replacement) replacement.focus();
+    }
   }
 
   function renderCalendarDetails(elements, selectedDate, transactions) {
     elements.calendarDetailList.innerHTML = '';
     elements.calendarDetailEmpty.hidden = transactions.length > 0;
+    elements.calendarDetailEmpty.textContent = selectedDate
+      ? '선택한 날짜에 거래가 없어요.'
+      : '날짜를 누르면 거래 내역을 보여드려요.';
     elements.calendarDetailCount.textContent = selectedDate ? `${selectedDate} · ${transactions.length}건` : '날짜를 선택해 주세요.';
     if (!transactions.length) return;
     const proxy = {
