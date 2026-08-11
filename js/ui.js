@@ -32,6 +32,13 @@
     scope.querySelectorAll('[aria-invalid="true"]').forEach((field) => field.setAttribute('aria-invalid', 'false'));
   }
 
+  function fieldForError(scope, field) {
+    if (!field) return null;
+    const scoped = scope.querySelector(`[name="${field}"]`);
+    if (scoped) return scoped;
+    return fieldSelectors[field] ? document.querySelector(fieldSelectors[field]) : null;
+  }
+
   function showValidationErrors(scope, messageElement, errors) {
     clearFieldErrors(scope);
     const messages = errors.map((item) => item.message || String(item));
@@ -41,13 +48,13 @@
         scope.querySelectorAll('input').forEach((field) => field.setAttribute('aria-invalid', 'true'));
         return;
       }
-      if (!item.field || !fieldSelectors[item.field]) return;
-      const target = document.querySelector(fieldSelectors[item.field]);
+      if (!item.field) return;
+      const target = fieldForError(scope, item.field);
       if (target) target.setAttribute('aria-invalid', 'true');
     });
-    const first = errors.find((item) => item.field && fieldSelectors[item.field]);
+    const first = errors.find((item) => fieldForError(scope, item.field));
     if (first) {
-      const target = document.querySelector(fieldSelectors[first.field]);
+      const target = fieldForError(scope, first.field);
       if (target) {
         target.focus();
       }
@@ -63,6 +70,36 @@
       option.textContent = category;
       select.append(option);
     });
+  }
+
+  function setActiveTab(elements, tabName, focus = false) {
+    elements.tabs.forEach((tab) => {
+      const active = tab.dataset.tab === tabName;
+      tab.setAttribute('aria-selected', String(active));
+      tab.tabIndex = active ? 0 : -1;
+      if (focus && active) tab.focus();
+    });
+    elements.tabPanels.forEach((panel) => {
+      panel.hidden = panel.id !== `panel-${tabName}`;
+    });
+  }
+
+  function fillFilterCategoryOptions(select, type, selected = 'all') {
+    const categories = type === 'all'
+      ? [...window.BudgetTransactions.EXPENSE_CATEGORIES, ...window.BudgetTransactions.INCOME_CATEGORIES]
+      : window.BudgetTransactions.categoriesFor(type);
+    select.innerHTML = '';
+    const all = document.createElement('option');
+    all.value = 'all';
+    all.textContent = '전체';
+    select.append(all);
+    Array.from(new Set(categories)).forEach((category) => {
+      const option = document.createElement('option');
+      option.value = category;
+      option.textContent = category;
+      select.append(option);
+    });
+    select.value = categories.includes(selected) ? selected : 'all';
   }
 
   function initDefaults(elements, state) {
@@ -241,17 +278,117 @@
 
       const actions = document.createElement('div');
       actions.className = 'transaction-actions';
+      const editButton = document.createElement('button');
+      editButton.type = 'button';
+      editButton.className = 'secondary edit-button';
+      editButton.dataset.id = tx.id;
+      editButton.dataset.action = 'edit';
+      editButton.textContent = '수정';
+      editButton.setAttribute('aria-label', `${tx.date} ${tx.category} ${formatWon(tx.amount)} 수정`);
+
       const deleteButton = document.createElement('button');
       deleteButton.type = 'button';
       deleteButton.className = 'danger delete-button';
       deleteButton.dataset.id = tx.id;
+      deleteButton.dataset.action = 'delete';
       deleteButton.textContent = '삭제';
       deleteButton.setAttribute('aria-label', `${tx.date} ${tx.category} ${formatWon(tx.amount)} 삭제`);
-      actions.append(deleteButton);
+      actions.append(editButton, deleteButton);
 
       item.append(main, amount, actions);
       elements.list.append(item);
     });
+  }
+
+  function openEditDialog(elements, transaction, trigger) {
+    elements.editId.value = transaction.id;
+    elements.editDate.value = transaction.date;
+    elements.editType.value = transaction.type;
+    fillCategoryOptions(elements.editCategory, transaction.type);
+    elements.editCategory.value = transaction.category;
+    elements.editAmount.value = String(transaction.amount);
+    elements.editMemo.value = transaction.memo || '';
+    elements.editDialog.returnFocus = trigger || null;
+    const ownerPanel = trigger ? trigger.closest('[role="tabpanel"]') : null;
+    elements.editDialog.returnTab = ownerPanel ? ownerPanel.id.replace('panel-', '') : 'history';
+    setMessage(elements.editMessage, '', null);
+    clearFieldErrors(elements.editForm);
+    elements.editDialog.showModal();
+    elements.editDate.focus();
+  }
+
+  function closeEditDialog(elements) {
+    const returnFocus = elements.editDialog.returnFocus;
+    const transactionId = elements.editId.value;
+    const returnTab = elements.editDialog.returnTab || 'history';
+    elements.editDialog.close();
+    elements.editDialog.returnFocus = null;
+    elements.editDialog.returnTab = null;
+    const replacement = Array.from(document.querySelectorAll('[data-action="edit"]'))
+      .find((button) => button.dataset.id === transactionId && !button.closest('[hidden]'));
+    const target = returnFocus && document.contains(returnFocus)
+      ? returnFocus
+      : replacement || elements.tabs.find((tab) => tab.dataset.tab === returnTab);
+    if (target) target.focus();
+  }
+
+  function renderCalendar(elements, days, byDate, selectedDate) {
+    elements.calendarGrid.innerHTML = '';
+    days.forEach((day) => {
+      const summary = byDate[day.date];
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'calendar-day';
+      button.dataset.date = day.date;
+      button.dataset.action = 'select-date';
+      button.disabled = !day.inPeriod;
+      button.classList.toggle('outside-period', !day.inPeriod);
+      button.classList.toggle('is-selected', day.date === selectedDate);
+      button.setAttribute('aria-pressed', String(day.date === selectedDate));
+
+      const date = document.createElement('span');
+      date.className = 'calendar-date';
+      date.textContent = String(day.day);
+      button.append(date);
+
+      if (summary && summary.expense) {
+        const expense = document.createElement('span');
+        expense.className = 'calendar-expense';
+        expense.textContent = `지출 ${formatWon(summary.expense)}`;
+        button.append(expense);
+      }
+      if (summary && summary.income) {
+        const income = document.createElement('span');
+        income.className = 'calendar-income';
+        income.textContent = `수입 ${formatWon(summary.income)}`;
+        button.append(income);
+      }
+      if (summary) {
+        const count = document.createElement('span');
+        count.className = 'calendar-count';
+        count.textContent = `${summary.count}건`;
+        button.append(count);
+      }
+      const accessible = summary
+        ? `${day.date}, 지출 ${formatWon(summary.expense)}, 수입 ${formatWon(summary.income)}, ${summary.count}건`
+        : `${day.date}, 거래 없음`;
+      button.setAttribute('aria-label', accessible);
+      elements.calendarGrid.append(button);
+    });
+  }
+
+  function renderCalendarDetails(elements, selectedDate, transactions) {
+    elements.calendarDetailList.innerHTML = '';
+    elements.calendarDetailEmpty.hidden = transactions.length > 0;
+    elements.calendarDetailCount.textContent = selectedDate ? `${selectedDate} · ${transactions.length}건` : '날짜를 선택해 주세요.';
+    if (!transactions.length) return;
+    const proxy = {
+      list: elements.calendarDetailList,
+      listCount: elements.calendarDetailCount,
+      emptyState: elements.calendarDetailEmpty
+    };
+    renderList(proxy, transactions);
+    elements.calendarDetailCount.textContent = `${selectedDate} · ${transactions.length}건`;
   }
 
   function updateCloudStatus(elements, user) {
@@ -291,6 +428,30 @@
 
   function getElements() {
     return {
+      tabs: Array.from(document.querySelectorAll('[role="tab"]')),
+      tabPanels: Array.from(document.querySelectorAll('[role="tabpanel"]')),
+      previousMonthButton: $('#month-previous'),
+      currentMonthButton: $('#month-current'),
+      nextMonthButton: $('#month-next'),
+      filterCategory: $('#filter-category'),
+      calendarPeriodLabel: $('#calendar-period-label'),
+      calendarGrid: $('#calendar-grid'),
+      calendarDetailList: $('#calendar-detail-list'),
+      calendarDetailEmpty: $('#calendar-detail-empty'),
+      calendarDetailCount: $('#calendar-detail-count'),
+      previewDataWarning: $('#preview-data-warning'),
+      editDialog: $('#edit-dialog'),
+      editForm: $('#edit-transaction-form'),
+      editId: $('#edit-id'),
+      editDate: $('#edit-date'),
+      editType: $('#edit-type'),
+      editCategory: $('#edit-category'),
+      editAmount: $('#edit-amount'),
+      editMemo: $('#edit-memo'),
+      editMessage: $('#edit-message'),
+      editClose: $('#edit-close'),
+      editCancel: $('#edit-cancel'),
+      editSave: $('#edit-save'),
       monthStartForm: $('#month-start-form'),
       monthStartInput: $('#month-start-day'),
       monthStartMessage: $('#month-start-message'),
@@ -355,6 +516,12 @@
     clearFieldErrors,
     showValidationErrors,
     fillCategoryOptions,
+    setActiveTab,
+    fillFilterCategoryOptions,
+    openEditDialog,
+    closeEditDialog,
+    renderCalendar,
+    renderCalendarDetails,
     initDefaults,
     renderCategoryBudgetFields,
     syncCategoryBudgetInputs,

@@ -496,6 +496,21 @@ function testAppStylesCoverTabsCalendarDialogAndMobile() {
   assert.ok(calendarMinimumWidth <= calendarContentWidth, 'seven 44px targets must fit the 360px calendar panel');
 }
 
+function testUiExportsTabEditAndCalendarRenderers() {
+  const source = fs.readFileSync(path.join(__dirname, '..', 'js/ui.js'), 'utf8');
+  for (const name of [
+    'setActiveTab',
+    'fillFilterCategoryOptions',
+    'openEditDialog',
+    'closeEditDialog',
+    'renderCalendar',
+    'renderCalendarDetails'
+  ]) {
+    assert.ok(source.includes(`function ${name}`), `missing UI function: ${name}`);
+    assert.ok(source.includes(`${name},`), `missing UI export: ${name}`);
+  }
+}
+
 function testCategoryFilterCombinesWithMonthTypeAndQuery() {
   const win = createContext();
   const transactions = [
@@ -658,6 +673,7 @@ const tests = [
   testCategoryBudgetDetailShowsSpentBeforeBudget,
   testAppMarkupProvidesTabsCalendarEditDialogAndPreviewWarning,
   testAppStylesCoverTabsCalendarDialogAndMobile,
+  testUiExportsTabEditAndCalendarRenderers,
   testCategoryFilterCombinesWithMonthTypeAndQuery,
   testUpdateTransactionValidatesAndPreservesIdentity,
   testCalendarDaysCoverBudgetPeriodByWholeWeeks,
