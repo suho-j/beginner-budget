@@ -5,7 +5,15 @@
   const SUPABASE_URL = 'https://htarkoatahivxgzbogmx.supabase.co';
   const SUPABASE_ANON_KEY = 'sb_publishable_bx0mPHkBtNdbYF8GUn_4Fg_TLKDEY1j';
   const LOGIN_EMAIL = 'ho910728@naver.com';
+  const SETTINGS_CONFLICT_MESSAGE = '다른 브라우저에서 예산 설정이 변경됐어요. 클라우드 데이터를 다시 불러와 주세요.';
   let client = null;
+  let settingsVersion = null;
+
+  function conflictError(message) {
+    const error = new Error(message);
+    error.code = '40001';
+    return error;
+  }
 
   function isConfigured() {
     return Boolean(SUPABASE_URL && SUPABASE_ANON_KEY && window.supabase && typeof window.supabase.createClient === 'function');
@@ -59,7 +67,35 @@
     };
   }
 
-  function replacementArgsForState(state) {
+  function addExpectedTransactionFilters(query, expectedTransaction, userId, transactionId) {
+    if (!expectedTransaction) return query;
+    const expected = transactionToRemote(expectedTransaction, userId);
+    if (expected.id !== transactionId) {
+      throw new Error('비교할 거래 정보가 올바르지 않아요.');
+    }
+    return query
+      .eq('date', expected.date)
+      .eq('type', expected.type)
+      .eq('category', expected.category)
+      .eq('amount', expected.amount)
+      .eq('memo', expected.memo)
+      .eq('source', expected.source);
+  }
+
+  function transactionRowsForState(state) {
+    const normalized = window.BudgetStorage.normalizeState(state);
+    return normalized.transactions.map((transaction) => ({
+      id: transaction.id,
+      date: transaction.date,
+      type: transaction.type,
+      category: transaction.category,
+      amount: transaction.amount,
+      memo: transaction.memo || '',
+      source: transaction.source === 'sample' ? 'sample' : 'user'
+    }));
+  }
+
+  function replacementArgsForState(state, expectedState) {
     const normalized = window.BudgetStorage.normalizeState(state);
     return {
       p_monthly_budget: normalized.monthlyBudget,
@@ -68,15 +104,10 @@
         __month_start_day: normalized.monthStartDay,
         __monthly_budgets: normalized.monthlyBudgets || {}
       },
-      p_transactions: normalized.transactions.map((transaction) => ({
-        id: transaction.id,
-        date: transaction.date,
-        type: transaction.type,
-        category: transaction.category,
-        amount: transaction.amount,
-        memo: transaction.memo || '',
-        source: transaction.source === 'sample' ? 'sample' : 'user'
-      }))
+      p_transactions: transactionRowsForState(normalized),
+      p_expected_updated_at: settingsVersion,
+      p_expected_transactions: transactionRowsForState(expectedState)
+        .sort((left, right) => left.id < right.id ? -1 : left.id > right.id ? 1 : 0)
     };
   }
 
@@ -130,16 +161,47 @@
 
   async function signOut() {
     const supabase = getClient();
-    if (!supabase) return;
+    if (!supabase) {
+      settingsVersion = null;
+      return;
+    }
     const { error } = await supabase.auth.signOut();
     if (error) throw error;
+    settingsVersion = null;
   }
 
   async function saveSettings(state) {
     const { supabase, user } = await authenticatedClient();
     const settings = stateToRemote(state, user.id).settings;
-    const result = await supabase.from('budget_settings').upsert(settings, { onConflict: 'user_id' });
-    if (result.error) throw result.error;
+    const priorTime = Date.parse(settingsVersion || '');
+    const nextTime = Number.isFinite(priorTime) ? Math.max(Date.now(), priorTime + 1) : Date.now();
+    const nextVersion = new Date(nextTime).toISOString();
+    const result = settingsVersion
+      ? await supabase
+        .from('budget_settings')
+        .update({
+          monthly_budget: settings.monthly_budget,
+          category_budgets: settings.category_budgets,
+          updated_at: nextVersion
+        })
+        .eq('user_id', user.id)
+        .eq('updated_at', settingsVersion)
+        .select('updated_at')
+      : await supabase
+        .from('budget_settings')
+        .insert({ ...settings, updated_at: nextVersion })
+        .select('updated_at');
+    if (result.error) {
+      if (result.error.code === '23505') throw conflictError(SETTINGS_CONFLICT_MESSAGE);
+      throw result.error;
+    }
+    if (!Array.isArray(result.data)
+      || result.data.length !== 1
+      || typeof result.data[0].updated_at !== 'string'
+      || !result.data[0].updated_at) {
+      throw conflictError(SETTINGS_CONFLICT_MESSAGE);
+    }
+    settingsVersion = result.data[0].updated_at;
     return { ok: true };
   }
 
@@ -151,7 +213,7 @@
     return { ok: true, id: row.id };
   }
 
-  async function updateTransaction(transaction) {
+  async function updateTransaction(transaction, expectedTransaction = null) {
     if (!transaction || typeof transaction.id !== 'string' || !transaction.id.trim()) {
       throw new Error('거래 ID가 올바르지 않아요.');
     }
@@ -165,40 +227,50 @@
       memo: row.memo,
       source: row.source
     };
-    const result = await supabase
+    let query = supabase
       .from('transactions')
       .update(patch)
       .eq('id', row.id)
-      .eq('user_id', user.id)
-      .select('id');
+      .eq('user_id', user.id);
+    query = addExpectedTransactionFilters(query, expectedTransaction, user.id, row.id);
+    const result = await query.select('id');
     if (result.error) throw result.error;
     if (!Array.isArray(result.data) || result.data.length !== 1 || result.data[0].id !== row.id) {
-      throw new Error('거래가 이미 변경되었거나 삭제되었어요. 새로고침 후 다시 시도해 주세요.');
+      throw conflictError('거래가 이미 변경되었거나 삭제되었어요. 클라우드 데이터를 다시 불러와 주세요.');
     }
     return { ok: true, id: row.id };
   }
 
-  async function deleteTransaction(id) {
+  async function deleteTransaction(id, expectedTransaction = null) {
     if (typeof id !== 'string' || !id) throw new Error('삭제할 거래 ID가 올바르지 않아요.');
     const { supabase, user } = await authenticatedClient();
-    const result = await supabase
+    let query = supabase
       .from('transactions')
       .delete()
       .eq('id', id)
-      .eq('user_id', user.id)
-      .select('id');
+      .eq('user_id', user.id);
+    query = addExpectedTransactionFilters(query, expectedTransaction, user.id, id);
+    const result = await query.select('id');
     if (result.error) throw result.error;
     if (!Array.isArray(result.data) || result.data.length !== 1 || result.data[0].id !== id) {
-      throw new Error('거래가 이미 변경되었거나 삭제되었어요. 새로고침 후 다시 시도해 주세요.');
+      throw conflictError('거래가 이미 변경되었거나 삭제되었어요. 클라우드 데이터를 다시 불러와 주세요.');
     }
     return { ok: true, id };
   }
 
-  async function uploadState(state) {
+  async function uploadState(state, expectedState) {
+    if (!expectedState || typeof expectedState !== 'object') {
+      throw new Error('비교할 기존 가계부 데이터가 필요해요. 클라우드 데이터를 다시 불러와 주세요.');
+    }
     const { supabase } = await authenticatedClient();
-    const args = replacementArgsForState(state);
+    const args = replacementArgsForState(state, expectedState);
     const result = await supabase.rpc('replace_budget_state', args);
     if (result.error) throw result.error;
+    const row = Array.isArray(result.data) ? result.data[0] : result.data;
+    if (!row || typeof row.updated_at !== 'string' || !row.updated_at) {
+      throw conflictError('클라우드 저장 버전을 확인하지 못했어요. 데이터를 다시 불러와 주세요.');
+    }
+    settingsVersion = row.updated_at;
     return {
       ok: true,
       uploadedCount: countFromRpcResult(result.data, 'uploaded_count', args.p_transactions.length)
@@ -261,7 +333,7 @@
 
     const settingsResult = await supabase
       .from('budget_settings')
-      .select('monthly_budget, category_budgets')
+      .select('monthly_budget, category_budgets, updated_at')
       .eq('user_id', user.id)
       .maybeSingle();
     if (settingsResult.error) throw settingsResult.error;
@@ -273,6 +345,9 @@
       .order('date', { ascending: false });
     if (txResult.error) throw txResult.error;
 
+    settingsVersion = settingsResult.data && typeof settingsResult.data.updated_at === 'string'
+      ? settingsResult.data.updated_at
+      : null;
     return remoteToState(settingsResult.data, txResult.data || []);
   }
 

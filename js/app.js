@@ -34,8 +34,28 @@
     window.BudgetUI.setMessage(elements.globalMessage, message, kind);
   }
 
+  function clearMutationMessages() {
+    for (const messageElement of [
+      elements.globalMessage,
+      elements.toolMessage,
+      elements.formMessage,
+      elements.budgetMessage,
+      elements.categoryBudgetMessage,
+      elements.monthStartMessage,
+      elements.editMessage
+    ]) window.BudgetUI.setMessage(messageElement, '', null);
+  }
+
+  function isCloudConflict(error) {
+    const message = error && error.message ? String(error.message) : '';
+    return String(error && error.code) === '40001'
+      || message.includes('다른 브라우저에서')
+      || message.includes('거래가 이미 변경되었거나 삭제되었어요.');
+  }
+
   function refuseMutation() {
     if (cloudReadiness !== 'ready') {
+      if (cloudReadiness === 'load-error' && elements.globalMessage.textContent.trim()) return true;
       const message = cloudReadiness === 'load-error'
         ? '클라우드 데이터를 다시 불러온 뒤 저장해 주세요.'
         : cloudReadiness === 'signed-out'
@@ -68,11 +88,17 @@
     try {
       return { ok: true, blocked: false, value: await action() };
     } catch (error) {
+      const message = `${failurePrefix}: ${error.message}`;
+      const target = messageElement || elements.globalMessage;
       window.BudgetUI.setMessage(
-        messageElement || elements.globalMessage,
-        `${failurePrefix}: ${error.message}`,
+        target,
+        message,
         'error'
       );
+      if (isCloudConflict(error)) {
+        setCloudReadiness('load-error', signedInUser);
+        if (target !== elements.globalMessage) setGlobalMessage(message, 'error');
+      }
       return { ok: false, blocked: false, value: null };
     } finally {
       endMutation();
@@ -96,9 +122,10 @@
   }
 
   function replaceAllRemoteFirst(nextState, messageElement, busyButton) {
+    const expectedState = state;
     return persistRemoteFirst(
       nextState,
-      () => window.BudgetCloud.uploadState(nextState),
+      () => window.BudgetCloud.uploadState(nextState, expectedState),
       messageElement,
       busyButton
     );
@@ -283,7 +310,7 @@
     const nextState = window.BudgetTransactions.deleteTransaction(state, transaction.id);
     const saved = await persistRemoteFirst(
       nextState,
-      () => window.BudgetCloud.deleteTransaction(transaction.id),
+      () => window.BudgetCloud.deleteTransaction(transaction.id, transaction),
       elements.globalMessage,
       button
     );
@@ -295,6 +322,7 @@
   async function handleEditSubmit(event) {
     event.preventDefault();
     window.BudgetUI.clearFieldErrors(elements.editForm);
+    const expectedTransaction = state.transactions.find((item) => item.id === elements.editId.value);
     const result = window.BudgetTransactions.updateTransaction(state, elements.editId.value, {
       date: elements.editDate.value,
       type: elements.editType.value,
@@ -314,7 +342,7 @@
     );
     const saved = await persistRemoteFirst(
       result.state,
-      () => window.BudgetCloud.updateTransaction(result.transaction),
+      () => window.BudgetCloud.updateTransaction(result.transaction, expectedTransaction),
       elements.globalMessage,
       elements.editSave
     );
@@ -477,6 +505,7 @@
       const cloudState = await window.BudgetCloud.downloadState();
       applyDownloadedState(cloudState);
       setCloudReadiness('ready', user);
+      clearMutationMessages();
       window.BudgetUI.setMessage(elements.cloudMessage, '클라우드 데이터를 불러왔어요.', 'ok');
       return true;
     } catch (error) {
@@ -527,7 +556,7 @@
 
   async function handleCloudUpload(event) {
     const operation = await runExclusiveMutation(
-      () => window.BudgetCloud.uploadState(state),
+      () => window.BudgetCloud.uploadState(state, state),
       elements.cloudMessage,
       '클라우드 저장 실패'
     );
@@ -556,6 +585,7 @@
       const cloudState = await window.BudgetCloud.downloadState();
       applyDownloadedState(cloudState);
       setCloudReadiness('ready', user);
+      clearMutationMessages();
       window.BudgetUI.setMessage(elements.cloudMessage, '클라우드 데이터를 불러왔어요.', 'ok');
     } catch (error) {
       setCloudReadiness('load-error', user);
@@ -600,15 +630,7 @@
     elements.categoryBudgetFields.innerHTML = '';
     window.BudgetUI.initDefaults(elements, state);
     viewState.month = currentBudgetMonth();
-    for (const messageElement of [
-      elements.globalMessage,
-      elements.toolMessage,
-      elements.formMessage,
-      elements.budgetMessage,
-      elements.categoryBudgetMessage,
-      elements.monthStartMessage,
-      elements.editMessage
-    ]) window.BudgetUI.setMessage(messageElement, '', null);
+    clearMutationMessages();
     setCloudReadiness('signed-out', null);
     render();
     window.BudgetUI.setMessage(elements.cloudMessage, '로그아웃했어요.', 'ok');

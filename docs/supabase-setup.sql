@@ -76,18 +76,26 @@ to authenticated
 using (auth.uid() = user_id);
 
 -- Atomically replace one authenticated user's settings and transaction rows.
+drop function if exists public.replace_budget_state(integer, jsonb, jsonb);
+
 create or replace function public.replace_budget_state(
   p_monthly_budget integer,
   p_category_budgets jsonb,
-  p_transactions jsonb
+  p_transactions jsonb,
+  p_expected_updated_at timestamptz,
+  p_expected_transactions jsonb
 )
-returns table (uploaded_count integer)
+returns table (uploaded_count integer, updated_at timestamptz)
 language plpgsql
 security invoker
 set search_path = pg_catalog, public
 as $function$
 declare
   v_user_id uuid := auth.uid();
+  v_settings_exists boolean := false;
+  v_current_updated_at timestamptz;
+  v_current_transactions jsonb;
+  v_new_updated_at timestamptz := clock_timestamp();
 begin
   if v_user_id is null then
     raise exception 'authentication required' using errcode = '42501';
@@ -101,6 +109,9 @@ begin
   end if;
   if p_transactions is null or jsonb_typeof(p_transactions) <> 'array' then
     raise exception 'transactions must be a JSON array' using errcode = '22023';
+  end if;
+  if p_expected_transactions is null or jsonb_typeof(p_expected_transactions) <> 'array' then
+    raise exception 'expected transactions must be a JSON array' using errcode = '22023';
   end if;
 
   if exists (
@@ -131,7 +142,7 @@ begin
 
   if exists (
     select 1
-    from jsonb_array_elements(p_transactions) as transaction_row
+    from jsonb_array_elements(p_transactions || p_expected_transactions) as transaction_row
     where jsonb_typeof(transaction_row) <> 'object'
       or jsonb_typeof(transaction_row -> 'id') <> 'string'
       or nullif(btrim(transaction_row ->> 'id'), '') is null
@@ -162,21 +173,81 @@ begin
     raise exception 'duplicate transaction ids are not allowed' using errcode = '22023';
   end if;
 
-  insert into public.budget_settings (
-    user_id,
-    monthly_budget,
-    category_budgets,
-    updated_at
-  ) values (
-    v_user_id,
-    p_monthly_budget,
-    p_category_budgets,
-    now()
+  if exists (
+    select 1
+    from jsonb_array_elements(p_expected_transactions) as transaction_row
+    group by transaction_row ->> 'id'
+    having count(*) > 1
+  ) then
+    raise exception 'duplicate expected transaction ids are not allowed' using errcode = '22023';
+  end if;
+
+  select settings.updated_at
+  into v_current_updated_at
+  from public.budget_settings as settings
+  where settings.user_id = v_user_id
+  for update;
+  v_settings_exists := found;
+
+  if (v_settings_exists and v_current_updated_at is distinct from p_expected_updated_at)
+    or (not v_settings_exists and p_expected_updated_at is not null) then
+    raise exception '다른 브라우저에서 가계부 데이터가 변경됐어요. 클라우드 데이터를 다시 불러와 주세요.'
+      using errcode = '40001';
+  end if;
+
+  select coalesce(
+    jsonb_agg(
+      jsonb_build_object(
+        'id', transaction_row.id,
+        'date', to_char(transaction_row.date, 'YYYY-MM-DD'),
+        'type', transaction_row.type,
+        'category', transaction_row.category,
+        'amount', transaction_row.amount,
+        'memo', coalesce(transaction_row.memo, ''),
+        'source', coalesce(transaction_row.source, 'user')
+      ) order by transaction_row.id collate "C"
+    ),
+    '[]'::jsonb
   )
-  on conflict (user_id) do update set
-    monthly_budget = excluded.monthly_budget,
-    category_budgets = excluded.category_budgets,
-    updated_at = now();
+  into v_current_transactions
+  from public.transactions as transaction_row
+  where transaction_row.user_id = v_user_id;
+
+  if v_current_transactions is distinct from p_expected_transactions then
+    raise exception '다른 브라우저에서 가계부 데이터가 변경됐어요. 클라우드 데이터를 다시 불러와 주세요.'
+      using errcode = '40001';
+  end if;
+
+  if v_settings_exists then
+    update public.budget_settings as settings
+    set
+      monthly_budget = p_monthly_budget,
+      category_budgets = p_category_budgets,
+      updated_at = v_new_updated_at
+    where settings.user_id = v_user_id
+      and settings.updated_at = p_expected_updated_at;
+    if not found then
+      raise exception '다른 브라우저에서 가계부 데이터가 변경됐어요. 클라우드 데이터를 다시 불러와 주세요.'
+        using errcode = '40001';
+    end if;
+  else
+    insert into public.budget_settings (
+      user_id,
+      monthly_budget,
+      category_budgets,
+      updated_at
+    ) values (
+      v_user_id,
+      p_monthly_budget,
+      p_category_budgets,
+      v_new_updated_at
+    )
+    on conflict (user_id) do nothing;
+    if not found then
+      raise exception '다른 브라우저에서 가계부 데이터가 변경됐어요. 클라우드 데이터를 다시 불러와 주세요.'
+        using errcode = '40001';
+    end if;
+  end if;
 
   delete from public.transactions
   where user_id = v_user_id;
@@ -210,13 +281,13 @@ begin
     source text
   );
 
-  return query select jsonb_array_length(p_transactions)::integer;
+  return query select jsonb_array_length(p_transactions)::integer, v_new_updated_at;
 end;
 $function$;
 
-revoke all on function public.replace_budget_state(integer, jsonb, jsonb) from public;
-revoke all on function public.replace_budget_state(integer, jsonb, jsonb) from anon;
-grant execute on function public.replace_budget_state(integer, jsonb, jsonb) to authenticated;
+revoke all on function public.replace_budget_state(integer, jsonb, jsonb, timestamptz, jsonb) from public;
+revoke all on function public.replace_budget_state(integer, jsonb, jsonb, timestamptz, jsonb) from anon;
+grant execute on function public.replace_budget_state(integer, jsonb, jsonb, timestamptz, jsonb) to authenticated;
 
 -- Atomically replace sample rows inside one validated budget period.
 create or replace function public.replace_budget_samples(

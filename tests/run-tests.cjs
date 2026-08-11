@@ -263,24 +263,59 @@ function createSupabaseFake(options = {}) {
   const emptyActions = new Set(options.emptyActions || []);
   const rpcErrors = options.rpcErrors || {};
   const rpcData = options.rpcData || {};
+  const queryErrors = options.queryErrors || {};
+  const settingsRow = Object.prototype.hasOwnProperty.call(options, 'settingsRow')
+    ? options.settingsRow
+    : null;
+  const transactionRows = options.transactionRows || [];
+  function queryResult(call) {
+    const key = `${call.table}:${call.action}`;
+    const configured = queryErrors[key];
+    const configuredError = typeof configured === 'function' ? configured(call, calls) : configured;
+    if (configuredError) {
+      return {
+        data: null,
+        error: configuredError instanceof Error || typeof configuredError === 'object'
+          ? configuredError
+          : new Error(String(configuredError))
+      };
+    }
+    if (call.action === 'select') {
+      const rows = call.table === 'budget_settings'
+        ? (settingsRow ? [settingsRow] : [])
+        : transactionRows;
+      return { data: call.maybeSingle ? (rows[0] || null) : rows, error: null };
+    }
+    const isEmpty = emptyActions.has(call.action) || emptyActions.has(key);
+    if (call.select) {
+      if (isEmpty) return { data: [], error: null };
+      if (call.table === 'budget_settings') {
+        return { data: [{ updated_at: call.payload.updated_at }], error: null };
+      }
+      const idFilter = call.filters.find(([column]) => column === 'id');
+      return { data: [{ id: idFilter ? idFilter[1] : call.payload && call.payload.id }], error: null };
+    }
+    return { data: null, error: null };
+  }
   function filteredQuery(table, action, payload) {
-    const call = { table, action, payload, filters: [], select: null };
+    const call = { table, action, payload, filters: [], select: null, order: null, maybeSingle: false };
     calls.push(call);
     const query = {
       eq(column, value) { call.filters.push([column, value]); return query; },
       select(columns) { call.select = columns; return query; },
+      order(column, optionsValue) { call.order = [column, optionsValue]; return query; },
+      maybeSingle() { call.maybeSingle = true; return Promise.resolve(queryResult(call)); },
       then(resolve, reject) {
-        const idFilter = call.filters.find(([column]) => column === 'id');
-        const data = call.select
-          ? (emptyActions.has(action) ? [] : [{ id: idFilter && idFilter[1] }])
-          : null;
-        return Promise.resolve({ data, error: null }).then(resolve, reject);
+        return Promise.resolve(queryResult(call)).then(resolve, reject);
       }
     };
     return query;
   }
   const client = {
-    auth: { async getUser() { return { data: { user: { id: 'user-1' } }, error: null }; } },
+    auth: {
+      async getUser() { return { data: { user: { id: 'user-1' } }, error: null }; },
+      async signOut() { return { error: null }; }
+    },
     rpc(name, args) {
       calls.push({ action: 'rpc', name, args });
       const configuredError = rpcErrors[name];
@@ -289,7 +324,10 @@ function createSupabaseFake(options = {}) {
         : null;
       let data = rpcData[name];
       if (data === undefined && name === 'replace_budget_state') {
-        data = [{ uploaded_count: Array.isArray(args.p_transactions) ? args.p_transactions.length : 0 }];
+        data = [{
+          uploaded_count: Array.isArray(args.p_transactions) ? args.p_transactions.length : 0,
+          updated_at: options.rpcUpdatedAt || '2026-08-12T00:00:00.000Z'
+        }];
       }
       if (data === undefined && name === 'replace_budget_samples') {
         data = [{ replaced_count: Array.isArray(args.p_transactions) ? args.p_transactions.length : 0 }];
@@ -298,10 +336,15 @@ function createSupabaseFake(options = {}) {
     },
     from(table) {
       return {
-        insert(payload) { calls.push({ table, action: 'insert', payload, filters: [] }); return Promise.resolve({ data: null, error: null }); },
+        select(columns) { return filteredQuery(table, 'select', null).select(columns); },
+        insert(payload) { return filteredQuery(table, 'insert', payload); },
         update(payload) { return filteredQuery(table, 'update', payload); },
         delete() { return filteredQuery(table, 'delete', null); },
-        upsert(payload, options) { calls.push({ table, action: 'upsert', payload, options, filters: [] }); return Promise.resolve({ data: null, error: null }); }
+        upsert(payload, optionsValue) {
+          const query = filteredQuery(table, 'upsert', payload);
+          calls[calls.length - 1].options = optionsValue;
+          return query;
+        }
       };
     }
   };
@@ -570,9 +613,13 @@ function createAppHarness(options = {}) {
     signOut: () => runCloudBehavior('signOut', [], { ok: true }),
     saveSettings: (nextState) => runCloudBehavior('saveSettings', [nextState], { ok: true }),
     insertTransaction: (transaction) => runCloudBehavior('insertTransaction', [transaction], { ok: true }),
-    updateTransaction: (transaction) => runCloudBehavior('updateTransaction', [transaction], { ok: true }),
-    deleteTransaction: (id) => runCloudBehavior('deleteTransaction', [id], { ok: true }),
-    uploadState: (nextState) => runCloudBehavior('uploadState', [nextState], { ok: true, uploadedCount: nextState.transactions.length }),
+    updateTransaction: (transaction, expected) => runCloudBehavior('updateTransaction', [transaction, expected], { ok: true }),
+    deleteTransaction: (id, expected) => runCloudBehavior('deleteTransaction', [id, expected], { ok: true }),
+    uploadState: (nextState, expectedState) => runCloudBehavior(
+      'uploadState',
+      [nextState, expectedState],
+      { ok: true, uploadedCount: nextState.transactions.length }
+    ),
     replaceSampleTransactions: (...args) => runCloudBehavior('replaceSampleTransactions', args, { ok: true, replacedCount: 6 })
   };
 
@@ -761,6 +808,16 @@ function testBudgetMonthStartAndMonthlyBudgets() {
   const summary = win.BudgetTransactions.summarize(state.transactions, monthBudget.monthlyBudget, '2026-05', new Date(2026, 5, 1), monthBudget.categoryBudgets, state.monthStartDay);
   assert.strictEqual(summary.expense, 5000);
   assert.strictEqual(summary.budgetRemaining, 695000);
+}
+
+function testMonthKeyUsesClampedFebruaryStartBoundary() {
+  const win = createContext();
+  for (const startDay of [29, 30, 31]) {
+    assert.strictEqual(win.BudgetStorage.monthKeyForDate('2026-02-27', startDay), '2026-01');
+    assert.strictEqual(win.BudgetStorage.monthKeyForDate('2026-02-28', startDay), '2026-02');
+    assert.strictEqual(win.BudgetStorage.monthKeyForDate('2028-02-28', startDay), '2028-01');
+    assert.strictEqual(win.BudgetStorage.monthKeyForDate('2028-02-29', startDay), '2028-02');
+  }
 }
 
 function testAddTransactionCanonicalizesBeginnerMoneyInput() {
@@ -1473,9 +1530,119 @@ async function testCloudMutatesOnlyRequestedTransactionRow() {
   assert.strictEqual(JSON.stringify(fake.calls[2].filters), JSON.stringify([['id', 'tx-a'], ['user_id', 'user-1']]));
   assert.strictEqual(fake.calls[2].select, 'id');
   assert.strictEqual(fake.calls[3].table, 'budget_settings');
-  assert.strictEqual(fake.calls[3].action, 'upsert');
+  assert.strictEqual(fake.calls[3].action, 'insert');
   assert.strictEqual(fake.calls[3].payload.user_id, 'user-1');
-  assert.strictEqual(fake.calls[3].options.onConflict, 'user_id');
+  assert.strictEqual(fake.calls[3].select, 'updated_at');
+}
+
+async function testCloudSettingsUpdateUsesDownloadedVersion() {
+  const initialVersion = '2026-08-12T01:02:03.000Z';
+  const fake = createSupabaseFake({
+    settingsRow: {
+      monthly_budget: 600000,
+      category_budgets: {},
+      updated_at: initialVersion
+    }
+  });
+  const win = createContext({ supabase: fake.supabase });
+  await win.BudgetCloud.downloadState();
+
+  const firstState = win.BudgetStorage.normalizeState({ monthlyBudget: 700000 });
+  await win.BudgetCloud.saveSettings(firstState);
+  const firstUpdate = fake.calls.filter((call) => call.table === 'budget_settings' && call.action === 'update')[0];
+  assert.ok(firstUpdate, 'settings save must update the downloaded row');
+  assert.deepStrictEqual(firstUpdate.filters, [
+    ['user_id', 'user-1'],
+    ['updated_at', initialVersion]
+  ]);
+  assert.strictEqual(firstUpdate.select, 'updated_at');
+  assert.match(firstUpdate.payload.updated_at, /^\d{4}-\d{2}-\d{2}T/);
+  assert.notStrictEqual(firstUpdate.payload.updated_at, initialVersion);
+
+  const secondState = win.BudgetStorage.normalizeState({ monthlyBudget: 800000 });
+  await win.BudgetCloud.saveSettings(secondState);
+  const updates = fake.calls.filter((call) => call.table === 'budget_settings' && call.action === 'update');
+  assert.strictEqual(updates.length, 2);
+  assert.deepStrictEqual(updates[1].filters, [
+    ['user_id', 'user-1'],
+    ['updated_at', firstUpdate.payload.updated_at]
+  ]);
+}
+
+async function testCloudSettingsConflictKeepsExpectedVersionAndInput() {
+  const initialVersion = '2026-08-12T01:02:03.000Z';
+  const fake = createSupabaseFake({
+    settingsRow: {
+      monthly_budget: 600000,
+      category_budgets: {},
+      updated_at: initialVersion
+    },
+    emptyActions: ['budget_settings:update']
+  });
+  const win = createContext({ supabase: fake.supabase });
+  await win.BudgetCloud.downloadState();
+  const state = win.BudgetStorage.normalizeState({ monthlyBudget: 700000 });
+  const before = JSON.stringify(state);
+  const conflictMessage = '다른 브라우저에서 예산 설정이 변경됐어요. 클라우드 데이터를 다시 불러와 주세요.';
+
+  await assert.rejects(win.BudgetCloud.saveSettings(state), new RegExp(conflictMessage));
+  await assert.rejects(win.BudgetCloud.saveSettings(state), new RegExp(conflictMessage));
+
+  assert.strictEqual(JSON.stringify(state), before);
+  const updates = fake.calls.filter((call) => call.table === 'budget_settings' && call.action === 'update');
+  assert.strictEqual(updates.length, 2);
+  assert.strictEqual(updates[0].filters.find(([column]) => column === 'updated_at')[1], initialVersion);
+  assert.strictEqual(updates[1].filters.find(([column]) => column === 'updated_at')[1], initialVersion);
+}
+
+async function testCloudSettingsInsertDuplicateUsesFriendlyConflict() {
+  const fake = createSupabaseFake({
+    settingsRow: null,
+    queryErrors: {
+      'budget_settings:insert': { code: '23505', message: 'duplicate key value violates unique constraint' }
+    }
+  });
+  const win = createContext({ supabase: fake.supabase });
+  await win.BudgetCloud.downloadState();
+
+  await assert.rejects(
+    win.BudgetCloud.saveSettings(win.BudgetStorage.defaultState()),
+    /다른 브라우저에서 예산 설정이 변경됐어요. 클라우드 데이터를 다시 불러와 주세요./
+  );
+  assert.strictEqual(fake.calls.filter((call) => call.action === 'insert').length, 1);
+  assert.strictEqual(fake.calls.filter((call) => call.action === 'update').length, 0);
+}
+
+async function testCloudSettingsVersionChangesOnlyAfterCompleteDownloadAndClearsOnLogout() {
+  const firstVersion = '2026-08-12T01:02:03.000Z';
+  const secondVersion = '2026-08-12T02:03:04.000Z';
+  const settingsRow = { monthly_budget: 600000, category_budgets: {}, updated_at: firstVersion };
+  let transactionReads = 0;
+  const failedDownloadFake = createSupabaseFake({
+    settingsRow,
+    queryErrors: {
+      'transactions:select': () => {
+        transactionReads += 1;
+        return transactionReads === 2 ? new Error('transaction download failed') : null;
+      }
+    }
+  });
+  const failedDownloadWin = createContext({ supabase: failedDownloadFake.supabase });
+  await failedDownloadWin.BudgetCloud.downloadState();
+  settingsRow.updated_at = secondVersion;
+  await assert.rejects(failedDownloadWin.BudgetCloud.downloadState(), /transaction download failed/);
+  await failedDownloadWin.BudgetCloud.saveSettings(failedDownloadWin.BudgetStorage.defaultState());
+  const update = failedDownloadFake.calls.find((call) => call.table === 'budget_settings' && call.action === 'update');
+  assert.strictEqual(update.filters.find(([column]) => column === 'updated_at')[1], firstVersion);
+
+  const logoutFake = createSupabaseFake({
+    settingsRow: { monthly_budget: 600000, category_budgets: {}, updated_at: firstVersion }
+  });
+  const logoutWin = createContext({ supabase: logoutFake.supabase });
+  await logoutWin.BudgetCloud.downloadState();
+  await logoutWin.BudgetCloud.signOut();
+  await logoutWin.BudgetCloud.saveSettings(logoutWin.BudgetStorage.defaultState());
+  assert.strictEqual(logoutFake.calls.some((call) => call.table === 'budget_settings' && call.action === 'insert'), true);
 }
 
 async function testCloudRejectsInvalidOrStaleTransactionMutations() {
@@ -1492,15 +1659,41 @@ async function testCloudRejectsInvalidOrStaleTransactionMutations() {
   const staleFake = createSupabaseFake({ emptyActions: ['update', 'delete'] });
   const staleWin = createContext({ supabase: staleFake.supabase });
   await assert.rejects(
-    staleWin.BudgetCloud.updateTransaction(transaction),
+    staleWin.BudgetCloud.updateTransaction(transaction, transaction),
     /거래가 이미 변경되었거나 삭제되었어요/
   );
   await assert.rejects(
-    staleWin.BudgetCloud.deleteTransaction('tx-a'),
+    staleWin.BudgetCloud.deleteTransaction('tx-a', transaction),
     /거래가 이미 변경되었거나 삭제되었어요/
   );
   assert.strictEqual(staleFake.calls[0].select, 'id');
   assert.strictEqual(staleFake.calls[1].select, 'id');
+}
+
+async function testCloudTransactionMutationsFilterExpectedPriorRow() {
+  const fake = createSupabaseFake();
+  const win = createContext({ supabase: fake.supabase });
+  const expected = {
+    id: 'tx-a', date: '2026-05-02', type: 'expense', category: '생활비',
+    amount: 12000, memo: '마트', source: 'user'
+  };
+  const updated = { ...expected, category: '배달비', amount: 15000, memo: '배달' };
+
+  await win.BudgetCloud.updateTransaction(updated, expected);
+  await win.BudgetCloud.deleteTransaction(expected.id, expected);
+
+  const expectedFilters = [
+    ['id', 'tx-a'],
+    ['user_id', 'user-1'],
+    ['date', '2026-05-02'],
+    ['type', 'expense'],
+    ['category', '생활비'],
+    ['amount', 12000],
+    ['memo', '마트'],
+    ['source', 'user']
+  ];
+  assert.deepStrictEqual(fake.calls[0].filters, expectedFilters);
+  assert.deepStrictEqual(fake.calls[1].filters, expectedFilters);
 }
 
 async function testCloudReplacesWholeStateWithOneRpc() {
@@ -1519,7 +1712,7 @@ async function testCloudReplacesWholeStateWithOneRpc() {
   });
   const before = JSON.stringify(state);
 
-  const result = await win.BudgetCloud.uploadState(state);
+  const result = await win.BudgetCloud.uploadState(state, state);
 
   assert.strictEqual(result.uploadedCount, 1);
   assert.strictEqual(JSON.stringify(state), before);
@@ -1537,9 +1730,52 @@ async function testCloudReplacesWholeStateWithOneRpc() {
     },
     p_transactions: [
       { id: 'tx-a', date: '2026-05-25', type: 'expense', category: '생활비', amount: 12000, memo: '마트', source: 'user' }
+    ],
+    p_expected_updated_at: null,
+    p_expected_transactions: [
+      { id: 'tx-a', date: '2026-05-25', type: 'expense', category: '생활비', amount: 12000, memo: '마트', source: 'user' }
     ]
   }));
   assert.strictEqual(fake.calls.some((call) => ['delete', 'insert', 'upsert'].includes(call.action)), false);
+}
+
+async function testCloudWholeStateReplacementUsesExpectedSnapshotAndAdvancesVersion() {
+  const initialVersion = '2026-08-12T01:02:03.000Z';
+  const replacementVersion = '2026-08-12T02:03:04.000Z';
+  const fake = createSupabaseFake({
+    settingsRow: { monthly_budget: 600000, category_budgets: {}, updated_at: initialVersion },
+    transactionRows: [],
+    rpcData: {
+      replace_budget_state: [{ uploaded_count: 1, updated_at: replacementVersion }]
+    }
+  });
+  const win = createContext({ supabase: fake.supabase });
+  await win.BudgetCloud.downloadState();
+  const expectedState = win.BudgetStorage.normalizeState({
+    transactions: [
+      { id: 'tx-z', date: '2026-05-02', type: 'expense', category: '생활비', amount: 2000, memo: 'z', source: 'user' },
+      { id: 'tx-a', date: '2026-05-01', type: 'income', category: '월급', amount: 1000, memo: 'a', source: 'user' }
+    ]
+  });
+  const nextState = win.BudgetStorage.normalizeState({
+    monthlyBudget: 900000,
+    transactions: [
+      { id: 'tx-new', date: '2026-06-01', type: 'expense', category: '생활비', amount: 3000, memo: '', source: 'user' }
+    ]
+  });
+
+  await win.BudgetCloud.uploadState(nextState, expectedState);
+  const rpc = fake.calls.find((call) => call.action === 'rpc' && call.name === 'replace_budget_state');
+  assert.strictEqual(rpc.args.p_expected_updated_at, initialVersion);
+  assert.strictEqual(JSON.stringify(rpc.args.p_expected_transactions), JSON.stringify([
+    { id: 'tx-a', date: '2026-05-01', type: 'income', category: '월급', amount: 1000, memo: 'a', source: 'user' },
+    { id: 'tx-z', date: '2026-05-02', type: 'expense', category: '생활비', amount: 2000, memo: 'z', source: 'user' }
+  ]));
+  assert.strictEqual(rpc.args.p_expected_transactions.some((row) => 'user_id' in row), false);
+
+  await win.BudgetCloud.saveSettings(nextState);
+  const update = fake.calls.find((call) => call.table === 'budget_settings' && call.action === 'update');
+  assert.strictEqual(update.filters.find(([column]) => column === 'updated_at')[1], replacementVersion);
 }
 
 async function testCloudWholeStateRpcErrorsBeforeAnyDirectWrite() {
@@ -1553,7 +1789,7 @@ async function testCloudWholeStateRpcErrorsBeforeAnyDirectWrite() {
   });
   const before = JSON.stringify(state);
 
-  await assert.rejects(win.BudgetCloud.uploadState(state), /replace_budget_state 함수를 찾지 못했어요/);
+  await assert.rejects(win.BudgetCloud.uploadState(state, state), /replace_budget_state 함수를 찾지 못했어요/);
 
   assert.strictEqual(JSON.stringify(state), before);
   assert.strictEqual(fake.calls.length, 1);
@@ -1563,11 +1799,37 @@ async function testCloudWholeStateRpcErrorsBeforeAnyDirectWrite() {
 
 function testSupabaseSetupDefinesTransactionalWholeStateRpc() {
   const source = fs.readFileSync(path.join(__dirname, '..', 'docs', 'supabase-setup.sql'), 'utf8');
+  const start = source.search(/create or replace function public\.replace_budget_state\s*\(/i);
+  const end = source.indexOf('-- Atomically replace sample rows', start);
+  const rpc = source.slice(start, end);
   assert.match(source, /create or replace function public\.replace_budget_state\s*\(/i);
-  assert.match(source, /security invoker/i);
-  assert.match(source, /auth\.uid\(\)/i);
-  assert.match(source, /duplicate transaction ids/i);
-  assert.match(source, /grant execute on function public\.replace_budget_state/i);
+  assert.match(source, /drop function if exists public\.replace_budget_state\s*\(integer,\s*jsonb,\s*jsonb\)/i);
+  assert.match(rpc, /p_expected_updated_at\s+timestamptz/i);
+  assert.match(rpc, /p_expected_transactions\s+jsonb/i);
+  assert.match(rpc, /returns table\s*\(uploaded_count integer,\s*updated_at timestamptz\)/i);
+  assert.match(rpc, /security invoker/i);
+  assert.match(rpc, /auth\.uid\(\)/i);
+  assert.match(rpc, /jsonb_typeof\(p_expected_transactions\)\s*<>\s*'array'/i);
+  assert.match(rpc, /duplicate transaction ids/i);
+  assert.match(rpc, /v_current_updated_at\s+is distinct from\s+p_expected_updated_at/i);
+  assert.match(rpc, /where settings\.user_id\s*=\s*v_user_id\s+for update/i);
+  assert.match(rpc, /jsonb_agg\s*\([\s\S]*jsonb_build_object[\s\S]*order by[\s\S]*\.id/i);
+  assert.match(rpc, /v_current_transactions\s+is distinct from\s+p_expected_transactions/i);
+  assert.match(rpc, /update public\.budget_settings[\s\S]*updated_at\s*=\s*v_new_updated_at[\s\S]*updated_at\s*=\s*p_expected_updated_at/i);
+  assert.match(rpc, /insert into public\.budget_settings[\s\S]*on conflict\s*\(user_id\)\s*do nothing/i);
+  assert.match(rpc, /errcode\s*=\s*'40001'/i);
+  const versionCheck = rpc.indexOf('v_current_updated_at is distinct from p_expected_updated_at');
+  const transactionCheck = rpc.indexOf('v_current_transactions is distinct from p_expected_transactions');
+  const firstWrite = Math.min(...[
+    rpc.indexOf('update public.budget_settings'),
+    rpc.indexOf('insert into public.budget_settings'),
+    rpc.indexOf('delete from public.transactions')
+  ].filter((index) => index >= 0));
+  assert.ok(versionCheck >= 0 && versionCheck < firstWrite, 'settings CAS must run before the first write');
+  assert.ok(transactionCheck >= 0 && transactionCheck < firstWrite, 'transaction CAS must run before the first write');
+  assert.match(source, /revoke all on function public\.replace_budget_state\(integer,\s*jsonb,\s*jsonb,\s*timestamptz,\s*jsonb\) from public/i);
+  assert.match(source, /revoke all on function public\.replace_budget_state\(integer,\s*jsonb,\s*jsonb,\s*timestamptz,\s*jsonb\) from anon/i);
+  assert.match(source, /grant execute on function public\.replace_budget_state\(integer,\s*jsonb,\s*jsonb,\s*timestamptz,\s*jsonb\) to authenticated/i);
 }
 
 function testAppReplacesSamplesThroughOneCloudRpc() {
@@ -1693,6 +1955,11 @@ async function testAppReadinessBlocksWritesAfterLoadErrorAndEnablesAfterSuccess(
   await loaded.init();
   assert.strictEqual(loaded.records.cloudStatuses.at(-1).readiness, 'ready');
   assert.strictEqual(loaded.writeControls.every((control) => !control.disabled), true);
+  await loaded.elements.cloudUploadButton.dispatch('click');
+  assert.strictEqual(
+    JSON.stringify(loaded.cloudCalls.uploadState[0][0]),
+    JSON.stringify(loaded.cloudCalls.uploadState[0][1])
+  );
 }
 
 async function testAppDisablesWritesDuringInitialSessionLookup() {
@@ -1776,6 +2043,7 @@ async function testAppRoutesDeleteAndMovedEditFeedbackToGlobalMessage() {
   await deleted.elements.list.dispatch('click', { target: deleteButton });
   assert.strictEqual(deleted.elements.globalMessage.textContent, '거래를 삭제했어요.');
   assert.strictEqual(deleted.elements.toolMessage.textContent, '');
+  assert.strictEqual(JSON.stringify(deleted.cloudCalls.deleteTransaction[0][1]), JSON.stringify(transaction));
 
   const deleteFailed = createAppHarness({
     cloudState: { ...createContext().BudgetStorage.defaultState(), transactions: [transaction] },
@@ -1807,6 +2075,123 @@ async function testAppRoutesDeleteAndMovedEditFeedbackToGlobalMessage() {
     '수정했어요. 날짜가 바뀌어 현재 월 목록에서는 보이지 않아요.'
   );
   assert.strictEqual(edited.elements.toolMessage.textContent, '');
+}
+
+async function testAppTransactionConflictPassesExpectedRowAndKeepsLocalState() {
+  const transaction = {
+    id: 'tx-cas', date: '2026-05-02', type: 'expense', category: '생활비',
+    amount: 12000, memo: '마트', source: 'user'
+  };
+  const conflict = Object.assign(
+    new Error('거래가 이미 변경되었거나 삭제되었어요. 새로고침 후 다시 시도해 주세요.'),
+    { code: '40001' }
+  );
+  const harness = createAppHarness({
+    cloudState: { ...createContext().BudgetStorage.defaultState(), transactions: [transaction] },
+    cloud: { updateTransaction: async () => { throw conflict; } }
+  });
+  await harness.init();
+  harness.elements.editId.value = transaction.id;
+  harness.elements.editDate.value = transaction.date;
+  harness.elements.editType.value = transaction.type;
+  harness.elements.editCategory.value = '배달비';
+  harness.elements.editAmount.value = '15000';
+  harness.elements.editMemo.value = '배달';
+
+  await harness.elements.editForm.dispatch('submit', { submitter: harness.elements.editSave });
+  await harness.elements.exportButton.dispatch('click');
+  const exported = JSON.parse(harness.records.downloads.at(-1).content);
+
+  assert.strictEqual(JSON.stringify(harness.cloudCalls.updateTransaction[0][1]), JSON.stringify(transaction));
+  assert.strictEqual(exported.transactions[0].amount, 12000);
+  assert.strictEqual(exported.transactions[0].memo, '마트');
+  assert.match(harness.elements.globalMessage.textContent, /거래가 이미 변경되었거나 삭제되었어요/);
+  assert.strictEqual(harness.records.cloudStatuses.at(-1).readiness, 'load-error');
+  assert.strictEqual(harness.writeControls.every((control) => control.disabled), true);
+  assert.strictEqual(harness.elements.cloudDownloadButton.hidden, false);
+}
+
+async function testAppWholeStateConflictPassesExpectedStateAndKeepsLocalState() {
+  const currentState = {
+    ...createContext().BudgetStorage.defaultState(),
+    monthlyBudget: 900000,
+    transactions: [
+      { id: 'tx-current', date: '2026-05-02', type: 'expense', category: '생활비', amount: 45000, memo: '현재', source: 'user' }
+    ]
+  };
+  const conflict = Object.assign(
+    new Error('다른 브라우저에서 가계부 데이터가 변경됐어요. 클라우드 데이터를 다시 불러와 주세요.'),
+    { code: '40001' }
+  );
+  const harness = createAppHarness({
+    cloudState: currentState,
+    cloud: { uploadState: async () => { throw conflict; } }
+  });
+  await harness.init();
+
+  await harness.elements.resetButton.dispatch('click');
+  assert.match(harness.elements.toolMessage.textContent, /다른 브라우저에서 가계부 데이터가 변경됐어요/);
+  assert.match(harness.elements.globalMessage.textContent, /다른 브라우저에서 가계부 데이터가 변경됐어요/);
+  await harness.elements.exportButton.dispatch('click');
+  const exported = JSON.parse(harness.records.downloads.at(-1).content);
+
+  assert.strictEqual(JSON.stringify(harness.cloudCalls.uploadState[0][1]), JSON.stringify(currentState));
+  assert.strictEqual(exported.monthlyBudget, 900000);
+  assert.strictEqual(exported.transactions[0].id, 'tx-current');
+  assert.strictEqual(harness.records.cloudStatuses.at(-1).readiness, 'load-error');
+  assert.strictEqual(harness.writeControls.every((control) => control.disabled), true);
+  assert.strictEqual(harness.elements.cloudDownloadButton.hidden, false);
+}
+
+async function testAppSettingsConflictRetriesOnlyAfterCloudRefresh() {
+  const initialState = { ...createContext().BudgetStorage.defaultState(), monthlyBudget: 600000 };
+  const refreshedState = { ...createContext().BudgetStorage.defaultState(), monthlyBudget: 650000 };
+  const conflict = Object.assign(
+    new Error('다른 브라우저에서 예산 설정이 변경됐어요. 클라우드 데이터를 다시 불러와 주세요.'),
+    { code: '40001' }
+  );
+  let downloadCount = 0;
+  const harness = createAppHarness({
+    cloud: {
+      downloadState: async () => {
+        downloadCount += 1;
+        return downloadCount === 1 ? initialState : refreshedState;
+      },
+      saveSettings: async () => {
+        if (downloadCount < 2) throw conflict;
+        return { ok: true };
+      }
+    }
+  });
+  await harness.init();
+
+  harness.elements.budgetInput.valueAsNumber = 700000;
+  await harness.elements.budgetForm.dispatch('submit', { submitter: harness.elements.budgetSave });
+  assert.match(harness.elements.budgetMessage.textContent, /다른 브라우저에서 예산 설정이 변경됐어요/);
+  assert.match(harness.elements.globalMessage.textContent, /다른 브라우저에서 예산 설정이 변경됐어요/);
+  assert.strictEqual(harness.records.cloudStatuses.at(-1).readiness, 'load-error');
+  assert.strictEqual(harness.writeControls.every((control) => control.disabled), true);
+  assert.strictEqual(harness.elements.cloudDownloadButton.hidden, false);
+  harness.elements.budgetInput.valueAsNumber = 700000;
+  await harness.elements.budgetForm.dispatch('submit', { submitter: harness.elements.budgetSave });
+  assert.strictEqual(harness.cloudCalls.saveSettings.length, 1);
+
+  await harness.elements.cloudDownloadButton.dispatch('click');
+  assert.strictEqual(harness.records.cloudStatuses.at(-1).readiness, 'ready');
+  assert.strictEqual(harness.writeControls.every((control) => !control.disabled), true);
+  assert.strictEqual(harness.elements.globalMessage.textContent, '');
+  assert.strictEqual(harness.elements.budgetMessage.textContent, '');
+  harness.elements.budgetInput.valueAsNumber = 700000;
+  await harness.elements.budgetForm.dispatch('submit', { submitter: harness.elements.budgetSave });
+  await harness.elements.exportButton.dispatch('click');
+  const exported = JSON.parse(harness.records.downloads.at(-1).content);
+  const selectedBudget = harness.window.BudgetStorage.budgetForMonth(exported, harness.elements.monthInput.value);
+
+  assert.strictEqual(harness.cloudCalls.downloadState.length, 2);
+  assert.strictEqual(harness.cloudCalls.saveSettings.length, 2);
+  assert.strictEqual(selectedBudget.monthlyBudget, 700000);
+  assert.strictEqual(harness.records.cloudStatuses.at(-1).readiness, 'ready');
+  assert.strictEqual(harness.writeControls.every((control) => !control.disabled), true);
 }
 
 async function testAppLogoutClearsPrivateStateAndFocusesLogin() {
@@ -1853,6 +2238,7 @@ const tests = [
   testDatabaseIntegerBoundsAreEnforced,
   testCategoryBudgetSaveAndSummary,
   testBudgetMonthStartAndMonthlyBudgets,
+  testMonthKeyUsesClampedFebruaryStartBoundary,
   testAddTransactionCanonicalizesBeginnerMoneyInput,
   testSummaryInsightsAndSearchFilter,
   testSummaryAndSampleReplace,
@@ -1875,8 +2261,14 @@ const tests = [
   testSummarizeTransactionsByDateHonorsBudgetPeriod,
   testAppIntegratesTabsCalendarAndRemoteFirstMutations,
   testCloudRejectsInvalidOrStaleTransactionMutations,
+  testCloudTransactionMutationsFilterExpectedPriorRow,
   testCloudMutatesOnlyRequestedTransactionRow,
+  testCloudSettingsUpdateUsesDownloadedVersion,
+  testCloudSettingsConflictKeepsExpectedVersionAndInput,
+  testCloudSettingsInsertDuplicateUsesFriendlyConflict,
+  testCloudSettingsVersionChangesOnlyAfterCompleteDownloadAndClearsOnLogout,
   testCloudReplacesWholeStateWithOneRpc,
+  testCloudWholeStateReplacementUsesExpectedSnapshotAndAdvancesVersion,
   testCloudWholeStateRpcErrorsBeforeAnyDirectWrite,
   testSupabaseSetupDefinesTransactionalWholeStateRpc,
   testAppReplacesSamplesThroughOneCloudRpc,
@@ -1888,6 +2280,9 @@ const tests = [
   testAppReadinessBlocksWritesAfterLoadErrorAndEnablesAfterSuccess,
   testAppSerializesMutationsAndRemoteFailureUnlocksWithoutCommit,
   testAppRoutesDeleteAndMovedEditFeedbackToGlobalMessage,
+  testAppTransactionConflictPassesExpectedRowAndKeepsLocalState,
+  testAppWholeStateConflictPassesExpectedStateAndKeepsLocalState,
+  testAppSettingsConflictRetriesOnlyAfterCloudRefresh,
   testAppLogoutClearsPrivateStateAndFocusesLogin
 ];
 

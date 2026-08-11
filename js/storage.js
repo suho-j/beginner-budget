@@ -95,9 +95,10 @@
   function monthKeyForDate(dateString, startDay = DEFAULT_MONTH_START_DAY) {
     if (!isValidDateString(dateString)) return '';
     const normalizedStartDay = normalizeMonthStartDay(startDay);
-    const [year, month, day] = dateString.split('-').map(Number);
+    const [year, month] = dateString.split('-').map(Number);
     const currentMonth = `${year}-${pad2(month)}`;
-    return day >= normalizedStartDay ? currentMonth : addMonthsToMonth(currentMonth, -1);
+    const currentMonthStart = localDateString(monthStartDateFor(currentMonth, normalizedStartDay));
+    return dateString >= currentMonthStart ? currentMonth : addMonthsToMonth(currentMonth, -1);
   }
 
   function isDateInBudgetMonth(dateString, month, startDay = DEFAULT_MONTH_START_DAY) {
