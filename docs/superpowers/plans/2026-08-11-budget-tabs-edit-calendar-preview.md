@@ -41,6 +41,7 @@
 
 **Files:**
 - Create: `.gitignore`
+- Modify: `docs/superpowers/plans/2026-08-11-budget-tabs-edit-calendar-preview.md`
 
 - [ ] **Step 1: 브랜치와 운영 기준을 확인한다**
 
@@ -76,12 +77,13 @@ node tests/run-tests.cjs
 
 Expected: `15 tests passed`
 
-- [ ] **Step 3: 시안 자료를 Git 대상에서 제외한다**
+- [ ] **Step 3: 시안 자료와 로컬 worktree를 Git 대상에서 제외한다**
 
 Create `.gitignore` with exactly:
 
 ```gitignore
 .superpowers/
+.worktrees/
 ```
 
 - [ ] **Step 4: 제외 범위를 확인한다**
@@ -91,15 +93,16 @@ Run:
 ```powershell
 git status --short
 git check-ignore -v .superpowers/brainstorm/4193-1785974708/content/category-filter-v2.html
+git check-ignore -v .worktrees/probe
 ```
 
-Expected: `.gitignore`만 새 변경으로 보이고 `git check-ignore`가 `.gitignore:1:.superpowers/`를 출력한다.
+Expected: `.gitignore`와 이 계획서만 새 변경으로 보이고 `git check-ignore`가 각각 `.gitignore:1:.superpowers/`, `.gitignore:2:.worktrees/`를 출력한다.
 
 - [ ] **Step 5: 저장소 위생 변경을 커밋한다**
 
 ```powershell
-git add -- .gitignore
-git commit -m "로컬 시안 자료를 Git 대상에서 제외"
+git add -- .gitignore docs/superpowers/plans/2026-08-11-budget-tabs-edit-calendar-preview.md
+git commit -m "로컬 시안과 worktree를 Git 대상에서 제외"
 ```
 
 ## Task 2: 카테고리 단일 필터를 도메인에 추가
