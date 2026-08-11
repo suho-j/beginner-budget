@@ -83,6 +83,29 @@
     return { state: nextState, ok: true, transaction, errors: [] };
   }
 
+  function updateTransaction(state, id, input) {
+    const index = state.transactions.findIndex((tx) => tx.id === id);
+    if (index < 0) {
+      return { state, ok: false, transaction: null, errors: [error('transaction', '수정할 거래를 찾지 못했어요.')] };
+    }
+
+    const validation = validateTransaction(input);
+    if (!validation.valid) {
+      return { state, ok: false, transaction: null, errors: validation.errors };
+    }
+
+    const previous = state.transactions[index];
+    const transaction = {
+      ...previous,
+      ...validation.value,
+      id: previous.id,
+      source: previous.source
+    };
+    const transactions = state.transactions.slice();
+    transactions[index] = transaction;
+    return { state: { ...state, transactions }, ok: true, transaction, errors: [] };
+  }
+
   function deleteTransaction(state, id) {
     return {
       ...state,
@@ -307,6 +330,7 @@
     canonicalizeTransactionInput,
     validateTransaction,
     addTransaction,
+    updateTransaction,
     deleteTransaction,
     setMonthlyBudget,
     setMonthStartDay,

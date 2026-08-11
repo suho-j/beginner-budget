@@ -323,6 +323,37 @@ function testCategoryFilterCombinesWithMonthTypeAndQuery() {
   assert.strictEqual(JSON.stringify(allCategories.map((tx) => tx.id)), JSON.stringify(['b']));
 }
 
+function testUpdateTransactionValidatesAndPreservesIdentity() {
+  const win = createContext();
+  const original = win.BudgetStorage.normalizeState({
+    transactions: [
+      { id: 'tx-a', date: '2026-05-02', type: 'expense', category: '생활비', amount: 12000, memo: '마트', source: 'user' }
+    ]
+  });
+
+  const updated = win.BudgetTransactions.updateTransaction(original, 'tx-a', {
+    date: '2026-04-30', type: 'expense', category: '배달비', amount: '25,000', memo: '  저녁 배달  '
+  });
+  assert.strictEqual(updated.ok, true);
+  assert.strictEqual(updated.transaction.id, 'tx-a');
+  assert.strictEqual(updated.transaction.amount, 25000);
+  assert.strictEqual(updated.transaction.memo, '저녁 배달');
+  assert.strictEqual(updated.transaction.source, 'user');
+  assert.strictEqual(original.transactions[0].amount, 12000);
+
+  const invalid = win.BudgetTransactions.updateTransaction(original, 'tx-a', {
+    date: '2026-04-30', type: 'expense', category: '배달비', amount: '0', memo: ''
+  });
+  assert.strictEqual(invalid.ok, false);
+  assert.strictEqual(invalid.state, original);
+
+  const missing = win.BudgetTransactions.updateTransaction(original, 'tx-missing', {
+    date: '2026-04-30', type: 'expense', category: '배달비', amount: '1000', memo: ''
+  });
+  assert.strictEqual(missing.ok, false);
+  assert.strictEqual(missing.errors[0].field, 'transaction');
+}
+
 const tests = [
   testStorageDefaultsAndIgnoresLocalStorage,
   testSaveDoesNotUseLocalStorage,
@@ -339,7 +370,8 @@ const tests = [
   testCloudStateMappingKeepsBudgetAndTransactions,
   testCloudUsesSharedLoginEmail,
   testCategoryBudgetDetailShowsSpentBeforeBudget,
-  testCategoryFilterCombinesWithMonthTypeAndQuery
+  testCategoryFilterCombinesWithMonthTypeAndQuery,
+  testUpdateTransactionValidatesAndPreservesIdentity
 ];
 
 for (const test of tests) {
