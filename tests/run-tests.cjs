@@ -392,6 +392,13 @@ function testAppMarkupProvidesTabsCalendarEditDialogAndPreviewWarning() {
   assertAttribute(listCount, 'aria-atomic', 'true');
 }
 
+function testAppStylesCoverTabsCalendarDialogAndMobile() {
+  const source = fs.readFileSync(path.join(__dirname, '..', 'css/style.css'), 'utf8');
+  for (const required of ['.preview-data-warning','.month-toolbar','.app-tabs','.tab-panel[hidden]','.calendar-grid','.calendar-day','dialog::backdrop','@media (max-width: 559px)']) {
+    assert.ok(source.includes(required), `missing style: ${required}`);
+  }
+}
+
 function testCategoryFilterCombinesWithMonthTypeAndQuery() {
   const win = createContext();
   const transactions = [
@@ -553,6 +560,7 @@ const tests = [
   testCloudUsesSharedLoginEmail,
   testCategoryBudgetDetailShowsSpentBeforeBudget,
   testAppMarkupProvidesTabsCalendarEditDialogAndPreviewWarning,
+  testAppStylesCoverTabsCalendarDialogAndMobile,
   testCategoryFilterCombinesWithMonthTypeAndQuery,
   testUpdateTransactionValidatesAndPreservesIdentity,
   testCalendarDaysCoverBudgetPeriodByWholeWeeks,

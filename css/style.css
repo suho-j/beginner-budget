@@ -366,3 +366,44 @@ h2[id], h3[id] { scroll-margin-top: 6.5rem; }
   .transaction-actions { grid-column: auto; }
   .data-actions { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 }
+
+.preview-data-warning { position: sticky; top: 0; z-index: 30; padding: 0.65rem 1rem; background: #7c2d12; color: #fff7ed; text-align: center; font-weight: 900; }
+.month-toolbar { display: grid; grid-template-columns: auto minmax(150px, 1fr) auto auto; gap: 0.65rem; align-items: end; padding-top: 1rem; }
+.month-picker { display: grid; gap: 0.35rem; font-weight: 800; }
+.month-toolbar #selected-month-label { grid-column: 1 / -1; margin: 0; }
+.app-tabs { position: sticky; top: 0; z-index: 20; padding-top: 0.75rem; padding-bottom: 0.75rem; background: color-mix(in srgb, var(--bg) 94%, transparent); backdrop-filter: blur(10px); }
+.app-tabs [role="tablist"] { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.4rem; padding: 0.35rem; border: 1px solid var(--border); border-radius: 14px; background: var(--panel); }
+.app-tabs [role="tab"] { background: transparent; color: var(--muted); }
+.app-tabs [role="tab"][aria-selected="true"] { background: var(--primary); color: #fff; }
+.has-preview-warning .app-tabs { top: 44px; }
+.tab-panel[hidden] { display: none; }
+.tab-panel { grid-column: 1 / -1; display: grid; gap: 1rem; }
+.filter-grid { display: grid; gap: 0.8rem; }
+
+.calendar-weekdays, .calendar-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 0.35rem; }
+.calendar-weekdays { margin-bottom: 0.35rem; text-align: center; color: var(--muted); font-weight: 800; }
+.calendar-day { min-height: 82px; padding: 0.45rem; border: 1px solid var(--border); border-radius: 10px; background: var(--panel); color: var(--text); text-align: left; display: grid; align-content: start; gap: 0.2rem; }
+.calendar-day.outside-period { opacity: 0.38; cursor: default; }
+.calendar-day.is-selected { outline: 3px solid color-mix(in srgb, var(--primary) 35%, transparent); border-color: var(--primary); }
+.calendar-date { font-weight: 900; }
+.calendar-expense { color: var(--expense); font-size: 0.78rem; font-weight: 800; }
+.calendar-income { color: var(--income); font-size: 0.78rem; font-weight: 800; }
+.calendar-count { color: var(--muted); font-size: 0.75rem; }
+dialog { width: min(680px, calc(100% - 2rem)); max-height: calc(100vh - 2rem); overflow: auto; border: 0; border-radius: 18px; padding: 0; background: var(--panel); color: var(--text); box-shadow: 0 24px 80px rgb(15 23 42 / 0.3); }
+dialog::backdrop { background: rgb(15 23 42 / 0.58); }
+.dialog-form { padding: 1.25rem; }
+.dialog-heading { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+.transaction-actions { gap: 0.5rem; flex-wrap: wrap; }
+
+@media (max-width: 559px) {
+  .month-toolbar { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .month-picker { grid-column: 1 / -1; grid-row: 1; }
+  .month-toolbar #selected-month-label { text-align: center; }
+  .app-tabs { padding-left: 0.75rem; padding-right: 0.75rem; }
+  .app-tabs [role="tab"] { padding-left: 0.35rem; padding-right: 0.35rem; }
+  .calendar-weekdays, .calendar-grid { gap: 0.2rem; }
+  .calendar-day { min-height: 68px; padding: 0.3rem; }
+  .calendar-expense, .calendar-income { font-size: 0.66rem; overflow-wrap: anywhere; }
+  .calendar-count { font-size: 0.64rem; }
+  dialog { width: calc(100% - 1rem); max-height: calc(100vh - 1rem); }
+}
