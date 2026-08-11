@@ -5,6 +5,22 @@
   const SUPABASE_URL = 'https://htarkoatahivxgzbogmx.supabase.co';
   const SUPABASE_ANON_KEY = 'sb_publishable_bx0mPHkBtNdbYF8GUn_4Fg_TLKDEY1j';
   const LOGIN_EMAIL = 'ho910728@naver.com';
+  const runtimeLocation = window.location || {};
+  const runtimeHostname = String(runtimeLocation.hostname || '').toLowerCase();
+  const runtimePathname = String(runtimeLocation.pathname || '/');
+  const IS_PREVIEW = runtimeHostname === 'localhost'
+    || runtimeHostname === '127.0.0.1'
+    || runtimePathname.startsWith('/beginner-budget-preview/');
+  const SETTINGS_TABLE = IS_PREVIEW ? 'preview_budget_settings' : 'budget_settings';
+  const TRANSACTIONS_TABLE = IS_PREVIEW ? 'preview_transactions' : 'transactions';
+  const STATE_REPLACEMENT_RPC = IS_PREVIEW ? 'replace_preview_budget_state' : 'replace_budget_state';
+  const ENVIRONMENT = Object.freeze({
+    name: IS_PREVIEW ? 'preview' : 'production',
+    isPreview: IS_PREVIEW,
+    settingsTable: SETTINGS_TABLE,
+    transactionsTable: TRANSACTIONS_TABLE,
+    stateRpc: STATE_REPLACEMENT_RPC
+  });
   const SETTINGS_CONFLICT_MESSAGE = '다른 브라우저에서 예산 설정이 변경됐어요. 클라우드 데이터를 다시 불러와 주세요.';
   let client = null;
   let settingsVersion = null;
@@ -175,7 +191,7 @@
     const settings = stateToRemote(state, user.id).settings;
     const result = settingsVersion
       ? await supabase
-        .from('budget_settings')
+        .from(SETTINGS_TABLE)
         .update({
           monthly_budget: settings.monthly_budget,
           category_budgets: settings.category_budgets
@@ -184,7 +200,7 @@
         .eq('updated_at', settingsVersion)
         .select('updated_at')
       : await supabase
-        .from('budget_settings')
+        .from(SETTINGS_TABLE)
         .insert(settings)
         .select('updated_at');
     if (result.error) {
@@ -204,7 +220,7 @@
   async function insertTransaction(transaction) {
     const { supabase, user } = await authenticatedClient();
     const row = transactionToRemote(transaction, user.id);
-    const result = await supabase.from('transactions').insert(row);
+    const result = await supabase.from(TRANSACTIONS_TABLE).insert(row);
     if (result.error) throw result.error;
     return { ok: true, id: row.id };
   }
@@ -224,7 +240,7 @@
       source: row.source
     };
     let query = supabase
-      .from('transactions')
+      .from(TRANSACTIONS_TABLE)
       .update(patch)
       .eq('id', row.id)
       .eq('user_id', user.id);
@@ -241,7 +257,7 @@
     if (typeof id !== 'string' || !id) throw new Error('삭제할 거래 ID가 올바르지 않아요.');
     const { supabase, user } = await authenticatedClient();
     let query = supabase
-      .from('transactions')
+      .from(TRANSACTIONS_TABLE)
       .delete()
       .eq('id', id)
       .eq('user_id', user.id);
@@ -260,7 +276,7 @@
     }
     const { supabase } = await authenticatedClient();
     const args = replacementArgsForState(state, expectedState);
-    const result = await supabase.rpc('replace_budget_state', args);
+    const result = await supabase.rpc(STATE_REPLACEMENT_RPC, args);
     if (result.error) throw result.error;
     const row = Array.isArray(result.data) ? result.data[0] : result.data;
     if (!row || typeof row.updated_at !== 'string' || !row.updated_at) {
@@ -280,14 +296,14 @@
     if (!user) throw new Error('먼저 로그인해 주세요.');
 
     const settingsResult = await supabase
-      .from('budget_settings')
+      .from(SETTINGS_TABLE)
       .select('monthly_budget, category_budgets, updated_at')
       .eq('user_id', user.id)
       .maybeSingle();
     if (settingsResult.error) throw settingsResult.error;
 
     const txResult = await supabase
-      .from('transactions')
+      .from(TRANSACTIONS_TABLE)
       .select('id, date, type, category, amount, memo, source')
       .eq('user_id', user.id)
       .order('date', { ascending: false });
@@ -303,6 +319,7 @@
     SUPABASE_URL,
     SUPABASE_ANON_KEY,
     LOGIN_EMAIL,
+    ENVIRONMENT,
     isConfigured,
     getClient,
     stateToRemote,

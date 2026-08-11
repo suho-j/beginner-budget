@@ -29,51 +29,38 @@ python -m http.server 8765 --bind 127.0.0.1
 
 로그인과 클라우드 다운로드가 끝나야 저장 버튼이 활성화됩니다. 일반 거래의 추가·수정·삭제는 해당 행만 Supabase에서 먼저 변경하고, 성공한 뒤 화면 상태를 갱신합니다. 수정·삭제 때 화면에 있던 기존 행과 DB 행이 다르면 저장하지 않고 최신 데이터를 다시 불러오도록 안내합니다.
 
-예산 설정은 DB가 발급한 `updated_at` 버전을 비교합니다. JSON 가져오기·전체 초기화·샘플 교체는 현재 설정 버전과 전체 거래 목록을 함께 비교하는 `replace_budget_state` RPC로 한 번에 처리합니다. 다른 브라우저에서 먼저 변경했다면 로컬 화면을 확정하지 않고 다시 불러오기를 요구합니다.
+예산 설정은 DB가 발급한 `updated_at` 버전을 비교합니다. JSON 가져오기·전체 초기화·샘플 교체는 현재 설정 버전과 전체 거래 목록을 함께 비교하는 5인자 RPC로 한 번에 처리합니다. 다른 브라우저에서 먼저 변경했다면 로컬 화면을 확정하지 않고 다시 불러오기를 요구합니다.
+
+로컬(`localhost`, `127.0.0.1`)과 `/beginner-budget-preview/` 경로는 `preview_budget_settings`, `preview_transactions`, `replace_preview_budget_state`만 사용합니다. 운영 `/beginner-budget/` 경로는 기존 `budget_settings`, `transactions`, `replace_budget_state`를 계속 사용합니다.
 
 로그아웃하면 메모리에 있던 가계부 데이터와 필터를 비우고 모든 쓰기 동작을 잠급니다. 가계부 데이터는 `localStorage`에 저장하지 않습니다.
 
-## Supabase SQL 선행 게이트
+## 미리보기 격리 SQL 선행 게이트
 
-현재 개발 브랜치의 `docs/supabase-setup.sql`에는 다음 변경이 들어 있지만, **2026-08-12 현재 운영 Supabase에는 아직 적용하지 않았습니다.**
+`docs/supabase-preview-setup.sql`은 운영 테이블을 수정하지 않고 다음 작업만 수행합니다.
 
-- 거래 ID의 안전한 ASCII 형식 보정과 제약 조건
-- `budget_settings.updated_at`을 DB가 단조 증가시키는 트리거
-- 설정 버전과 전체 거래 스냅샷을 비교해 원자적으로 교체하는 `replace_budget_state` RPC
-- 오래된 전체 교체·샘플 교체 RPC 제거와 실행 권한 제한
+- 사용자별 RLS를 적용한 `preview_budget_settings`, `preview_transactions` 생성
+- `preview_budget_settings.updated_at`을 DB가 단조 증가시키는 트리거 생성
+- 설정 버전과 전체 거래 스냅샷을 비교하는 5인자 `replace_preview_budget_state` 생성
+- 운영 데이터를 읽어 미리보기 테이블로 한 번만 복사
+- 비표준 운영 거래 ID를 `'tx-migrated-' || md5(user_id::text || ':' || id)`로 결정적으로 매핑
+- `ON CONFLICT DO NOTHING`으로 재실행해도 기존 미리보기 변경을 덮어쓰지 않음
 
-공유 운영 데이터로 미리보기를 열기 전에 반드시 다음 순서로 진행합니다.
+적용 전 파일 안의 ID 매핑과 두 충돌 감사 결과를 확인합니다. 적용 뒤 테이블·RLS·권한·트리거·RPC와 사용자별 복사 행 수를 검증합니다. 이 SQL에서 운영 `budget_settings`, `transactions`는 `SELECT` 원본일 뿐이며 update·delete·alter 대상이 아닙니다.
 
-1. 창을 열기 전의 백업·감사는 예비 자료로만 사용할 수 있습니다.
-2. 실제 SQL 적용 직전 절차의 첫 단계로 단일 배타적 쓰기 창부터 열고, 모든 기기의 구버전 운영 탭을 닫으며 운영 URL 쓰기를 금지합니다.
-3. 창 안에서 두 테이블을 다시 백업하고 `budget_settings`, `transactions`의 사용자별 `group by user_id` 행 수를 각각 authoritative CSV로 확정합니다.
-4. 창 안에서 비표준 ID를 아래 결정적 매핑 쿼리로 다시 내보내 authoritative CSV를 보관합니다. 같은 `new_id`끼리의 충돌과 기존 ID와의 충돌도 다시 감사해 모두 0건인지 확인합니다.
+2026-08-12 현재 이 미리보기 SQL은 저장소에만 있고 Supabase에는 적용하지 않았습니다. 따라서 실제 인증 다운로드·저장, 공개 미리보기 런타임 검증도 아직 대기 상태입니다.
 
-   ```sql
-   select
-     user_id,
-     id AS old_id,
-     'tx-migrated-' || md5(user_id::text || ':' || id) AS new_id
-   from public.transactions
-   where id !~ '^[A-Za-z0-9._:-]+$'
-   order by user_id, id;
-   ```
+## 격리 미리보기
 
-5. 설정 SQL이 위와 정확히 같은 식으로 ID를 바꾸는지 확인한 뒤, 창을 유지한 채 SQL을 곧바로 적용합니다.
-6. SQL 적용 뒤 사용자별 두 테이블 행 수와 authoritative 매핑 CSV를 대조하고, ID 제약 조건, `updated_at` 트리거, 새 RPC 시그니처·권한, 오래된 RPC 제거를 확인합니다.
-7. 같은 스냅샷의 정상 저장과 오래된 스냅샷의 충돌 거부를 별도 테스트 계정 또는 격리 환경에서 검증합니다.
+예정 주소는 `https://suho-j.github.io/beginner-budget-preview/v1/`이며 화면 상단에 `개발 화면 · 운영 데이터 복사본`과 `여기서 변경한 내용은 운영에 반영되지 않아요.` 안내가 표시됩니다. 배포 산출물에는 원본 브랜치와 소스 SHA를 적은 버전 매니페스트를 둘 예정입니다. 운영 `master`는 사용자 승인 전까지 `0d487df`에 그대로 둡니다.
 
-이 게이트 전에는 가져오기·초기화·샘플 교체가 안전하게 실패할 수 있으며, 동작 완료로 간주하지 않습니다. 가장 안전한 검증 방법은 별도 Supabase 프로젝트를 사용하는 것입니다.
+미리보기 브라우저 QA는 불변 접두사 `<marker> = QA-V1-<timestamp>`와 생성 직후 기록한 QA ID를 사용합니다. 거래를 추가·수정·삭제한 뒤 모든 월과 `preview_transactions`에서 `id = '<QA ID>' or memo like '<marker>%'`가 0건인지 확인하고, 변경한 미리보기 예산을 원복합니다. 범위를 좁히기 위해 JSON 가져오기·전체 초기화·샘플 교체는 스모크에서 실행하지 않습니다.
 
-## 공유 운영 데이터 미리보기 주의
+## 최종 운영 승격 게이트
 
-예정 주소는 `https://suho-j.github.io/beginner-budget-preview/v1/`이며 화면 상단에 `개발 화면 · 운영 데이터 사용 중` 경고가 표시됩니다. 배포 산출물에는 원본 브랜치와 소스 SHA를 적은 버전 매니페스트를 둘 예정입니다. 운영 `master`는 사용자 승인 전까지 `0d487df`에 그대로 둡니다.
+`docs/supabase-setup.sql`의 운영 ID 제약·단조 버전 트리거·5인자 `replace_budget_state`는 2026-08-12 현재 운영 Supabase에 적용하지 않았습니다. 사용자가 특정 미리보기 URL을 승인한 뒤에만 단일 배타적 쓰기 창을 열고 운영 백업·행 수·ID 매핑·충돌 감사를 창 안에서 확정한 뒤 운영 SQL과 정확한 소스 SHA를 승격합니다.
 
-단일 배타적 쓰기 창은 운영 Supabase SQL 적용 직전 절차의 첫 단계로 시작하며 중간에 해제하지 않습니다. **창을 먼저 연 뒤 그 안에서 최종 백업·두 테이블 사용자별 행 수·결정적 ID 매핑·두 충돌 감사를 다시 실행해 authoritative CSV로 확정하고 SQL을 적용합니다.** 창 밖에서 만든 자료는 예비 자료일 뿐 마이그레이션 기준이 아닙니다.
-
-창이 열린 동안에는 모든 기기의 구버전 운영 탭을 닫고 운영 URL의 모든 쓰기를 금지합니다. SQL 적용과 검증된 후보 소스의 통제된 QA만 공유 DB에 쓸 수 있습니다. 사용자가 선택한 정확한 안전 소스 SHA를 운영에 승격한 뒤, 운영 URL을 새로 열어 클라우드 다운로드와 인증 스모크·QA 정리를 완료해야 창을 닫을 수 있습니다. 이 전체 기간을 보장할 수 없다면 공유 운영 DB 대신 격리 Supabase만 사용합니다.
-
-운영 데이터를 쓰는 브라우저 스모크에서는 불변 접두사 `<marker> = QA-V1-<timestamp>`를 만들고 최초 메모 `<marker>-추가`, 수정 메모 `<marker>-수정`처럼 유지합니다. 거래 생성 직후 ID를 기록하고, 정리 뒤 브라우저 전체 월과 DB에서 `id = '<QA ID>' or memo like '<marker>%'`가 0건인지 확인합니다. 원래 예산은 먼저 기록해 정확히 복원하며, JSON 가져오기와 전체 초기화는 실행하지 않습니다.
+창은 운영 SQL 적용 직전에 시작해 운영 URL의 새 다운로드·인증 스모크와 운영 QA 정리가 끝날 때까지 유지합니다. 미리보기 SQL 적용과 미리보기 검수에는 운영 쓰기 중단 창을 사용하지 않습니다. 상세 절차는 [테스트 계획](TEST_PLAN.md)을 따릅니다.
 
 ## 검증
 
@@ -89,6 +76,6 @@ git diff --check
 git diff --check origin/master..HEAD
 ```
 
-2026-08-12 앱·SQL 소스 `eaad4ba`에서 문법 검사와 `60 tests passed`, 커밋 범위와 작업 트리 diff check를 통과했습니다. Supabase SQL 적용과 실제 로그인 브라우저 스모크는 아직 남아 있으므로 공개 미리보기 준비 완료로 간주하지 않습니다.
+기존 V1 앱·운영 SQL 소스 `eaad4ba`에서 기록한 `60 tests passed` 근거는 유지합니다. 2026-08-12 미리보기 격리 변경에서는 환경별 모든 클라우드 대상과 격리 SQL 구조를 포함해 `65 tests passed`를 확인했습니다. 미리보기 SQL 적용, 실제 로그인 저장, 공개 URL 스모크는 아직 남아 있으므로 공개 미리보기 준비 완료로 간주하지 않습니다.
 
 운영 데이터 보존을 포함한 상세 절차는 [테스트 계획](TEST_PLAN.md)을 따릅니다.

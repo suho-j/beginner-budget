@@ -4,6 +4,8 @@
 
 - 형태: 빌드 없는 정적 HTML/CSS/JavaScript 앱
 - 저장: Supabase Auth + RLS, 브라우저 `localStorage`에 가계부 데이터 저장 안 함
+- 운영 저장 대상: `budget_settings`, `transactions`, `replace_budget_state`
+- 로컬·미리보기 저장 대상: `preview_budget_settings`, `preview_transactions`, `replace_preview_budget_state`
 - 개발 브랜치: `guardian/budget-preview-v1`
 - V1 앱·SQL 검증 소스: `eaad4ba`
 - 운영 `origin/master`: `0d487df` 유지
@@ -28,13 +30,16 @@
 - JSON 가져오기·전체 초기화·샘플 교체는 설정 버전과 전체 거래 스냅샷을 비교하는 원자적 `replace_budget_state` RPC로 통합했다.
 - 충돌이나 네트워크 오류 때 로컬 상태를 확정하지 않고 클라우드 다시 불러오기를 안내한다.
 - 거래 ID를 안전한 ASCII 형식으로 제한하고, 비표준 ID를 `old_id`에서 `'tx-migrated-' || md5(user_id::text || ':' || id)`로 결정적으로 바꾸는 적용 전 매핑·보정·제약 SQL을 추가했다.
+- `localhost`, `127.0.0.1`, `/beginner-budget-preview/`는 운영 테이블이 아닌 preview 전용 테이블·RPC로 라우팅한다.
+- `docs/supabase-preview-setup.sql`은 운영 데이터를 SELECT로만 읽어 한 번 복사하고, `ON CONFLICT DO NOTHING`으로 재실행 시 미리보기 편집을 덮어쓰지 않는다.
+- preview 전용 RLS·authenticated 최소 권한·단조 설정 버전 트리거·5인자 전체 상태 CAS를 추가했다.
 
 ### 접근성·모바일
 
 - `tablist`·`tab`·`tabpanel`, 키보드 방향키와 Home/End 이동을 구현했다.
 - 수정 창의 초기 포커스, Escape·취소 후 포커스 복원, 전역 live region을 보강했다.
 - 360px에서 네 탭과 44px 캘린더 날짜 버튼이 가로 스크롤 없이 들어오도록 조정했다.
-- 미리보기 경로에서만 `개발 화면 · 운영 데이터 사용 중` 경고를 표시한다.
+- 로컬·미리보기 환경에서만 `개발 화면 · 운영 데이터 복사본`과 운영 미반영 안내를 표시한다.
 
 ### 자동 검증 근거
 
@@ -44,6 +49,8 @@
 - `node tests/run-tests.cjs`: `60 tests passed`
 - `git diff --check`와 `git diff --check origin/master..HEAD`: 통과
 - `origin/master`가 개발 소스의 조상임을 확인했고 운영 브랜치는 `0d487df` 그대로다.
+
+미리보기 격리 변경에서는 환경별 download/save/insert/update/delete/upload 대상, 운영 객체 비변경, snapshot seed, RLS·권한·트리거·5인자 CAS·오버로드 제거 구조까지 포함해 `65 tests passed`를 확인했다. 기존 `eaad4ba`의 60개 테스트 근거와 로컬 UI 스모크 근거는 그대로 보존한다.
 
 동시성·데이터 안전 관련 주요 커밋:
 
@@ -71,17 +78,18 @@
 
 ### 아직 필요한 런타임 근거
 
-- `docs/supabase-setup.sql`은 커밋됐지만 운영 Supabase에 아직 적용하지 않았다.
-- 배타적 쓰기 창 안에서 다시 확정할 DB 기준 백업, 두 테이블 사용자별 전후 행 수, 결정적 ID 매핑·충돌 감사 authoritative CSV, ID 제약 조건, 단조 증가 트리거, RPC 시그니처·권한·충돌 동작 검증이 남아 있다.
-- 인증 상태의 클라우드 다운로드, 거래 추가·수정·삭제, 예산 저장·복원, 수정 창 포커스 검증이 남아 있다.
-- 운영 데이터에서 불변 접두사 `<marker> = QA-V1-<timestamp>`와 생성 직후 기록한 QA ID를 사용한 추가·수정·필터·캘린더·삭제, 모든 월과 DB의 `id = '<QA ID>' or memo like '<marker>%'` 0건 확인, 예산 원복 검증이 남아 있다.
+- `docs/supabase-preview-setup.sql`은 저장소에만 있으며 Supabase에 아직 적용하지 않았다.
+- preview 두 테이블·RLS·권한·트리거·RPC와 운영→preview 일회성 복사의 실제 DB 검증이 남아 있다.
+- 미리보기 인증 상태의 클라우드 다운로드, 거래 추가·수정·삭제, 예산 저장·복원, 수정 창 포커스 검증이 남아 있다.
+- 미리보기 복사본에서 불변 접두사 `<marker> = QA-V1-<timestamp>`와 생성 직후 기록한 QA ID를 사용한 추가·수정·필터·캘린더·삭제, 모든 월과 `preview_transactions`의 0건 확인, 미리보기 예산 원복 검증이 남아 있다.
 - 공개 `/beginner-budget-preview/v1/` 배포, 소스 SHA 매니페스트 확인, 공개 URL 재검증이 남아 있다.
+- `docs/supabase-setup.sql` 운영 적용과 운영 승격은 사용자가 미리보기 URL을 선택한 뒤까지 대기한다.
 
-따라서 현재 결과는 **코드·자동 테스트와 로컬 비로그인 UI 스모크 완료**이며, 인증 저장 흐름, DB 마이그레이션 런타임, 공개 미리보기 검증 완료를 뜻하지 않는다.
+따라서 현재 결과는 **코드·자동 테스트와 이전 로컬 비로그인 UI 스모크 근거 확보**이며, 미리보기 인증 저장 흐름, DB 격리 SQL 런타임, 공개 미리보기 검증 완료를 뜻하지 않는다.
 
-### 공유 운영 데이터 하드 게이트
+### 최종 운영 승격 하드 게이트
 
-기존 운영 작성기는 오래된 전체 상태를 비원자적으로 저장할 수 있다. 단일 배타적 쓰기 창은 운영 SQL 적용 직전 절차의 첫 단계로 열고, 모든 기기의 구버전 운영 탭을 닫은 채 운영 URL 쓰기를 금지한다. 창 안에서 기준 백업, 두 테이블 사용자별 행 수, 결정적 ID 매핑, 매핑 간·기존 ID 충돌 감사를 다시 실행해 authoritative CSV로 확정한 뒤 SQL을 적용한다. 창 밖의 자료는 예비 자료로만 취급한다. 사용자가 선택한 정확한 안전 소스 SHA를 운영에 승격하고 운영 URL을 새로 열어 클라우드 다운로드·인증 스모크·QA 정리를 끝낼 때까지 창을 유지한다. 전체 기간을 보장하지 못하면 공유 운영 DB를 사용하지 않고 격리 Supabase만 사용한다.
+미리보기 SQL과 QA는 preview 전용 객체만 사용하므로 운영 쓰기 중단 창을 열지 않는다. 사용자가 특정 URL을 승인한 뒤, 운영 SQL 적용 직전 절차의 첫 단계로만 단일 배타적 쓰기 창을 연다. 모든 기기의 구버전 운영 탭을 닫고 창 안에서 기준 백업, 사용자별 행 수, 결정적 ID 매핑, 매핑 간·기존 ID 충돌 감사를 authoritative 자료로 확정한다. 운영 SQL과 사용자가 선택한 정확한 안전 소스 SHA를 승격하고 운영 URL의 새 다운로드·인증 스모크·QA 정리를 끝낼 때까지 창을 유지한다.
 
 ## 이전 반복 기록
 

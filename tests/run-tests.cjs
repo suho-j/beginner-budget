@@ -26,6 +26,7 @@ function createContext(options = {}) {
       localStorage,
       crypto: { randomUUID: () => 'test-uuid-' + Math.random().toString(16).slice(2) },
       supabase: options.supabase,
+      location: options.location || { hostname: 'suho-j.github.io', pathname: '/beginner-budget/' },
       console: testConsole
     },
     console: testConsole
@@ -261,6 +262,7 @@ function createUiContext() {
 
 function createSupabaseFake(options = {}) {
   const calls = [];
+  const settingsTables = new Set(['budget_settings', 'preview_budget_settings']);
   const emptyActions = new Set(options.emptyActions || []);
   const rpcErrors = options.rpcErrors || {};
   const rpcData = options.rpcData || {};
@@ -283,7 +285,7 @@ function createSupabaseFake(options = {}) {
       };
     }
     if (call.action === 'select') {
-      const rows = call.table === 'budget_settings'
+      const rows = settingsTables.has(call.table)
         ? (settingsRow ? [settingsRow] : [])
         : transactionRows;
       return { data: call.maybeSingle ? (rows[0] || null) : rows, error: null };
@@ -291,7 +293,7 @@ function createSupabaseFake(options = {}) {
     const isEmpty = emptyActions.has(call.action) || emptyActions.has(key);
     if (call.select) {
       if (isEmpty) return { data: [], error: null };
-      if (call.table === 'budget_settings') {
+      if (settingsTables.has(call.table)) {
         const configuredVersions = options.settingsWriteVersions || [];
         const updatedAt = configuredVersions[settingsWriteIndex]
           || options.settingsWriteUpdatedAt
@@ -330,7 +332,7 @@ function createSupabaseFake(options = {}) {
         ? (configuredError instanceof Error ? configuredError : new Error(String(configuredError)))
         : null;
       let data = rpcData[name];
-      if (data === undefined && name === 'replace_budget_state') {
+      if (data === undefined && ['replace_budget_state', 'replace_preview_budget_state'].includes(name)) {
         data = [{
           uploaded_count: Array.isArray(args.p_transactions) ? args.p_transactions.length : 0,
           updated_at: options.rpcUpdatedAt || '2026-08-12T00:00:00.000Z'
@@ -610,6 +612,7 @@ function createAppHarness(options = {}) {
   }
   const defaultUser = Object.prototype.hasOwnProperty.call(options, 'user') ? options.user : { id: 'user-1' };
   window.BudgetCloud = {
+    ENVIRONMENT: Object.freeze({ isPreview: Boolean(options.isPreview) }),
     isConfigured: () => true,
     currentUser: () => runCloudBehavior('currentUser', [], defaultUser),
     downloadState: () => runCloudBehavior('downloadState', [], options.cloudState || window.BudgetStorage.defaultState()),
@@ -1033,6 +1036,87 @@ function testCloudUsesSharedLoginEmail() {
   assert.strictEqual(win.BudgetCloud.LOGIN_EMAIL, 'ho910728@naver.com');
 }
 
+async function testCloudRoutesEveryOperationByRuntimeEnvironment() {
+  const cases = [
+    {
+      location: { hostname: 'localhost', pathname: '/' },
+      name: 'preview',
+      settingsTable: 'preview_budget_settings',
+      transactionsTable: 'preview_transactions',
+      stateRpc: 'replace_preview_budget_state'
+    },
+    {
+      location: { hostname: '127.0.0.1', pathname: '/anything/' },
+      name: 'preview',
+      settingsTable: 'preview_budget_settings',
+      transactionsTable: 'preview_transactions',
+      stateRpc: 'replace_preview_budget_state'
+    },
+    {
+      location: { hostname: 'suho-j.github.io', pathname: '/beginner-budget-preview/v1/' },
+      name: 'preview',
+      settingsTable: 'preview_budget_settings',
+      transactionsTable: 'preview_transactions',
+      stateRpc: 'replace_preview_budget_state'
+    },
+    {
+      location: { hostname: 'suho-j.github.io', pathname: '/beginner-budget/' },
+      name: 'production',
+      settingsTable: 'budget_settings',
+      transactionsTable: 'transactions',
+      stateRpc: 'replace_budget_state'
+    }
+  ];
+
+  for (const expected of cases) {
+    const fake = createSupabaseFake({
+      settingsRow: {
+        monthly_budget: 600000,
+        category_budgets: {},
+        updated_at: '2026-08-12T00:00:00.000Z'
+      }
+    });
+    const win = createContext({ supabase: fake.supabase, location: expected.location });
+    const state = win.BudgetStorage.normalizeState({
+      transactions: [
+        { id: 'tx-a', date: '2026-08-12', type: 'expense', category: '생활비', amount: 1000, memo: '환경 확인', source: 'user' }
+      ]
+    });
+
+    assert.strictEqual(win.BudgetCloud.ENVIRONMENT.name, expected.name);
+    assert.strictEqual(win.BudgetCloud.ENVIRONMENT.settingsTable, expected.settingsTable);
+    assert.strictEqual(win.BudgetCloud.ENVIRONMENT.transactionsTable, expected.transactionsTable);
+    assert.strictEqual(win.BudgetCloud.ENVIRONMENT.stateRpc, expected.stateRpc);
+    assert.strictEqual(Object.isFrozen(win.BudgetCloud.ENVIRONMENT), true);
+
+    await win.BudgetCloud.downloadState();
+    await win.BudgetCloud.saveSettings(state);
+    await win.BudgetCloud.insertTransaction(state.transactions[0]);
+    await win.BudgetCloud.updateTransaction(state.transactions[0], state.transactions[0]);
+    await win.BudgetCloud.deleteTransaction(state.transactions[0].id, state.transactions[0]);
+    await win.BudgetCloud.uploadState(state, state);
+    await win.BudgetCloud.signOut();
+    await win.BudgetCloud.saveSettings(state);
+
+    const tableCalls = fake.calls.filter((call) => call.table);
+    assert.deepStrictEqual(
+      tableCalls.map((call) => call.table),
+      [
+        expected.settingsTable,
+        expected.transactionsTable,
+        expected.settingsTable,
+        expected.transactionsTable,
+        expected.transactionsTable,
+        expected.transactionsTable,
+        expected.settingsTable
+      ]
+    );
+    const rpcCalls = fake.calls.filter((call) => call.action === 'rpc');
+    assert.strictEqual(rpcCalls.length, 1);
+    assert.strictEqual(rpcCalls[0].name, expected.stateRpc);
+  }
+}
+
 function testCategoryBudgetDetailShowsSpentBeforeBudget() {
   const source = fs.readFileSync(path.join(__dirname, '..', 'js/ui.js'), 'utf8');
   assert.ok(source.includes('`사용 ${formatWon(item.spent)} / 예산 ${formatWon(item.budget)}`'));
@@ -1059,6 +1143,10 @@ function testAppMarkupProvidesTabsCalendarEditDialogAndPreviewWarning() {
     'id="filter-category"', 'id="calendar-grid"', 'id="calendar-detail-list"',
     '<dialog id="edit-dialog"', 'id="edit-transaction-form"', 'id="global-message"'
   ]) assert.ok(source.includes(required), `missing markup: ${required}`);
+
+  assert.match(source, /개발 화면 · 운영 데이터 복사본/);
+  assert.match(source, /변경[^<]*운영[^<]*반영되지 않아요/);
+  assert.doesNotMatch(source, /개발 화면 · 운영 데이터 사용 중/);
 
   const globalMessage = startTagById('global-message');
   assert.strictEqual(globalMessage.name, 'p');
@@ -2047,6 +2135,162 @@ function testSupabaseSetupDropsUnsafeSampleRpcOverloads() {
   assert.doesNotMatch(source, /grant execute on function public\.replace_budget_samples/i);
 }
 
+function testPreviewSupabaseSetupCreatesIsolatedTablesRlsAndPermissions() {
+  const source = fs.readFileSync(path.join(__dirname, '..', 'docs', 'supabase-preview-setup.sql'), 'utf8');
+
+  assert.match(source, /create table if not exists public\.preview_budget_settings\s*\(/i);
+  assert.match(source, /user_id uuid primary key references auth\.users\(id\) on delete cascade/i);
+  assert.match(source, /monthly_budget integer not null default 500000 check \(monthly_budget > 0\)/i);
+  assert.match(source, /category_budgets jsonb not null default '\{\}'::jsonb/i);
+  assert.match(source, /updated_at timestamptz not null default now\(\)/i);
+  assert.match(source, /create table if not exists public\.preview_transactions\s*\(/i);
+  assert.match(source, /id text primary key/i);
+  assert.match(source, /user_id uuid not null references auth\.users\(id\) on delete cascade/i);
+  assert.match(source, /type text not null check \(type in \('income', 'expense'\)\)/i);
+  assert.match(source, /amount integer not null check \(amount > 0\)/i);
+  assert.match(source, /constraint preview_transactions_id_canonical\s+check \(id ~ '\^\[A-Za-z0-9\._:-\]\+\$'\)/i);
+
+  assert.match(source, /create or replace function public\.set_preview_budget_settings_updated_at\(\)[\s\S]*security invoker/i);
+  assert.match(source, /greatest\(\s*clock_timestamp\(\),\s*old\.updated_at \+ interval '1 microsecond'\s*\)/i);
+  assert.match(source, /create trigger set_preview_budget_settings_updated_at[\s\S]*on public\.preview_budget_settings/i);
+  assert.match(source, /revoke all on function public\.set_preview_budget_settings_updated_at\(\) from public/i);
+  assert.match(source, /revoke all on function public\.set_preview_budget_settings_updated_at\(\) from anon/i);
+  assert.match(source, /grant execute on function public\.set_preview_budget_settings_updated_at\(\) to authenticated/i);
+
+  assert.match(source, /alter table public\.preview_budget_settings enable row level security/i);
+  assert.match(source, /alter table public\.preview_transactions enable row level security/i);
+  for (const operation of ['select', 'insert', 'update']) {
+    assert.match(
+      source,
+      new RegExp(`create policy "Preview users can ${operation} own settings"[\\s\\S]*?for ${operation}[\\s\\S]*?auth\\.uid\\(\\) = user_id`, 'i')
+    );
+  }
+  for (const operation of ['select', 'insert', 'update', 'delete']) {
+    assert.match(
+      source,
+      new RegExp(`create policy "Preview users can ${operation} own transactions"[\\s\\S]*?for ${operation}[\\s\\S]*?auth\\.uid\\(\\) = user_id`, 'i')
+    );
+  }
+  assert.match(source, /revoke all on table public\.preview_budget_settings from anon/i);
+  assert.match(source, /revoke all on table public\.preview_transactions from anon/i);
+  assert.match(source, /grant select, insert, update on table public\.preview_budget_settings to authenticated/i);
+  assert.match(source, /grant select, insert, update, delete on table public\.preview_transactions to authenticated/i);
+}
+
+function testPreviewSupabaseSetupCopiesProductionOnceWithoutMutatingIt() {
+  const source = fs.readFileSync(path.join(__dirname, '..', 'docs', 'supabase-preview-setup.sql'), 'utf8');
+  const executable = source.replace(/--[^\r\n]*/g, '');
+
+  assert.doesNotMatch(
+    executable,
+    /\b(?:insert\s+into|update|delete\s+from|alter\s+table|truncate(?:\s+table)?|drop\s+table)\s+public\.(?:budget_settings|transactions)\b/i,
+    'production tables must only be read as snapshot sources'
+  );
+  assert.doesNotMatch(
+    executable,
+    /\b(?:create(?:\s+or\s+replace)?|drop)\s+function\s+public\.(?:set_budget_settings_updated_at|replace_budget_state|replace_budget_samples)\b/i,
+    'production functions must not be changed'
+  );
+  assert.doesNotMatch(
+    executable,
+    /\b(?:create|drop)\s+policy[\s\S]*?\bon\s+public\.(?:budget_settings|transactions)\b/i,
+    'production policies must not be changed'
+  );
+  assert.doesNotMatch(
+    executable,
+    /\b(?:create|drop)\s+trigger[\s\S]*?\bon\s+public\.(?:budget_settings|transactions)\b/i,
+    'production triggers must not be changed'
+  );
+  assert.doesNotMatch(
+    executable,
+    /\b(?:grant|revoke)[^;]*\bon\s+(?:table|function)\s+public\.(?:budget_settings|transactions|replace_budget_state|replace_budget_samples)\b/i,
+    'production privileges must not be changed'
+  );
+
+  assert.match(source, /-- Preflight 1: deterministic legacy ID mapping/i);
+  assert.match(source, /'tx-migrated-' \|\| md5\(user_id::text \|\| ':' \|\| id\) as preview_id/i);
+  assert.match(source, /-- Preflight 2: candidate ID collision audit; expected result is zero rows/i);
+  assert.match(source, /group by preview_id[\s\S]*having count\(\*\) > 1/i);
+  assert.match(source, /-- Preflight 3: existing preview row collision audit/i);
+  assert.match(source, /join public\.preview_transactions as existing[\s\S]*existing\.id = candidate\.preview_id/i);
+
+  assert.match(
+    source,
+    /insert into public\.preview_budget_settings[\s\S]*select[\s\S]*from public\.budget_settings[\s\S]*on conflict \(user_id\) do nothing/i
+  );
+  assert.match(
+    source,
+    /insert into public\.preview_transactions[\s\S]*case[\s\S]*when id ~ '\^\[A-Za-z0-9\._:-\]\+\$' then id[\s\S]*else 'tx-migrated-' \|\| md5\(user_id::text \|\| ':' \|\| id\)[\s\S]*from public\.transactions[\s\S]*on conflict \(id\) do nothing/i
+  );
+  assert.ok((source.match(/on conflict \([^)]*\) do nothing/gi) || []).length >= 2);
+  assert.doesNotMatch(source, /on conflict[\s\S]{0,80}do update/i);
+}
+
+function testPreviewSupabaseSetupDefinesFullFiveArgumentCasAndDropsOverloads() {
+  const source = fs.readFileSync(path.join(__dirname, '..', 'docs', 'supabase-preview-setup.sql'), 'utf8');
+  const start = source.search(/create or replace function public\.replace_preview_budget_state\s*\(/i);
+  const permissionStart = source.search(/revoke all on function public\.replace_preview_budget_state/i);
+  assert.ok(start >= 0 && permissionStart > start, 'preview whole-state RPC must be defined before permissions');
+  const rpc = source.slice(start, permissionStart);
+
+  assert.match(source, /drop function if exists public\.replace_preview_budget_state\(integer,\s*jsonb,\s*jsonb\)/i);
+  assert.match(
+    source,
+    /create or replace function public\.replace_preview_budget_state\(\s*p_monthly_budget integer,\s*p_category_budgets jsonb,\s*p_transactions jsonb,\s*p_expected_updated_at timestamptz,\s*p_expected_transactions jsonb\s*\)/i
+  );
+  assert.match(rpc, /returns table \(uploaded_count integer, updated_at timestamptz\)/i);
+  assert.match(rpc, /security invoker/i);
+  assert.match(rpc, /v_user_id uuid := auth\.uid\(\)/i);
+  assert.match(rpc, /p_monthly_budget is null or p_monthly_budget <= 0/i);
+  assert.match(rpc, /jsonb_typeof\(p_category_budgets\) <> 'object'/i);
+  assert.match(rpc, /jsonb_typeof\(p_transactions\) <> 'array'/i);
+  assert.match(rpc, /jsonb_typeof\(p_expected_transactions\) <> 'array'/i);
+  assert.match(rpc, /between 1 and 2147483647/i);
+  assert.match(rpc, /__month_start_day[\s\S]*between 1 and 31/i);
+  assert.match(rpc, /__monthly_budgets[\s\S]*<> 'object'/i);
+  assert.match(rpc, /p_transactions \|\| p_expected_transactions/i);
+  assert.match(rpc, /\(transaction_row ->> 'id'\) !~ '\^\[A-Za-z0-9\._:-\]\+\$'/i);
+  assert.match(rpc, /to_char\(to_date\(transaction_row ->> 'date', 'YYYY-MM-DD'\), 'YYYY-MM-DD'\)/i);
+  assert.match(rpc, /coalesce\(transaction_row ->> 'type', ''\) not in \('income', 'expense'\)/i);
+  assert.match(rpc, /nullif\(btrim\(transaction_row ->> 'category'\), ''\) is null/i);
+  assert.match(rpc, /coalesce\(transaction_row ->> 'source', 'user'\) not in \('user', 'sample'\)/i);
+  assert.match(rpc, /char_length\(coalesce\(transaction_row ->> 'memo', ''\)\) > 80/i);
+  assert.match(rpc, /duplicate transaction ids are not allowed/i);
+  assert.match(rpc, /duplicate expected transaction ids are not allowed/i);
+  assert.match(rpc, /order by transaction_row\.id collate "C"[\s\S]*from jsonb_to_recordset\(p_expected_transactions\)/i);
+
+  const settingsLock = rpc.search(/from public\.preview_budget_settings as settings[\s\S]*?for update/i);
+  const settingsCheck = rpc.indexOf('v_current_updated_at is distinct from p_expected_updated_at');
+  const transactionsLock = rpc.indexOf('lock table public.preview_transactions in share row exclusive mode');
+  const transactionSnapshot = rpc.indexOf('into v_current_transactions');
+  const transactionCheck = rpc.indexOf('v_current_transactions is distinct from v_expected_transactions');
+  const firstWrite = Math.min(...[
+    rpc.indexOf('update public.preview_budget_settings'),
+    rpc.indexOf('insert into public.preview_budget_settings'),
+    rpc.indexOf('delete from public.preview_transactions')
+  ].filter((index) => index >= 0));
+  assert.ok(settingsLock >= 0 && settingsLock < settingsCheck, 'settings row must be locked before settings CAS');
+  assert.ok(settingsCheck < transactionsLock, 'settings CAS must precede the transaction table lock');
+  assert.ok(transactionsLock < transactionSnapshot, 'transaction lock must precede snapshot read');
+  assert.ok(transactionSnapshot < transactionCheck && transactionCheck < firstWrite, 'full snapshot CAS must precede writes');
+  assert.match(rpc, /from public\.preview_transactions as transaction_row[\s\S]*where transaction_row\.user_id = v_user_id/i);
+  assert.match(rpc, /update public\.preview_budget_settings[\s\S]*settings\.updated_at = p_expected_updated_at[\s\S]*returning settings\.updated_at into v_new_updated_at/i);
+  assert.match(rpc, /insert into public\.preview_budget_settings[\s\S]*on conflict \(user_id\) do nothing[\s\S]*returning settings\.updated_at into v_new_updated_at/i);
+  assert.match(rpc, /delete from public\.preview_transactions\s+where user_id = v_user_id/i);
+  assert.match(rpc, /insert into public\.preview_transactions[\s\S]*from jsonb_to_recordset\(p_transactions\)/i);
+  assert.match(rpc, /errcode = '40001'/i);
+  assert.match(rpc, /return query select jsonb_array_length\(p_transactions\)::integer, v_new_updated_at/i);
+  assert.doesNotMatch(rpc, /public\.(?:budget_settings|transactions)\b/i, 'preview RPC must never access production tables');
+
+  assert.match(source, /revoke all on function public\.replace_preview_budget_state\(integer, jsonb, jsonb, timestamptz, jsonb\) from public/i);
+  assert.match(source, /revoke all on function public\.replace_preview_budget_state\(integer, jsonb, jsonb, timestamptz, jsonb\) from anon/i);
+  assert.match(source, /grant execute on function public\.replace_preview_budget_state\(integer, jsonb, jsonb, timestamptz, jsonb\) to authenticated/i);
+  assert.match(source, /drop function if exists public\.replace_preview_budget_samples\(date, date, jsonb\)/i);
+  assert.match(source, /drop function if exists public\.replace_preview_budget_samples\(date, date, jsonb, jsonb\)/i);
+  assert.doesNotMatch(source, /create or replace function public\.replace_preview_budget_samples/i);
+  assert.doesNotMatch(source, /grant execute on function public\.replace_preview_budget_samples/i);
+}
+
 function testUiCloudStatusShowsLoadingRetryAndSignedOutStates() {
   const { window, document } = createUiContext();
   window.BudgetCloud = { isConfigured: () => true };
@@ -2109,6 +2353,18 @@ async function testAppReadinessBlocksWritesAfterLoadErrorAndEnablesAfterSuccess(
     JSON.stringify(loaded.cloudCalls.uploadState[0][0]),
     JSON.stringify(loaded.cloudCalls.uploadState[0][1])
   );
+}
+
+async function testAppShowsIsolatedCopyBannerOnlyInPreviewEnvironment() {
+  const preview = createAppHarness({ isPreview: true });
+  await preview.init();
+  assert.strictEqual(preview.elements.previewDataWarning.hidden, false);
+  assert.strictEqual(preview.document.body.classList.contains('has-preview-warning'), true);
+
+  const production = createAppHarness({ isPreview: false });
+  await production.init();
+  assert.strictEqual(production.elements.previewDataWarning.hidden, true);
+  assert.strictEqual(production.document.body.classList.contains('has-preview-warning'), false);
 }
 
 async function testAppDisablesWritesDuringInitialSessionLookup() {
@@ -2444,6 +2700,7 @@ const tests = [
   testLegacyExpenseCategoriesMapToFourBudgets,
   testCloudStateMappingKeepsBudgetAndTransactions,
   testCloudUsesSharedLoginEmail,
+  testCloudRoutesEveryOperationByRuntimeEnvironment,
   testCategoryBudgetDetailShowsSpentBeforeBudget,
   testUiExportsTabEditAndCalendarRenderers,
   testUiTabsAndFilterOptionsBehave,
@@ -2477,7 +2734,11 @@ const tests = [
   testAppReplacesSamplesThroughWholeStateCas,
   testCloudDoesNotExposeUnsafeSampleReplacement,
   testSupabaseSetupDropsUnsafeSampleRpcOverloads,
+  testPreviewSupabaseSetupCreatesIsolatedTablesRlsAndPermissions,
+  testPreviewSupabaseSetupCopiesProductionOnceWithoutMutatingIt,
+  testPreviewSupabaseSetupDefinesFullFiveArgumentCasAndDropsOverloads,
   testUiCloudStatusShowsLoadingRetryAndSignedOutStates,
+  testAppShowsIsolatedCopyBannerOnlyInPreviewEnvironment,
   testAppDisablesWritesDuringInitialSessionLookup,
   testAppReadinessBlocksWritesAfterLoadErrorAndEnablesAfterSuccess,
   testAppSerializesMutationsAndRemoteFailureUnlocksWithoutCommit,

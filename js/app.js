@@ -720,9 +720,11 @@
     window.BudgetUI.initDefaults(elements, state);
     viewState.month = currentBudgetMonth();
     window.BudgetUI.fillFilterCategoryOptions(elements.filterCategory, 'all', 'all');
-    const previewPath = window.location.pathname.startsWith('/beginner-budget-preview/');
-    elements.previewDataWarning.hidden = !previewPath;
-    document.body.classList.toggle('has-preview-warning', previewPath);
+    const previewEnvironment = Boolean(
+      window.BudgetCloud.ENVIRONMENT && window.BudgetCloud.ENVIRONMENT.isPreview
+    );
+    elements.previewDataWarning.hidden = !previewEnvironment;
+    document.body.classList.toggle('has-preview-warning', previewEnvironment);
     setCloudReadiness('loading', null);
     bindEvents();
     render();
