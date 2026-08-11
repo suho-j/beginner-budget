@@ -94,6 +94,7 @@ declare
   v_user_id uuid := auth.uid();
   v_settings_exists boolean := false;
   v_current_updated_at timestamptz;
+  v_expected_transactions jsonb;
   v_current_transactions jsonb;
   v_new_updated_at timestamptz := clock_timestamp();
 begin
@@ -182,6 +183,31 @@ begin
     raise exception 'duplicate expected transaction ids are not allowed' using errcode = '22023';
   end if;
 
+  select coalesce(
+    jsonb_agg(
+      jsonb_build_object(
+        'id', transaction_row.id,
+        'date', to_char(transaction_row.date, 'YYYY-MM-DD'),
+        'type', transaction_row.type,
+        'category', transaction_row.category,
+        'amount', transaction_row.amount,
+        'memo', coalesce(transaction_row.memo, ''),
+        'source', coalesce(transaction_row.source, 'user')
+      ) order by transaction_row.id collate "C"
+    ),
+    '[]'::jsonb
+  )
+  into v_expected_transactions
+  from jsonb_to_recordset(p_expected_transactions) as transaction_row(
+    id text,
+    date date,
+    type text,
+    category text,
+    amount integer,
+    memo text,
+    source text
+  );
+
   select settings.updated_at
   into v_current_updated_at
   from public.budget_settings as settings
@@ -194,6 +220,8 @@ begin
     raise exception '다른 브라우저에서 가계부 데이터가 변경됐어요. 클라우드 데이터를 다시 불러와 주세요.'
       using errcode = '40001';
   end if;
+
+  lock table public.transactions in share row exclusive mode;
 
   select coalesce(
     jsonb_agg(
@@ -213,7 +241,7 @@ begin
   from public.transactions as transaction_row
   where transaction_row.user_id = v_user_id;
 
-  if v_current_transactions is distinct from p_expected_transactions then
+  if v_current_transactions is distinct from v_expected_transactions then
     raise exception '다른 브라우저에서 가계부 데이터가 변경됐어요. 클라우드 데이터를 다시 불러와 주세요.'
       using errcode = '40001';
   end if;

@@ -1814,12 +1814,12 @@ function testSupabaseSetupDefinesTransactionalWholeStateRpc() {
   assert.match(rpc, /v_current_updated_at\s+is distinct from\s+p_expected_updated_at/i);
   assert.match(rpc, /where settings\.user_id\s*=\s*v_user_id\s+for update/i);
   assert.match(rpc, /jsonb_agg\s*\([\s\S]*jsonb_build_object[\s\S]*order by[\s\S]*\.id/i);
-  assert.match(rpc, /v_current_transactions\s+is distinct from\s+p_expected_transactions/i);
+  assert.match(rpc, /v_current_transactions\s+is distinct from\s+v_expected_transactions/i);
   assert.match(rpc, /update public\.budget_settings[\s\S]*updated_at\s*=\s*v_new_updated_at[\s\S]*updated_at\s*=\s*p_expected_updated_at/i);
   assert.match(rpc, /insert into public\.budget_settings[\s\S]*on conflict\s*\(user_id\)\s*do nothing/i);
   assert.match(rpc, /errcode\s*=\s*'40001'/i);
   const versionCheck = rpc.indexOf('v_current_updated_at is distinct from p_expected_updated_at');
-  const transactionCheck = rpc.indexOf('v_current_transactions is distinct from p_expected_transactions');
+  const transactionCheck = rpc.indexOf('v_current_transactions is distinct from v_expected_transactions');
   const firstWrite = Math.min(...[
     rpc.indexOf('update public.budget_settings'),
     rpc.indexOf('insert into public.budget_settings'),
@@ -1830,6 +1830,49 @@ function testSupabaseSetupDefinesTransactionalWholeStateRpc() {
   assert.match(source, /revoke all on function public\.replace_budget_state\(integer,\s*jsonb,\s*jsonb,\s*timestamptz,\s*jsonb\) from public/i);
   assert.match(source, /revoke all on function public\.replace_budget_state\(integer,\s*jsonb,\s*jsonb,\s*timestamptz,\s*jsonb\) from anon/i);
   assert.match(source, /grant execute on function public\.replace_budget_state\(integer,\s*jsonb,\s*jsonb,\s*timestamptz,\s*jsonb\) to authenticated/i);
+}
+
+function testSupabaseWholeStateRpcLocksTransactionsBeforeSnapshotAndReplacement() {
+  const source = fs.readFileSync(path.join(__dirname, '..', 'docs', 'supabase-setup.sql'), 'utf8');
+  const start = source.search(/create or replace function public\.replace_budget_state\s*\(/i);
+  const end = source.indexOf('-- Atomically replace sample rows', start);
+  const rpc = source.slice(start, end).toLowerCase();
+  const lock = rpc.indexOf('lock table public.transactions in share row exclusive mode');
+  const snapshotRead = rpc.indexOf('into v_current_transactions');
+  const snapshotCompare = rpc.indexOf('v_current_transactions is distinct from');
+  const transactionDelete = rpc.indexOf('delete from public.transactions');
+  const transactionInsert = rpc.indexOf('insert into public.transactions');
+
+  assert.ok(lock >= 0, 'whole-state replacement must lock transactions against direct DML');
+  assert.ok(lock < snapshotRead, 'transaction lock must precede the current snapshot read');
+  assert.ok(lock < snapshotCompare, 'transaction lock must cover the snapshot comparison');
+  assert.ok(lock < transactionDelete, 'transaction lock must precede replacement delete');
+  assert.ok(lock < transactionInsert, 'transaction lock must precede replacement insert');
+}
+
+function testSupabaseWholeStateRpcCanonicalizesExpectedTransactionsWithDatabaseOrdering() {
+  const source = fs.readFileSync(path.join(__dirname, '..', 'docs', 'supabase-setup.sql'), 'utf8');
+  const start = source.search(/create or replace function public\.replace_budget_state\s*\(/i);
+  const end = source.indexOf('-- Atomically replace sample rows', start);
+  const rpc = source.slice(start, end);
+
+  // A supplementary character and a BMP private-use character sort differently
+  // under JavaScript UTF-16 ordering and PostgreSQL UTF-8 COLLATE "C" ordering.
+  const ids = ['id-\uE000', 'id-\u{1F600}'];
+  const javascriptOrder = [...ids].sort();
+  const databaseCOrder = [...ids].sort((left, right) => Buffer.compare(Buffer.from(left), Buffer.from(right)));
+  assert.notDeepStrictEqual(javascriptOrder, databaseCOrder, 'regression fixture must expose the cross-runtime ordering difference');
+
+  const expectedInto = rpc.indexOf('into v_expected_transactions');
+  assert.ok(expectedInto >= 0, 'expected snapshot must be canonicalized into its own variable');
+  const canonicalizeStart = rpc.lastIndexOf('select coalesce(', expectedInto);
+  const canonicalizeEnd = rpc.indexOf(';', expectedInto);
+  const canonicalization = rpc.slice(canonicalizeStart, canonicalizeEnd);
+  assert.match(canonicalization, /from jsonb_to_recordset\(p_expected_transactions\)/i);
+  assert.match(canonicalization, /jsonb_build_object[\s\S]*'id'[\s\S]*'date'[\s\S]*'type'[\s\S]*'category'[\s\S]*'amount'[\s\S]*'memo'[\s\S]*'source'/i);
+  assert.match(canonicalization, /order by transaction_row\.id collate "C"/i);
+  assert.match(rpc, /v_current_transactions\s+is distinct from\s+v_expected_transactions/i);
+  assert.doesNotMatch(rpc, /v_current_transactions\s+is distinct from\s+p_expected_transactions/i);
 }
 
 function testAppReplacesSamplesThroughOneCloudRpc() {
@@ -2271,6 +2314,8 @@ const tests = [
   testCloudWholeStateReplacementUsesExpectedSnapshotAndAdvancesVersion,
   testCloudWholeStateRpcErrorsBeforeAnyDirectWrite,
   testSupabaseSetupDefinesTransactionalWholeStateRpc,
+  testSupabaseWholeStateRpcLocksTransactionsBeforeSnapshotAndReplacement,
+  testSupabaseWholeStateRpcCanonicalizesExpectedTransactionsWithDatabaseOrdering,
   testAppReplacesSamplesThroughOneCloudRpc,
   testCloudReplacesSelectedPeriodSamplesWithOneRpc,
   testCloudSampleRpcErrorsWithoutFallbackWrites,
