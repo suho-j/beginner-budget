@@ -250,7 +250,7 @@
     window.BudgetUI.setMessage(
       elements.toolMessage,
       movedOutsideSelectedMonth
-        ? '거래를 수정했어요. 수정한 날짜가 선택한 달 밖이라 목록에서 이동했어요.'
+        ? '수정했어요. 날짜가 바뀌어 현재 월 목록에서는 보이지 않아요.'
         : '거래를 수정했어요.',
       'ok'
     );
@@ -285,7 +285,10 @@
     const hasSample = window.BudgetTransactions.hasSampleForMonth(state.transactions, month, monthStartDay);
     if (hasSample && !window.confirm('선택한 달에 이미 샘플 데이터가 있어요. 기존 샘플만 교체할까요?')) return;
 
-    const preparedState = window.BudgetTransactions.createSampleState(state, month, { replace: hasSample });
+    const preparedState = window.BudgetTransactions.createSampleState(state, month, {
+      replace: hasSample,
+      monthStartDay
+    });
     const existingIds = new Set(state.transactions.map((transaction) => transaction.id));
     const previousSampleIds = state.transactions
       .filter((transaction) => (

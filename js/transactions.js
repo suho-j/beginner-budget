@@ -295,17 +295,33 @@
 
   function createSampleState(currentState, month, options = {}) {
     const targetMonth = month || window.BudgetStorage.localMonthString();
+    const startDay = window.BudgetStorage.normalizeMonthStartDay(
+      options.monthStartDay || currentState.monthStartDay || 1
+    );
     const baseTransactions = options.replace
-      ? currentState.transactions.filter((tx) => !(tx.source === 'sample' && monthFromDate(tx.date) === targetMonth))
+      ? currentState.transactions.filter((tx) => !(
+        tx.source === 'sample'
+        && window.BudgetStorage.isDateInBudgetMonth(tx.date, targetMonth, startDay)
+      ))
       : currentState.transactions;
+    const period = window.BudgetStorage.periodRangeForMonth(targetMonth, startDay);
+    const [startYear, startMonth, startDate] = period.start.split('-').map(Number);
+    const dateAtOffset = (offset) => window.BudgetStorage.localDateString(
+      new Date(startYear, startMonth - 1, startDate + offset)
+    );
     const samples = [
-      { date: `${targetMonth}-01`, type: 'income', category: '월급', amount: 2500000, memo: `${SAMPLE_SIGNATURE}: 이번 달 월급` },
-      { date: `${targetMonth}-03`, type: 'expense', category: '생활비', amount: 32000, memo: `${SAMPLE_SIGNATURE}: 장보기` },
-      { date: `${targetMonth}-05`, type: 'expense', category: '배달비', amount: 62000, memo: `${SAMPLE_SIGNATURE}: 배달 음식` },
-      { date: `${targetMonth}-09`, type: 'expense', category: '의류비', amount: 68000, memo: `${SAMPLE_SIGNATURE}: 옷 구매` },
-      { date: `${targetMonth}-12`, type: 'expense', category: '비상금', amount: 120000, memo: `${SAMPLE_SIGNATURE}: 예비 지출` },
-      { date: `${targetMonth}-15`, type: 'income', category: '부수입', amount: 80000, memo: `${SAMPLE_SIGNATURE}: 중고 거래` }
-    ].map((tx) => ({ ...tx, id: window.BudgetStorage.createId(), source: 'sample' }));
+      { offset: 0, type: 'income', category: '월급', amount: 2500000, memo: `${SAMPLE_SIGNATURE}: 이번 달 월급` },
+      { offset: 2, type: 'expense', category: '생활비', amount: 32000, memo: `${SAMPLE_SIGNATURE}: 장보기` },
+      { offset: 4, type: 'expense', category: '배달비', amount: 62000, memo: `${SAMPLE_SIGNATURE}: 배달 음식` },
+      { offset: 8, type: 'expense', category: '의류비', amount: 68000, memo: `${SAMPLE_SIGNATURE}: 옷 구매` },
+      { offset: 11, type: 'expense', category: '비상금', amount: 120000, memo: `${SAMPLE_SIGNATURE}: 예비 지출` },
+      { offset: 14, type: 'income', category: '부수입', amount: 80000, memo: `${SAMPLE_SIGNATURE}: 중고 거래` }
+    ].map(({ offset, ...tx }) => ({
+      ...tx,
+      date: dateAtOffset(offset),
+      id: window.BudgetStorage.createId(),
+      source: 'sample'
+    }));
 
     return {
       ...currentState,

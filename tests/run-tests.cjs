@@ -469,6 +469,35 @@ function testSummaryAndSampleReplace() {
   assert.strictEqual(state.transactions.length, countAfterFirst);
 }
 
+function testSampleReplaceHonorsCustomBudgetMonthStart() {
+  const win = createContext();
+  const state = win.BudgetStorage.normalizeState({
+    monthStartDay: 25,
+    transactions: [
+      { id: 'sample-prior', date: '2026-05-01', type: 'expense', category: '생활비', amount: 1000, memo: '이전 예산월', source: 'sample' },
+      { id: 'sample-selected', date: '2026-05-25', type: 'expense', category: '배달비', amount: 2000, memo: '선택 예산월', source: 'sample' }
+    ]
+  });
+
+  const replaced = win.BudgetTransactions.createSampleState(state, '2026-05', { replace: true });
+  const newSamples = replaced.transactions.filter((transaction) => (
+    transaction.source === 'sample'
+    && !['sample-prior', 'sample-selected'].includes(transaction.id)
+  ));
+
+  assert.strictEqual(replaced.transactions.some((transaction) => transaction.id === 'sample-prior'), true);
+  assert.strictEqual(replaced.transactions.some((transaction) => transaction.id === 'sample-selected'), false);
+  assert.strictEqual(newSamples.length, 6);
+  assert.strictEqual(
+    newSamples.every((transaction) => win.BudgetStorage.isDateInBudgetMonth(transaction.date, '2026-05', 25)),
+    true
+  );
+  assert.strictEqual(
+    JSON.stringify(newSamples.map((transaction) => transaction.date)),
+    JSON.stringify(['2026-05-25', '2026-05-27', '2026-05-29', '2026-06-02', '2026-06-05', '2026-06-08'])
+  );
+}
+
 function testImportExport() {
   const win = createContext();
   const state = win.BudgetTransactions.createSampleState(win.BudgetStorage.defaultState(), '2026-05');
@@ -1096,6 +1125,7 @@ const tests = [
   testAddTransactionCanonicalizesBeginnerMoneyInput,
   testSummaryInsightsAndSearchFilter,
   testSummaryAndSampleReplace,
+  testSampleReplaceHonorsCustomBudgetMonthStart,
   testImportExport,
   testLegacyExpenseCategoriesMapToFourBudgets,
   testCloudStateMappingKeepsBudgetAndTransactions,
