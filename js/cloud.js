@@ -8,9 +8,9 @@
   const runtimeLocation = window.location || {};
   const runtimeHostname = String(runtimeLocation.hostname || '').toLowerCase();
   const runtimePathname = String(runtimeLocation.pathname || '/');
-  const IS_PREVIEW = runtimeHostname === 'localhost'
-    || runtimeHostname === '127.0.0.1'
-    || runtimePathname.startsWith('/beginner-budget-preview/');
+  const IS_PRODUCTION = runtimeHostname === 'suho-j.github.io'
+    && runtimePathname === '/beginner-budget/';
+  const IS_PREVIEW = !IS_PRODUCTION;
   const SETTINGS_TABLE = IS_PREVIEW ? 'preview_budget_settings' : 'budget_settings';
   const TRANSACTIONS_TABLE = IS_PREVIEW ? 'preview_transactions' : 'transactions';
   const STATE_REPLACEMENT_RPC = IS_PREVIEW ? 'replace_preview_budget_state' : 'replace_budget_state';

@@ -1037,31 +1037,32 @@ function testCloudUsesSharedLoginEmail() {
 }
 
 async function testCloudRoutesEveryOperationByRuntimeEnvironment() {
+  const previewCase = (location) => ({
+    location,
+    name: 'preview',
+    isPreview: true,
+    settingsTable: 'preview_budget_settings',
+    transactionsTable: 'preview_transactions',
+    stateRpc: 'replace_preview_budget_state'
+  });
   const cases = [
-    {
-      location: { hostname: 'localhost', pathname: '/' },
-      name: 'preview',
-      settingsTable: 'preview_budget_settings',
-      transactionsTable: 'preview_transactions',
-      stateRpc: 'replace_preview_budget_state'
-    },
-    {
-      location: { hostname: '127.0.0.1', pathname: '/anything/' },
-      name: 'preview',
-      settingsTable: 'preview_budget_settings',
-      transactionsTable: 'preview_transactions',
-      stateRpc: 'replace_preview_budget_state'
-    },
-    {
-      location: { hostname: 'suho-j.github.io', pathname: '/beginner-budget-preview/v1/' },
-      name: 'preview',
-      settingsTable: 'preview_budget_settings',
-      transactionsTable: 'preview_transactions',
-      stateRpc: 'replace_preview_budget_state'
-    },
+    previewCase({ protocol: 'file:', hostname: '', pathname: '/C:/budget/index.html' }),
+    previewCase({ hostname: 'localhost', pathname: '/' }),
+    previewCase({ hostname: '127.0.0.1', pathname: '/anything/' }),
+    previewCase({ hostname: '0.0.0.0', pathname: '/beginner-budget/' }),
+    previewCase({ hostname: '::1', pathname: '/beginner-budget/' }),
+    previewCase({ hostname: '192.168.0.25', pathname: '/beginner-budget/' }),
+    previewCase({ hostname: 'budget-staging.internal', pathname: '/beginner-budget/' }),
+    previewCase({ hostname: 'budget.example.com', pathname: '/beginner-budget/' }),
+    previewCase({ hostname: 'suho-j.github.io.evil.example', pathname: '/beginner-budget/' }),
+    previewCase({ hostname: 'suho-j.github.io', pathname: '/beginner-budget' }),
+    previewCase({ hostname: 'suho-j.github.io', pathname: '/beginner-budget/v1/' }),
+    previewCase({ hostname: 'suho-j.github.io', pathname: '/beginner-budget-preview' }),
+    previewCase({ hostname: 'suho-j.github.io', pathname: '/beginner-budget-preview/v1/' }),
     {
       location: { hostname: 'suho-j.github.io', pathname: '/beginner-budget/' },
       name: 'production',
+      isPreview: false,
       settingsTable: 'budget_settings',
       transactionsTable: 'transactions',
       stateRpc: 'replace_budget_state'
@@ -1084,6 +1085,7 @@ async function testCloudRoutesEveryOperationByRuntimeEnvironment() {
     });
 
     assert.strictEqual(win.BudgetCloud.ENVIRONMENT.name, expected.name);
+    assert.strictEqual(win.BudgetCloud.ENVIRONMENT.isPreview, expected.isPreview);
     assert.strictEqual(win.BudgetCloud.ENVIRONMENT.settingsTable, expected.settingsTable);
     assert.strictEqual(win.BudgetCloud.ENVIRONMENT.transactionsTable, expected.transactionsTable);
     assert.strictEqual(win.BudgetCloud.ENVIRONMENT.stateRpc, expected.stateRpc);
@@ -1114,6 +1116,11 @@ async function testCloudRoutesEveryOperationByRuntimeEnvironment() {
     const rpcCalls = fake.calls.filter((call) => call.action === 'rpc');
     assert.strictEqual(rpcCalls.length, 1);
     assert.strictEqual(rpcCalls[0].name, expected.stateRpc);
+
+    const app = createAppHarness({ isPreview: win.BudgetCloud.ENVIRONMENT.isPreview });
+    await app.init();
+    assert.strictEqual(app.elements.previewDataWarning.hidden, !expected.isPreview);
+    assert.strictEqual(app.document.body.classList.contains('has-preview-warning'), expected.isPreview);
   }
 }
 
@@ -2229,16 +2236,97 @@ function testPreviewSupabaseSetupCopiesProductionOnceWithoutMutatingIt() {
   assert.match(source, /-- Preflight 3: existing preview row collision audit/i);
   assert.match(source, /join public\.preview_transactions as existing[\s\S]*existing\.id = candidate\.preview_id/i);
 
+  const seedStart = source.indexOf('-- Atomic one-time production snapshot.');
+  const seedEnd = source.indexOf('-- Atomically replace one authenticated user', seedStart);
+  assert.ok(seedStart >= 0 && seedEnd > seedStart, 'atomic seed section must be present');
+  const seed = source.slice(seedStart, seedEnd);
   assert.match(
-    source,
-    /insert into public\.preview_budget_settings[\s\S]*select[\s\S]*from public\.budget_settings[\s\S]*on conflict \(user_id\) do nothing/i
+    seed,
+    /insert into public\.preview_budget_settings[\s\S]*select[\s\S]*from public\.budget_settings/i
   );
   assert.match(
-    source,
-    /insert into public\.preview_transactions[\s\S]*case[\s\S]*when id ~ '\^\[A-Za-z0-9\._:-\]\+\$' then id[\s\S]*else 'tx-migrated-' \|\| md5\(user_id::text \|\| ':' \|\| id\)[\s\S]*from public\.transactions[\s\S]*on conflict \(id\) do nothing/i
+    seed,
+    /insert into public\.preview_transactions[\s\S]*case[\s\S]*when [^\r\n]*id ~ '\^\[A-Za-z0-9\._:-\]\+\$'[\s\S]*else 'tx-migrated-' \|\| md5\([^)]*user_id::text \|\| ':' \|\| [^)]*id\)[\s\S]*from public\.transactions/i
   );
-  assert.ok((source.match(/on conflict \([^)]*\) do nothing/gi) || []).length >= 2);
-  assert.doesNotMatch(source, /on conflict[\s\S]{0,80}do update/i);
+  assert.doesNotMatch(seed, /^\s*on\s+conflict\b/im, 'seed collisions must never be hidden');
+  assert.doesNotMatch(seed, /\b(?:update|delete\s+from|truncate)\s+public\.(?:budget_settings|transactions)\b/i);
+}
+
+function testPreviewSeedIsGuardedAtomicAndSkippedForeverAfterMarker() {
+  const source = fs.readFileSync(path.join(__dirname, '..', 'docs', 'supabase-preview-setup.sql'), 'utf8');
+  assert.match(source, /create table if not exists public\.preview_seed_metadata\s*\(/i);
+  assert.match(source, /seed_key text primary key/i);
+  assert.match(source, /completed_at timestamptz not null/i);
+  assert.match(source, /source_settings_count bigint not null/i);
+  assert.match(source, /source_transactions_count bigint not null/i);
+  assert.match(source, /alter table public\.preview_seed_metadata enable row level security/i);
+  for (const role of ['public', 'anon', 'authenticated']) {
+    assert.match(source, new RegExp(`revoke all on table public\\.preview_seed_metadata from ${role}`, 'i'));
+  }
+  assert.doesNotMatch(source, /grant [^;]+ on table public\.preview_seed_metadata/i);
+
+  const seedStart = source.indexOf('-- Atomic one-time production snapshot.');
+  const seedEnd = source.indexOf('-- Atomically replace one authenticated user', seedStart);
+  assert.ok(seedStart >= 0 && seedEnd > seedStart);
+  const seed = source.slice(seedStart, seedEnd).toLowerCase();
+  const begin = seed.indexOf('begin isolation level repeatable read');
+  const metadataLock = seed.indexOf('lock table public.preview_seed_metadata in share row exclusive mode');
+  const markerCheck = seed.indexOf("seed_key = 'production_snapshot_v1'");
+  const skipReturn = seed.indexOf('return;', markerCheck);
+  const productionSettingsLock = seed.indexOf('lock table public.budget_settings in share mode');
+  const productionTransactionsLock = seed.indexOf('lock table public.transactions in share mode');
+  const previewSettingsLock = seed.indexOf('lock table public.preview_budget_settings in share row exclusive mode');
+  const previewTransactionsLock = seed.indexOf('lock table public.preview_transactions in share row exclusive mode');
+  const candidateGuard = seed.indexOf("raise exception 'preview seed candidate id collision'");
+  const settingsConflictGuard = seed.indexOf("raise exception 'existing preview settings conflict'");
+  const transactionsConflictGuard = seed.indexOf("raise exception 'existing preview transaction conflict'");
+  const settingsInsert = seed.indexOf('insert into public.preview_budget_settings');
+  const transactionsInsert = seed.indexOf('insert into public.preview_transactions');
+  const settingsCompare = seed.indexOf("raise exception 'preview settings canonical comparison failed'");
+  const transactionsCompare = seed.indexOf("raise exception 'preview transactions canonical comparison failed'");
+  const markerInsert = seed.indexOf('insert into public.preview_seed_metadata');
+  const commit = seed.lastIndexOf('commit;');
+
+  assert.ok(begin >= 0 && begin < metadataLock);
+  assert.ok(metadataLock < markerCheck && markerCheck < skipReturn);
+  assert.ok(skipReturn < productionSettingsLock, 'completed marker must skip all source and preview data work');
+  assert.ok(productionSettingsLock < productionTransactionsLock);
+  assert.ok(productionTransactionsLock < previewSettingsLock);
+  assert.ok(previewSettingsLock < previewTransactionsLock);
+  assert.ok(previewTransactionsLock < candidateGuard);
+  assert.ok(candidateGuard < settingsConflictGuard && settingsConflictGuard < transactionsConflictGuard);
+  assert.ok(transactionsConflictGuard < settingsInsert, 'all collision guards must run before the first seed mutation');
+  assert.ok(settingsInsert < transactionsInsert);
+  assert.ok(transactionsInsert < settingsCompare && settingsCompare < transactionsCompare);
+  assert.ok(transactionsCompare < markerInsert && markerInsert < commit);
+  assert.match(seed, /having count\(\*\) > 1[\s\S]*raise exception 'preview seed candidate id collision'/i);
+  assert.ok((seed.match(/\bexcept\b/g) || []).length >= 6, 'existing conflicts and two-way canonical comparisons must use EXCEPT');
+  assert.match(seed, /insert into public\.preview_budget_settings[\s\S]*where not exists/i);
+  assert.match(seed, /insert into public\.preview_transactions[\s\S]*where not exists/i);
+  assert.doesNotMatch(seed, /^\s*on\s+conflict\b/im);
+  assert.doesNotMatch(seed, /delete from public\.preview_|update public\.preview_|truncate/i);
+  assert.match(source, /production changes and preview edits, deletions, or additions remain byte-for-byte unchanged on rerun/i);
+  assert.match(source, /explicit reseed requires a separate reviewed procedure/i);
+}
+
+function testPreviewSeedRunbookRequiresShortWriteFreeGateAndCanonicalComparison() {
+  const read = (file) => fs.readFileSync(path.join(__dirname, '..', file), 'utf8');
+  const readme = read('docs/README.md');
+  const plan = read('docs/TEST_PLAN.md');
+  const log = read('docs/IMPROVEMENT_LOG.md');
+  const checklist = read('manual-test-checklist.md');
+
+  for (const [name, source] of [['README', readme], ['TEST_PLAN', plan], ['IMPROVEMENT_LOG', log], ['checklist', checklist]]) {
+    assert.match(source, /짧은 운영 쓰기 중단 창/, `${name} must name the first-seed gate`);
+  }
+  assert.match(plan, /모든 운영 탭[\s\S]*운영 쓰기[\s\S]*중단/i);
+  assert.match(plan, /REPEATABLE READ/);
+  assert.match(plan, /production_snapshot_v1/);
+  assert.match(plan, /canonical settings[\s\S]*canonical transactions/i);
+  assert.match(plan, /양방향 EXCEPT/i);
+  assert.match(plan, /비교 완료[\s\S]*운영 쓰기 재개/i);
+  assert.match(checklist, /seed와 canonical 전체 비교가 끝난 뒤 운영 쓰기를 재개/i);
+  assert.match(readme, /명시적 reseed[\s\S]*별도 검토 절차/i);
 }
 
 function testPreviewSupabaseSetupDefinesFullFiveArgumentCasAndDropsOverloads() {
@@ -2751,6 +2839,8 @@ const tests = [
   testSupabaseSetupDropsUnsafeSampleRpcOverloads,
   testPreviewSupabaseSetupCreatesIsolatedTablesRlsAndPermissions,
   testPreviewSupabaseSetupCopiesProductionOnceWithoutMutatingIt,
+  testPreviewSeedIsGuardedAtomicAndSkippedForeverAfterMarker,
+  testPreviewSeedRunbookRequiresShortWriteFreeGateAndCanonicalComparison,
   testPreviewSupabaseSetupDefinesFullFiveArgumentCasAndDropsOverloads,
   testUiCloudStatusShowsLoadingRetryAndSignedOutStates,
   testAppShowsIsolatedCopyBannerOnlyInPreviewEnvironment,

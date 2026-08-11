@@ -5,12 +5,15 @@
 ## 미리보기 격리 준비
 
 - [ ] `docs/supabase-preview-setup.sql`이 운영 테이블·함수·정책을 update·delete·alter하지 않는지 확인했다.
-- [ ] 운영 `budget_settings`, `transactions`를 백업하고 사용자별 행 수를 읽기 전용 기준으로 기록했다.
-- [ ] 비표준 ID의 결정적 매핑과 후보끼리의 ID 충돌 감사를 실행했고 충돌이 0건이다.
-- [ ] 최초 적용 전 기존 preview 행 충돌이 0건인지 확인했다. 재적용이면 기존 preview 편집을 덮어쓰지 않는지 별도 검토했다.
-- [ ] preview SQL을 적용하고 두 테이블·RLS·권한·트리거·5인자 CAS·sample RPC 제거를 확인했다.
-- [ ] 운영→preview 복사 행 수와 ID 매핑을 대조했고 운영 두 테이블의 행·값은 바뀌지 않았다.
-- [ ] 미리보기 SQL 적용·QA에는 운영 단일 배타적 쓰기 창을 열지 않았다.
+- [ ] 최초 seed 직전 **짧은 운영 쓰기 중단 창**을 열고 모든 운영 탭을 닫아 모든 운영 쓰기를 중단했다.
+- [ ] 창 안에서 운영 `budget_settings`, `transactions`를 백업하고 사용자별 행 수를 읽기 전용 기준으로 기록했다.
+- [ ] 비표준 ID의 결정적 매핑과 후보 간·기존 preview 행 충돌 감사를 실행했고 충돌이 0건이다.
+- [ ] preview SQL을 적용하고 `REPEATABLE READ`, 운영·preview 잠금, DB 충돌 guard, 두 seed insert, `production_snapshot_v1` marker가 한 트랜잭션인지 확인했다.
+- [ ] preview 두 테이블·RLS·최소 권한·단조 트리거·5인자 CAS·sample RPC 제거를 확인했다.
+- [ ] canonical settings와 canonical transactions의 전체 행·값을 양방향 `EXCEPT`로 대조했고 차이가 0건이며 운영 두 테이블은 바뀌지 않았다.
+- [ ] seed와 canonical 전체 비교가 끝난 뒤 운영 쓰기를 재개했다.
+- [ ] marker 생성 후 운영 변경과 preview 수정·삭제·추가를 만든 뒤 SQL을 재실행해도 preview 행·값이 byte-for-byte 불변이다.
+- [ ] 명시적 reseed는 marker를 지우지 않고 별도 검토 절차로만 수행한다.
 - [ ] 미리보기에서 원래 선택 월의 총예산과 네 카테고리 예산을 기록했다.
 - [ ] 미리보기 JSON 내보내기 백업을 받았다.
 - [ ] 불변 접두사 `<marker> = QA-V1-<timestamp>`와 생성 직후 거래 ID를 기록할 준비가 됐다.
@@ -19,7 +22,7 @@
 ## 자동 검증
 
 - [ ] storage, transactions, cloud, ui, app, 테스트 실행기의 `node --check`가 모두 통과한다.
-- [ ] `node tests/run-tests.cjs`가 `65 tests passed`로 끝난다.
+- [ ] `node tests/run-tests.cjs`가 `67 tests passed`로 끝난다.
 - [ ] `git diff --check`와 `git diff --check origin/master..HEAD`가 통과한다.
 
 ## 로그인과 준비 상태
@@ -28,7 +31,7 @@
 - [ ] 로그인 후 클라우드 다운로드가 끝나야 쓰기 버튼이 활성화된다.
 - [ ] 다운로드 실패 시 기존 상태를 저장할 수 없고 다시 불러오기·로그아웃 안내가 보인다.
 - [ ] 로컬과 미리보기 `/beginner-budget-preview/v1/`에서 `개발 화면 · 운영 데이터 복사본`과 운영 미반영 안내가 보인다.
-- [ ] 운영 `/beginner-budget/`에서는 복사본 안내가 숨겨진다.
+- [ ] 정확한 `https://suho-j.github.io/beginner-budget/`에서만 복사본 안내가 숨겨지고, 그 외 호스트·경로는 모두 미리보기로 표시된다.
 
 ## 탭과 월 탐색
 

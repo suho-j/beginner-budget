@@ -3,7 +3,7 @@
 ## 현재 검증 상태
 
 - 2026-08-12 기존 V1 자동 검증 (`eaad4ba` 앱·운영 SQL 소스): JavaScript 문법 검사 통과, `60 tests passed`, 커밋 범위와 작업 트리 diff check 통과
-- 2026-08-12 미리보기 격리 자동 검증: 환경별 클라우드 대상·격리 SQL 구조를 포함해 `65 tests passed`
+- 2026-08-12 미리보기 격리 자동 검증: 이전 `65 tests passed` 근거를 보존하고 fail-closed 환경 경계·원자적 일회 seed까지 포함해 `67 tests passed`
 - 로컬 비로그인 브라우저 스모크: 통과 (`http://127.0.0.1:8765/`)
 - 미리보기 Supabase SQL 적용: 대기 (`docs/supabase-preview-setup.sql`)
 - 미리보기 인증 저장 브라우저 스모크: 대기 (사용 가능한 로그인 세션·비밀번호 없음)
@@ -39,8 +39,8 @@ git diff --check origin/master..HEAD
 - 설정 `updated_at` 충돌 검사와 로그아웃 시 버전 초기화
 - 가져오기·초기화·샘플의 전체 상태 CAS와 실패 시 로컬 상태 보존
 - SQL의 ID 제약 조건, 단조 증가 트리거, 원자적 RPC·잠금·권한 계약
-- 로컬·미리보기 경로와 운영 경로의 전체 Supabase 테이블·RPC 라우팅
-- 미리보기 SQL의 운영 SELECT 전용 복사, 결정적 ID 매핑, 재실행 비덮어쓰기, RLS·권한·5인자 CAS 계약
+- 정확한 `suho-j.github.io/beginner-budget/`만 운영으로 판정하고 file·로컬·LAN·알 수 없는 호스트·잘못된 경로를 모두 preview로 닫는 전체 Supabase 테이블·RPC 라우팅
+- 미리보기 SQL의 운영 SELECT/읽기 잠금 전용, 결정적 ID 매핑, 충돌 전체 rollback, 일회 marker·재실행 byte-for-byte 불변, RLS·권한·5인자 CAS 계약
 - 앱 쓰기 잠금, 로딩 실패, 충돌 안내, 로그아웃 후 메모리 제거
 
 ## 2026-08-12 로컬 비로그인 브라우저 근거
@@ -61,17 +61,23 @@ git diff --check origin/master..HEAD
 
 ## 미리보기 격리 SQL 게이트
 
-미리보기와 로컬 앱은 `preview_budget_settings`, `preview_transactions`, `replace_preview_budget_state`만 사용합니다. `docs/supabase-preview-setup.sql` 적용 전후에 다음을 확인합니다.
+미리보기와 로컬 앱은 `preview_budget_settings`, `preview_transactions`, `replace_preview_budget_state`만 사용합니다. 단, 구 운영 writer는 설정과 거래를 여러 요청으로 저장할 수 있어 DB 잠금만으로 요청 중간 상태 복사를 막을 수 없습니다. 따라서 **최초 seed에만 별도의 짧은 운영 쓰기 중단 창**을 적용합니다.
 
-1. 운영 `budget_settings`, `transactions`를 읽기 전용 기준본으로 백업하고 사용자별 행 수를 기록한다.
-2. 파일의 결정적 ID 매핑 결과를 저장하고 후보끼리의 ID 충돌이 0건인지 확인한다.
-3. 최초 적용이면 기존 미리보기 행 충돌도 0건인지 확인한다. 재적용이면 충돌 목록을 검토하되 기존 미리보기 편집은 덮어쓰지 않는다.
-4. SQL을 적용하고 preview 두 테이블, canonical ID 제약, RLS 정책, authenticated 전용 DML 권한, 단조 `updated_at` 트리거를 확인한다.
-5. 5개 인자의 `replace_preview_budget_state`만 실행 가능하고 preview sample RPC 오버로드가 제거됐는지 확인한다.
-6. 사용자별 복사 행 수와 결정적 ID 매핑을 대조하고 운영 두 테이블의 행·값이 바뀌지 않았는지 확인한다.
-7. 같은 스냅샷 저장은 성공하고 오래된 설정 버전·거래 스냅샷은 `40001`로 거부되는지 인증 상태에서 확인한다.
+1. 최초 seed 시작 전 모든 운영 탭을 닫고, API를 포함한 모든 운영 쓰기를 중단해 **짧은 운영 쓰기 중단 창**을 연다.
+2. 창 안에서 운영 `budget_settings`, `transactions`를 읽기 전용 기준본으로 백업하고 사용자별 행 수를 기록한다.
+3. 결정적 ID 매핑, 후보 간 충돌, 기존 preview 행 충돌 사전 조회를 저장한다. 이 조회는 작업자 검토용이며, SQL 내부 DB guard가 실제 안전 게이트다.
+4. `docs/supabase-preview-setup.sql` 전체를 한 번에 적용한다. seed는 `REPEATABLE READ` 트랜잭션에서 운영 두 테이블과 preview 두 테이블을 잠그고, 후보·기존 행 충돌 guard, settings insert, transactions insert, canonical 양방향 비교, `production_snapshot_v1` marker 기록을 한 트랜잭션으로 완료한다. 충돌이나 비교 실패는 예외를 발생시켜 두 insert와 marker를 모두 rollback한다.
+5. preview 두 테이블, canonical ID 제약, RLS 정책, authenticated 최소 DML 권한, 단조 `updated_at` 트리거, 5인자 `replace_preview_budget_state`, preview sample RPC 오버로드 제거를 확인한다.
+6. 창을 유지한 채 SQL 파일의 **canonical settings** 전체 행/값 비교를 실행한다. DB 소유 버전인 preview `updated_at`은 제외하고 `user_id`, `monthly_budget`, `category_budgets`를 양방향 EXCEPT로 비교하며 결과는 0건이어야 한다.
+7. SQL 파일의 **canonical transactions** 전체 행/값 비교를 실행한다. 운영 ID를 같은 규칙으로 매핑한 뒤 `id`, `user_id`, `date`, `type`, `category`, `amount`, `memo`, `source`, `created_at`을 **양방향 EXCEPT**로 비교하며 결과는 0건이어야 한다.
+8. `preview_seed_metadata` 행의 source count와 백업 행 수를 대조하고, 운영 두 테이블의 행·값이 기준본과 같은지 확인한다. **seed와 canonical 전체 비교 완료 후에만 운영 쓰기 재개**를 허용한다.
+9. 운영 쓰기 재개 후 같은 스냅샷 저장은 성공하고 오래된 설정 버전·거래 스냅샷은 `40001`로 거부되는지 인증 상태에서 확인한다.
 
-미리보기 SQL은 운영 테이블·함수·정책을 update·delete·alter하지 않습니다. 따라서 이 단계에서는 운영 쓰기 중단 창을 열지 않습니다.
+canonical settings 비교와 canonical transactions 비교는 `docs/supabase-preview-setup.sql`의 `production_minus_preview`, `preview_minus_production` 양방향 EXCEPT 조회를 그대로 재실행합니다. 두 조회의 최종 `differences`가 모두 0건인 결과를 시간과 함께 보존합니다. 행 수만 비교하면 값 차이를 놓칠 수 있으므로 전체 컬럼 비교를 생략하지 않습니다.
+
+`production_snapshot_v1` marker가 이미 있으면 재실행은 운영 잠금·guard·insert를 포함한 seed 전체를 건너뜁니다. 이후 운영 변경과 preview 수정·삭제·추가가 있어도 재실행 전후 preview 행·값과 marker는 byte-for-byte 불변이어야 합니다. **명시적 reseed는 marker를 임의로 삭제하지 말고 별도 검토 절차로만 진행**합니다.
+
+미리보기 SQL은 운영 테이블·함수·정책을 update·delete·alter하지 않고, 운영 테이블을 읽기 일관성을 위한 SELECT/LOCK 원본으로만 사용합니다. 짧은 최초 seed 창은 아래 최종 운영 승격의 긴 단일 배타적 창과 별도입니다.
 
 ## 최종 운영 승격 단일 배타적 쓰기 창
 

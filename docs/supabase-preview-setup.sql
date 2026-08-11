@@ -23,6 +23,13 @@ create table if not exists public.preview_transactions (
     check (id ~ '^[A-Za-z0-9._:-]+$')
 );
 
+create table if not exists public.preview_seed_metadata (
+  seed_key text primary key,
+  completed_at timestamptz not null default clock_timestamp(),
+  source_settings_count bigint not null check (source_settings_count >= 0),
+  source_transactions_count bigint not null check (source_transactions_count >= 0)
+);
+
 create or replace function public.set_preview_budget_settings_updated_at()
 returns trigger
 language plpgsql
@@ -54,6 +61,7 @@ execute function public.set_preview_budget_settings_updated_at();
 
 alter table public.preview_budget_settings enable row level security;
 alter table public.preview_transactions enable row level security;
+alter table public.preview_seed_metadata enable row level security;
 
 drop policy if exists "Preview users can select own settings" on public.preview_budget_settings;
 drop policy if exists "Preview users can insert own settings" on public.preview_budget_settings;
@@ -113,6 +121,9 @@ revoke all on table public.preview_budget_settings from authenticated;
 revoke all on table public.preview_transactions from public;
 revoke all on table public.preview_transactions from anon;
 revoke all on table public.preview_transactions from authenticated;
+revoke all on table public.preview_seed_metadata from public;
+revoke all on table public.preview_seed_metadata from anon;
+revoke all on table public.preview_seed_metadata from authenticated;
 grant select, insert, update on table public.preview_budget_settings to authenticated;
 grant select, insert, update, delete on table public.preview_transactions to authenticated;
 
@@ -149,8 +160,8 @@ having count(*) > 1
 order by preview_id;
 
 -- Preflight 3: existing preview row collision audit.
--- Zero rows are expected before the first seed. On a re-run, rows intentionally
--- edited in preview can appear here; ON CONFLICT DO NOTHING preserves those edits.
+-- Zero rows are expected before the first seed. The DB-side guard below aborts
+-- the transaction if a conflicting preview row exists.
 with preview_candidates as (
   select
     case
@@ -192,48 +203,298 @@ where row(
 )
 order by candidate.preview_id;
 
--- One-time production snapshot. Re-running is safe: existing preview rows are
--- never overwritten, including rows changed after the first copy.
-insert into public.preview_budget_settings (
-  user_id,
-  monthly_budget,
-  category_budgets,
-  updated_at
-)
-select
-  user_id,
-  monthly_budget,
-  category_budgets,
-  updated_at
-from public.budget_settings
-on conflict (user_id) do nothing;
+-- Atomic one-time production snapshot.
+-- Production changes and preview edits, deletions, or additions remain byte-for-byte unchanged on rerun.
+-- Explicit reseed requires a separate reviewed procedure; never remove the marker in this setup file.
+-- First application only: pause every production writer before running this file, and resume
+-- only after the canonical settings and transaction comparisons have been independently verified.
+begin isolation level repeatable read;
 
-insert into public.preview_transactions (
-  id,
-  user_id,
-  date,
-  type,
-  category,
-  amount,
-  memo,
-  source,
-  created_at
-)
-select
-  case
-    when id ~ '^[A-Za-z0-9._:-]+$' then id
-    else 'tx-migrated-' || md5(user_id::text || ':' || id)
-  end,
-  user_id,
-  date,
-  type,
-  category,
-  amount,
-  memo,
-  source,
-  created_at
-from public.transactions
-on conflict (id) do nothing;
+lock table public.preview_seed_metadata in share row exclusive mode;
+
+do $seed$
+declare
+  v_source_settings_count bigint;
+  v_source_transactions_count bigint;
+begin
+  if exists (
+    select 1
+    from public.preview_seed_metadata
+    where seed_key = 'production_snapshot_v1'
+  ) then
+    return;
+  end if;
+
+  lock table public.budget_settings in share mode;
+  lock table public.transactions in share mode;
+  lock table public.preview_budget_settings in share row exclusive mode;
+  lock table public.preview_transactions in share row exclusive mode;
+
+  if exists (
+    with production_candidates as (
+      select
+        case
+          when production.id ~ '^[A-Za-z0-9._:-]+$' then production.id
+          else 'tx-migrated-' || md5(production.user_id::text || ':' || production.id)
+        end as preview_id
+      from public.transactions as production
+    )
+    select 1
+    from production_candidates
+    group by preview_id
+    having count(*) > 1
+  ) then
+    raise exception 'preview seed candidate ID collision' using errcode = '23505';
+  end if;
+
+  if exists (
+    with preview_conflicts as (
+      select
+        preview.user_id,
+        preview.monthly_budget,
+        preview.category_budgets
+      from public.preview_budget_settings as preview
+      except
+      select
+        production.user_id,
+        production.monthly_budget,
+        production.category_budgets
+      from public.budget_settings as production
+    )
+    select 1 from preview_conflicts
+  ) then
+    raise exception 'existing preview settings conflict' using errcode = '23505';
+  end if;
+
+  if exists (
+    with production_candidates as (
+      select
+        case
+          when production.id ~ '^[A-Za-z0-9._:-]+$' then production.id
+          else 'tx-migrated-' || md5(production.user_id::text || ':' || production.id)
+        end as id,
+        production.user_id,
+        production.date,
+        production.type,
+        production.category,
+        production.amount,
+        production.memo,
+        production.source,
+        production.created_at
+      from public.transactions as production
+    ),
+    preview_conflicts as (
+      select
+        preview.id,
+        preview.user_id,
+        preview.date,
+        preview.type,
+        preview.category,
+        preview.amount,
+        preview.memo,
+        preview.source,
+        preview.created_at
+      from public.preview_transactions as preview
+      except
+      select
+        production.id,
+        production.user_id,
+        production.date,
+        production.type,
+        production.category,
+        production.amount,
+        production.memo,
+        production.source,
+        production.created_at
+      from production_candidates as production
+    )
+    select 1 from preview_conflicts
+  ) then
+    raise exception 'existing preview transaction conflict' using errcode = '23505';
+  end if;
+
+  insert into public.preview_budget_settings (
+    user_id,
+    monthly_budget,
+    category_budgets
+  )
+  select
+    production.user_id,
+    production.monthly_budget,
+    production.category_budgets
+  from public.budget_settings as production
+  where not exists (
+    select 1
+    from public.preview_budget_settings as preview
+    where preview.user_id = production.user_id
+  );
+
+  insert into public.preview_transactions (
+    id,
+    user_id,
+    date,
+    type,
+    category,
+    amount,
+    memo,
+    source,
+    created_at
+  )
+  select
+    case
+      when production.id ~ '^[A-Za-z0-9._:-]+$' then production.id
+      else 'tx-migrated-' || md5(production.user_id::text || ':' || production.id)
+    end,
+    production.user_id,
+    production.date,
+    production.type,
+    production.category,
+    production.amount,
+    production.memo,
+    production.source,
+    production.created_at
+  from public.transactions as production
+  where not exists (
+    select 1
+    from public.preview_transactions as preview
+    where preview.id = case
+      when production.id ~ '^[A-Za-z0-9._:-]+$' then production.id
+      else 'tx-migrated-' || md5(production.user_id::text || ':' || production.id)
+    end
+  );
+
+  if exists (
+    with production_minus_preview as (
+      select
+        production.user_id,
+        production.monthly_budget,
+        production.category_budgets
+      from public.budget_settings as production
+      except
+      select
+        preview.user_id,
+        preview.monthly_budget,
+        preview.category_budgets
+      from public.preview_budget_settings as preview
+    ),
+    preview_minus_production as (
+      select
+        preview.user_id,
+        preview.monthly_budget,
+        preview.category_budgets
+      from public.preview_budget_settings as preview
+      except
+      select
+        production.user_id,
+        production.monthly_budget,
+        production.category_budgets
+      from public.budget_settings as production
+    ),
+    settings_differences as (
+      select 1 from production_minus_preview
+      union all
+      select 1 from preview_minus_production
+    )
+    select 1 from settings_differences
+  ) then
+    raise exception 'preview settings canonical comparison failed' using errcode = '40001';
+  end if;
+
+  if exists (
+    with production_candidates as (
+      select
+        case
+          when production.id ~ '^[A-Za-z0-9._:-]+$' then production.id
+          else 'tx-migrated-' || md5(production.user_id::text || ':' || production.id)
+        end as id,
+        production.user_id,
+        production.date,
+        production.type,
+        production.category,
+        production.amount,
+        production.memo,
+        production.source,
+        production.created_at
+      from public.transactions as production
+    ),
+    production_minus_preview as (
+      select
+        production.id,
+        production.user_id,
+        production.date,
+        production.type,
+        production.category,
+        production.amount,
+        production.memo,
+        production.source,
+        production.created_at
+      from production_candidates as production
+      except
+      select
+        preview.id,
+        preview.user_id,
+        preview.date,
+        preview.type,
+        preview.category,
+        preview.amount,
+        preview.memo,
+        preview.source,
+        preview.created_at
+      from public.preview_transactions as preview
+    ),
+    preview_minus_production as (
+      select
+        preview.id,
+        preview.user_id,
+        preview.date,
+        preview.type,
+        preview.category,
+        preview.amount,
+        preview.memo,
+        preview.source,
+        preview.created_at
+      from public.preview_transactions as preview
+      except
+      select
+        production.id,
+        production.user_id,
+        production.date,
+        production.type,
+        production.category,
+        production.amount,
+        production.memo,
+        production.source,
+        production.created_at
+      from production_candidates as production
+    ),
+    transaction_differences as (
+      select 1 from production_minus_preview
+      union all
+      select 1 from preview_minus_production
+    )
+    select 1 from transaction_differences
+  ) then
+    raise exception 'preview transactions canonical comparison failed' using errcode = '40001';
+  end if;
+
+  select count(*) into v_source_settings_count from public.budget_settings;
+  select count(*) into v_source_transactions_count from public.transactions;
+
+  insert into public.preview_seed_metadata (
+    seed_key,
+    completed_at,
+    source_settings_count,
+    source_transactions_count
+  ) values (
+    'production_snapshot_v1',
+    clock_timestamp(),
+    v_source_settings_count,
+    v_source_transactions_count
+  );
+end;
+$seed$;
+
+commit;
 
 -- Atomically replace one authenticated user's preview settings and transactions.
 drop function if exists public.replace_preview_budget_state(integer, jsonb, jsonb);
