@@ -693,22 +693,43 @@ function testNormalizationDropsInvalidRowsAndDeduplicatesIds() {
   assert.strictEqual(new Set(state.transactions.map((tx) => tx.id)).size, 2);
 }
 
-function testTransactionIdsTrimGenerateBlanksAndDeduplicateAfterTrim() {
+function testTransactionIdsUseSafeOpaqueAsciiContract() {
   const win = createContext();
+  const invalidIds = [
+    ' tx-space ',
+    'tx\tid',
+    'tx-newline\n',
+    'tx\u00a0id',
+    'tx-😀',
+    '거래-1',
+    ''
+  ];
+  const validId = 'AZaz09._:-';
   const state = win.BudgetStorage.normalizeState({
     transactions: [
-      { id: '  tx-trim  ', date: '2026-05-01', type: 'expense', category: '생활비', amount: 1000 },
-      { id: 'tx-trim', date: '2026-05-02', type: 'expense', category: '생활비', amount: 2000 },
-      { id: '   ', date: '2026-05-03', type: 'expense', category: '생활비', amount: 3000 }
+      ...invalidIds.map((id, index) => ({
+        id,
+        date: `2026-05-${String(index + 1).padStart(2, '0')}`,
+        type: 'expense',
+        category: '생활비',
+        amount: 1000 + index
+      })),
+      { id: validId, date: '2026-05-08', type: 'expense', category: '생활비', amount: 2000 },
+      { id: validId, date: '2026-05-09', type: 'expense', category: '생활비', amount: 3000 },
+      { id: validId, date: '2026-05-10', type: 'expense', category: '생활비', amount: 4000 }
     ]
   });
   const ids = state.transactions.map((transaction) => transaction.id);
+  const generatedIds = ids.slice(0, invalidIds.length);
 
-  assert.strictEqual(state.transactions.length, 3);
-  assert.strictEqual(ids[0], 'tx-trim');
-  assert.strictEqual(ids.every((id) => id === id.trim() && id.length > 0), true);
-  assert.strictEqual(new Set(ids).size, 3);
-  assert.notStrictEqual(ids[1], 'tx-trim');
+  assert.strictEqual(state.transactions.length, invalidIds.length + 3);
+  assert.strictEqual(generatedIds.every((id, index) => id !== invalidIds[index]), true);
+  assert.strictEqual(generatedIds.every((id) => /^tx-[A-Za-z0-9._:-]+$/.test(id)), true);
+  assert.strictEqual(ids[invalidIds.length], validId);
+  assert.strictEqual(ids[invalidIds.length + 1] !== validId, true);
+  assert.strictEqual(ids[invalidIds.length + 2] !== validId, true);
+  assert.strictEqual(ids.every((id) => /^[A-Za-z0-9._:-]+$/.test(id)), true);
+  assert.strictEqual(new Set(ids).size, ids.length);
 }
 
 function testDatabaseIntegerBoundsAreEnforced() {
@@ -1884,8 +1905,9 @@ function testSupabaseSettingsVersionIsDatabaseOwnedAndMonotonic() {
   assert.match(rpc, /return query select jsonb_array_length\(p_transactions\)::integer,\s*v_new_updated_at/i);
 }
 
-function testSupabaseCanonicalizesLegacyTransactionIdsBeforeRpcUse() {
+function testSupabaseEnforcesSafeOpaqueTransactionIdsBeforeRpcUse() {
   const source = fs.readFileSync(path.join(__dirname, '..', 'docs', 'supabase-setup.sql'), 'utf8');
+  const safeOpaqueIdSql = "'^[A-Za-z0-9._:-]+$'";
   const migrationStart = source.search(/update public\.transactions\s+set id\s*=/i);
   const constraintDrop = source.search(/drop constraint if exists transactions_id_canonical/i);
   const constraintAdd = source.search(/add constraint transactions_id_canonical/i);
@@ -1895,27 +1917,40 @@ function testSupabaseCanonicalizesLegacyTransactionIdsBeforeRpcUse() {
   assert.ok(constraintDrop < constraintAdd && constraintAdd < rpcStart, 'canonical ID constraint must be installed before RPC use');
   const migration = source.slice(migrationStart, constraintDrop);
   assert.match(migration, /set id\s*=\s*'tx-'\s*\|\|\s*gen_random_uuid\(\)::text/i);
-  assert.match(migration, /where id\s*<>\s*btrim\(id\)\s+or\s+btrim\(id\)\s*=\s*''/i);
-  assert.doesNotMatch(migration, /set id\s*=\s*btrim\(id\)/i, 'trim-collision rows must not be merged in place');
-  assert.match(source, /add constraint transactions_id_canonical\s+check\s*\(\s*id\s*=\s*btrim\(id\)\s+and\s+btrim\(id\)\s*<>\s*''\s*\)/i);
+  assert.strictEqual(migration.includes(`where id !~ ${safeOpaqueIdSql}`), true);
+  assert.doesNotMatch(migration, /btrim\(id\)/i, 'SQL must not model opaque IDs with PostgreSQL btrim');
+  assert.strictEqual(source.includes(`check (id ~ ${safeOpaqueIdSql})`), true);
+  assert.strictEqual(source.split(safeOpaqueIdSql).length - 1, 3, 'migration, CHECK, and RPC must share one exact ID regex');
 
-  const trimCollisionFixture = ['collision', ' collision ', '\tcollision\t', '   '];
+  const safeOpaqueId = /^[A-Za-z0-9._:-]+$/;
+  const legacyIdFixture = [
+    'collision',
+    'valid._:-09AZaz',
+    ' collision ',
+    '\tcollision\t',
+    '\ncollision\n',
+    'collision\u00a0',
+    'collision-😀',
+    '충돌-1'
+  ];
   let generated = 0;
-  const migratedIds = trimCollisionFixture.map((id) => (
-    id !== id.trim() || !id.trim() ? `tx-fixture-${++generated}` : id
+  const migratedIds = legacyIdFixture.map((id) => (
+    safeOpaqueId.test(id) ? id : `tx-fixture-${++generated}`
   ));
-  assert.strictEqual(new Set(migratedIds).size, trimCollisionFixture.length);
-  assert.strictEqual(migratedIds.slice(1).every((id) => id.startsWith('tx-fixture-')), true);
+  assert.strictEqual(JSON.stringify(migratedIds.slice(0, 2)), JSON.stringify(legacyIdFixture.slice(0, 2)));
+  assert.strictEqual(new Set(migratedIds).size, legacyIdFixture.length);
+  assert.strictEqual(migratedIds.slice(2).every((id) => id.startsWith('tx-fixture-')), true);
 }
 
-function testSupabaseWholeStateRpcRejectsUntrimmedTransactionIds() {
+function testSupabaseWholeStateRpcRejectsUnsafeOpaqueTransactionIds() {
   const source = fs.readFileSync(path.join(__dirname, '..', 'docs', 'supabase-setup.sql'), 'utf8');
   const wholeStart = source.search(/create or replace function public\.replace_budget_state\s*\(/i);
   const sampleDrop = source.search(/drop function if exists public\.replace_budget_samples/i);
   const wholeRpc = source.slice(wholeStart, sampleDrop);
-  const trimmedIdGuard = /btrim\(transaction_row\s*->>\s*'id'\)\s*<>\s*transaction_row\s*->>\s*'id'/i;
+  const safeOpaqueIdGuard = /\(transaction_row\s*->>\s*'id'\)\s*!~\s*'\^\[A-Za-z0-9\._:-\]\+\$'/;
 
-  assert.match(wholeRpc, trimmedIdGuard, 'whole-state proposed and expected IDs must already be trimmed');
+  assert.match(wholeRpc, safeOpaqueIdGuard, 'whole-state proposed and expected IDs must use the safe opaque-ID contract');
+  assert.doesNotMatch(wholeRpc, /btrim\(transaction_row\s*->>\s*'id'\)/i);
 }
 
 function testSupabaseWholeStateRpcLocksTransactionsBeforeSnapshotAndReplacement() {
@@ -2379,7 +2414,7 @@ const tests = [
   testStrictDateValidation,
   testLocalDateFormatting,
   testNormalizationDropsInvalidRowsAndDeduplicatesIds,
-  testTransactionIdsTrimGenerateBlanksAndDeduplicateAfterTrim,
+  testTransactionIdsUseSafeOpaqueAsciiContract,
   testDatabaseIntegerBoundsAreEnforced,
   testCategoryBudgetSaveAndSummary,
   testBudgetMonthStartAndMonthlyBudgets,
@@ -2417,8 +2452,8 @@ const tests = [
   testCloudWholeStateRpcErrorsBeforeAnyDirectWrite,
   testSupabaseSetupDefinesTransactionalWholeStateRpc,
   testSupabaseSettingsVersionIsDatabaseOwnedAndMonotonic,
-  testSupabaseCanonicalizesLegacyTransactionIdsBeforeRpcUse,
-  testSupabaseWholeStateRpcRejectsUntrimmedTransactionIds,
+  testSupabaseEnforcesSafeOpaqueTransactionIdsBeforeRpcUse,
+  testSupabaseWholeStateRpcRejectsUnsafeOpaqueTransactionIds,
   testSupabaseWholeStateRpcLocksTransactionsBeforeSnapshotAndReplacement,
   testSupabaseWholeStateRpcCanonicalizesExpectedTransactionsWithDatabaseOrdering,
   testAppSampleUsesWholeStateCasAndRollsBackOnConflict,

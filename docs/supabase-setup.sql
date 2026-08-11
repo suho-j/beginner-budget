@@ -20,17 +20,16 @@ create table if not exists public.transactions (
   created_at timestamptz not null default now()
 );
 
--- Repair legacy IDs without trimming two rows into the same primary key.
+-- Repair legacy IDs without normalizing distinct rows into the same primary key.
 update public.transactions
 set id = 'tx-' || gen_random_uuid()::text
-where id <> btrim(id)
-  or btrim(id) = '';
+where id !~ '^[A-Za-z0-9._:-]+$';
 
 alter table public.transactions
 drop constraint if exists transactions_id_canonical;
 alter table public.transactions
 add constraint transactions_id_canonical
-check (id = btrim(id) and btrim(id) <> '');
+check (id ~ '^[A-Za-z0-9._:-]+$');
 
 create or replace function public.set_budget_settings_updated_at()
 returns trigger
@@ -183,8 +182,7 @@ begin
     from jsonb_array_elements(p_transactions || p_expected_transactions) as transaction_row
     where jsonb_typeof(transaction_row) <> 'object'
       or jsonb_typeof(transaction_row -> 'id') <> 'string'
-      or nullif(btrim(transaction_row ->> 'id'), '') is null
-      or btrim(transaction_row ->> 'id') <> transaction_row ->> 'id'
+      or (transaction_row ->> 'id') !~ '^[A-Za-z0-9._:-]+$'
       or jsonb_typeof(transaction_row -> 'date') <> 'string'
       or coalesce(transaction_row ->> 'date', '') !~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
       or to_char(to_date(transaction_row ->> 'date', 'YYYY-MM-DD'), 'YYYY-MM-DD') <> transaction_row ->> 'date'

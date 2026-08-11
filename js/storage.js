@@ -7,6 +7,7 @@
   const DEFAULT_MONTH_START_DAY = 1;
   const MAX_MEMO_LENGTH = 80;
   const MAX_DB_INTEGER = 2147483647;
+  const TRANSACTION_ID_PATTERN = /^[A-Za-z0-9._:-]+$/;
   const EXPENSE_CATEGORIES = ['생활비', '배달비', '의류비', '비상금'];
   const LEGACY_EXPENSE_CATEGORY_MAP = {
     '식비': '생활비',
@@ -135,7 +136,8 @@
     const rawCategory = typeof tx.category === 'string' ? tx.category.trim() : '';
     const category = type === 'expense' ? normalizeExpenseCategory(rawCategory) : rawCategory;
     const amount = Number(tx.amount);
-    const id = typeof tx.id === 'string' ? tx.id.trim() : '';
+    const rawId = typeof tx.id === 'string' ? tx.id : '';
+    const id = TRANSACTION_ID_PATTERN.test(rawId) ? rawId : '';
 
     if (!type || !isValidDateString(date) || !categoriesFor(type).includes(category) || !isPositiveInteger(amount)) {
       return null;
