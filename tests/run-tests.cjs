@@ -2,6 +2,7 @@ const fs = require('fs');
 const vm = require('vm');
 const path = require('path');
 const assert = require('assert');
+const crypto = require('crypto');
 
 function createContext(options = {}) {
   const store = new Map();
@@ -1908,19 +1909,26 @@ function testSupabaseSettingsVersionIsDatabaseOwnedAndMonotonic() {
 function testSupabaseEnforcesSafeOpaqueTransactionIdsBeforeRpcUse() {
   const source = fs.readFileSync(path.join(__dirname, '..', 'docs', 'supabase-setup.sql'), 'utf8');
   const safeOpaqueIdSql = "'^[A-Za-z0-9._:-]+$'";
+  const deterministicIdSql = "'tx-migrated-' || md5(user_id::text || ':' || id)";
+  const preflightStart = source.search(/select\s+user_id,\s+id as old_id/i);
   const migrationStart = source.search(/update public\.transactions\s+set id\s*=/i);
   const constraintDrop = source.search(/drop constraint if exists transactions_id_canonical/i);
   const constraintAdd = source.search(/add constraint transactions_id_canonical/i);
   const rpcStart = source.search(/create or replace function public\.replace_budget_state\s*\(/i);
 
+  assert.ok(preflightStart >= 0 && preflightStart < migrationStart, 'exact legacy ID mapping must be visible before the update');
   assert.ok(migrationStart >= 0 && migrationStart < constraintDrop, 'legacy IDs must be repaired before the check constraint');
   assert.ok(constraintDrop < constraintAdd && constraintAdd < rpcStart, 'canonical ID constraint must be installed before RPC use');
+  const preflight = source.slice(preflightStart, migrationStart);
   const migration = source.slice(migrationStart, constraintDrop);
-  assert.match(migration, /set id\s*=\s*'tx-'\s*\|\|\s*gen_random_uuid\(\)::text/i);
+  assert.strictEqual(preflight.includes(`${deterministicIdSql} as new_id`), true);
+  assert.strictEqual(migration.includes(`set id = ${deterministicIdSql}`), true);
+  assert.strictEqual(source.split(deterministicIdSql).length - 1, 2, 'preflight and update must use the same deterministic expression');
+  assert.doesNotMatch(migration, /gen_random_uuid/i);
   assert.strictEqual(migration.includes(`where id !~ ${safeOpaqueIdSql}`), true);
   assert.doesNotMatch(migration, /btrim\(id\)/i, 'SQL must not model opaque IDs with PostgreSQL btrim');
   assert.strictEqual(source.includes(`check (id ~ ${safeOpaqueIdSql})`), true);
-  assert.strictEqual(source.split(safeOpaqueIdSql).length - 1, 3, 'migration, CHECK, and RPC must share one exact ID regex');
+  assert.strictEqual(source.split(safeOpaqueIdSql).length - 1, 4, 'preflight, migration, CHECK, and RPC must share one exact ID regex');
 
   const safeOpaqueId = /^[A-Za-z0-9._:-]+$/;
   const legacyIdFixture = [
@@ -1940,6 +1948,15 @@ function testSupabaseEnforcesSafeOpaqueTransactionIdsBeforeRpcUse() {
   assert.strictEqual(JSON.stringify(migratedIds.slice(0, 2)), JSON.stringify(legacyIdFixture.slice(0, 2)));
   assert.strictEqual(new Set(migratedIds).size, legacyIdFixture.length);
   assert.strictEqual(migratedIds.slice(2).every((id) => id.startsWith('tx-fixture-')), true);
+
+  const userId = '00000000-0000-4000-8000-000000000001';
+  const migratedIdFor = (oldId) => (
+    `tx-migrated-${crypto.createHash('md5').update(`${userId}:${oldId}`).digest('hex')}`
+  );
+  const trimCollisionIds = [' collision ', '\tcollision\t', '\ncollision\n', 'collision\u00a0'];
+  assert.strictEqual(migratedIdFor(trimCollisionIds[0]), migratedIdFor(trimCollisionIds[0]));
+  assert.strictEqual(new Set(trimCollisionIds.map(migratedIdFor)).size, trimCollisionIds.length);
+  assert.strictEqual(trimCollisionIds.map(migratedIdFor).every((id) => safeOpaqueId.test(id)), true);
 }
 
 function testSupabaseWholeStateRpcRejectsUnsafeOpaqueTransactionIds() {

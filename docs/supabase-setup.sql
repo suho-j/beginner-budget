@@ -20,9 +20,18 @@ create table if not exists public.transactions (
   created_at timestamptz not null default now()
 );
 
+-- Preview the exact legacy ID mapping before applying it.
+select
+  user_id,
+  id as old_id,
+  'tx-migrated-' || md5(user_id::text || ':' || id) as new_id
+from public.transactions
+where id !~ '^[A-Za-z0-9._:-]+$'
+order by user_id, id;
+
 -- Repair legacy IDs without normalizing distinct rows into the same primary key.
 update public.transactions
-set id = 'tx-' || gen_random_uuid()::text
+set id = 'tx-migrated-' || md5(user_id::text || ':' || id)
 where id !~ '^[A-Za-z0-9._:-]+$';
 
 alter table public.transactions
