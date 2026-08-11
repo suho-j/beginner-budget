@@ -353,6 +353,16 @@ function testAppMarkupProvidesTabsCalendarEditDialogAndPreviewWarning() {
     '<dialog id="edit-dialog"', 'id="edit-transaction-form"'
   ]) assert.ok(source.includes(required), `missing markup: ${required}`);
 
+  const stickyChromeMatches = [...source.matchAll(/<div\b(?=[^>]*\bclass="[^"]*\bapp-sticky-chrome\b[^"]*")(?=[^>]*\brole="region")(?=[^>]*\baria-label="개발 화면 안내와 주요 메뉴")[^>]*>[\s\S]*?<\/nav>\s*<\/div>/g)];
+  assert.strictEqual(stickyChromeMatches.length, 1, 'preview warning and tabs need one named sticky region');
+  assert.strictEqual((source.match(/\bapp-sticky-chrome\b/g) || []).length, 1, 'app-sticky-chrome must be unique');
+  const stickyChrome = stickyChromeMatches[0][0];
+  assert.match(stickyChrome, /id="preview-data-warning"/, 'sticky region must contain the preview warning');
+  assert.match(stickyChrome, /<nav\b[^>]*\bclass="[^"]*\bapp-tabs\b/, 'sticky region must contain the app tabs');
+  assert.ok(stickyChrome.indexOf('preview-data-warning') < stickyChrome.indexOf('app-tabs'), 'preview warning must precede the tabs');
+  const stickyChromeEnd = stickyChromeMatches[0].index + stickyChrome.length;
+  assert.ok(stickyChromeEnd < source.indexOf('<section class="container month-toolbar"'), 'month toolbar must stay below the sticky region');
+
   const ids = [...source.matchAll(/\bid="([^"]+)"/g)].map((match) => match[1]);
   assert.strictEqual(new Set(ids).size, ids.length, 'all element IDs must be unique');
 
@@ -393,10 +403,67 @@ function testAppMarkupProvidesTabsCalendarEditDialogAndPreviewWarning() {
 }
 
 function testAppStylesCoverTabsCalendarDialogAndMobile() {
-  const source = fs.readFileSync(path.join(__dirname, '..', 'css/style.css'), 'utf8');
-  for (const required of ['.preview-data-warning','.month-toolbar','.app-tabs','.tab-panel[hidden]','.calendar-grid','.calendar-day','dialog::backdrop','@media (max-width: 559px)']) {
-    assert.ok(source.includes(required), `missing style: ${required}`);
+  const source = fs.readFileSync(path.join(__dirname, '..', 'css/style.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+  const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const declarations = (selector, scope = source) => {
+    const match = scope.match(new RegExp(`(?:^|})\\s*${escapeRegex(selector)}\\s*\\{([^}]*)\\}`, 'm'));
+    assert.ok(match, `missing style rule: ${selector}`);
+    return match[1];
+  };
+
+  const stickyChrome = declarations('.app-sticky-chrome');
+  assert.match(stickyChrome, /(?:^|;)\s*position\s*:\s*sticky\s*;/);
+  assert.match(stickyChrome, /(?:^|;)\s*top\s*:\s*0\s*;/);
+  assert.match(stickyChrome, /(?:^|;)\s*z-index\s*:\s*30\s*;/);
+
+  for (const selector of ['.preview-data-warning', '.app-tabs']) {
+    const block = declarations(selector);
+    assert.match(block, /(?:^|;)\s*position\s*:\s*static\s*;/, `${selector} must rely on the shared sticky wrapper`);
+    assert.doesNotMatch(block, /(?:^|;)\s*position\s*:\s*sticky\s*;/);
   }
+  assert.doesNotMatch(source, /\.has-preview-warning\s+\.app-tabs\s*\{[^}]*\btop\s*:\s*44px\s*;/, 'tab offset must not depend on a hard-coded warning height');
+
+  for (const selector of ['.app-tabs [role="tab"]:hover', '.app-tabs [role="tab"][aria-selected="true"]:hover']) {
+    const block = declarations(selector);
+    assert.match(block, /(?:^|;)\s*background\s*:\s*[^;]+;/, `${selector} needs hover feedback`);
+    assert.match(block, /(?:^|;)\s*color\s*:\s*[^;]+;/, `${selector} needs readable hover text`);
+  }
+
+  const calendarHover = declarations('.calendar-day:hover');
+  assert.match(calendarHover, /(?:^|;)\s*background\s*:\s*[^;]+;/);
+  assert.match(calendarHover, /(?:^|;)\s*color\s*:\s*[^;]+;/);
+  const calendarFocus = declarations('.calendar-day:focus-visible');
+  assert.match(calendarFocus, /(?:^|;)\s*background\s*:\s*[^;]+;/);
+  assert.match(calendarFocus, /(?:^|;)\s*color\s*:\s*[^;]+;/);
+  assert.match(calendarFocus, /(?:^|;)\s*outline\s*:\s*3px\s+solid\s+[^;]+;/);
+  assert.match(calendarFocus, /(?:^|;)\s*outline-offset\s*:\s*2px\s*;/);
+  const calendarSelected = declarations('.calendar-day.is-selected');
+  assert.match(calendarSelected, /(?:^|;)\s*box-shadow\s*:\s*inset\s+[^;]+;/);
+  assert.match(calendarSelected, /(?:^|;)\s*border-color\s*:\s*[^;]+;/);
+  assert.doesNotMatch(calendarSelected, /(?:^|;)\s*outline\s*:/, 'selection must not replace the focus outline');
+
+  const dialog = declarations('dialog');
+  assert.match(dialog, /max-height\s*:\s*calc\(100vh - 2rem\)\s*;[\s\S]*max-height\s*:\s*calc\(100dvh - 2rem\)\s*;/);
+  assert.match(dialog, /(?:^|;)\s*overscroll-behavior\s*:\s*contain\s*;/);
+
+  const mobileMarker = '@media (max-width: 559px)';
+  const mobileMarkerIndex = source.indexOf(mobileMarker);
+  assert.ok(mobileMarkerIndex >= 0, `missing style: ${mobileMarker}`);
+  const mobile = source.slice(source.indexOf('{', mobileMarkerIndex) + 1);
+  assert.match(declarations('#panel-calendar > .panel', mobile), /(?:^|;)\s*padding\s*:\s*0\.25rem\s*;/);
+  assert.match(declarations('.calendar-weekdays, .calendar-grid', mobile), /(?:^|;)\s*gap\s*:\s*0\.1rem\s*;/);
+  const mobileDay = declarations('.calendar-day', mobile);
+  assert.match(mobileDay, /(?:^|;)\s*min-width\s*:\s*44px\s*;/);
+  assert.match(mobileDay, /(?:^|;)\s*min-height\s*:\s*68px\s*;/);
+  const mobileAmounts = declarations('.calendar-expense, .calendar-income', mobile);
+  assert.match(mobileAmounts, /(?:^|;)\s*font-size\s*:\s*0\.75rem\s*;/);
+  assert.match(mobileAmounts, /(?:^|;)\s*overflow-wrap\s*:\s*anywhere\s*;/);
+  assert.match(declarations('.calendar-count', mobile), /(?:^|;)\s*font-size\s*:\s*0\.75rem\s*;/);
+  assert.match(declarations('dialog', mobile), /max-height\s*:\s*calc\(100vh - 1rem\)\s*;[\s\S]*max-height\s*:\s*calc\(100dvh - 1rem\)\s*;/);
+
+  const calendarContentWidth = 360 - 24 - 2 - (2 * 4);
+  const calendarMinimumWidth = (7 * 44) + (6 * 1.6);
+  assert.ok(calendarMinimumWidth <= calendarContentWidth, 'seven 44px targets must fit the 360px calendar panel');
 }
 
 function testCategoryFilterCombinesWithMonthTypeAndQuery() {
