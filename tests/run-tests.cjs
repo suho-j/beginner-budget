@@ -298,6 +298,31 @@ function testCategoryBudgetDetailShowsSpentBeforeBudget() {
   assert.ok(!source.includes('`예산 ${formatWon(item.budget)} / 사용 ${formatWon(item.spent)}`'));
 }
 
+function testCategoryFilterCombinesWithMonthTypeAndQuery() {
+  const win = createContext();
+  const transactions = [
+    { id: 'a', date: '2026-05-02', type: 'expense', category: '생활비', amount: 1000, memo: '마트' },
+    { id: 'b', date: '2026-05-03', type: 'expense', category: '배달비', amount: 2000, memo: '저녁' },
+    { id: 'c', date: '2026-05-04', type: 'expense', category: '생활비', amount: 3000, memo: '점심' },
+    { id: 'd', date: '2026-05-05', type: 'income', category: '급여', amount: 500000, memo: '' },
+    { id: 'e', date: '2026-06-02', type: 'expense', category: '생활비', amount: 4000, memo: '마트' }
+  ];
+
+  const filtered = win.BudgetTransactions.filterTransactions(transactions, {
+    month: '2026-05',
+    monthStartDay: 1,
+    type: 'expense',
+    category: '생활비',
+    query: ''
+  });
+  assert.strictEqual(JSON.stringify(filtered.map((tx) => tx.id)), JSON.stringify(['c', 'a']));
+
+  const allCategories = win.BudgetTransactions.filterTransactions(transactions, {
+    month: '2026-05', monthStartDay: 1, type: 'expense', category: 'all', query: '저녁'
+  });
+  assert.strictEqual(JSON.stringify(allCategories.map((tx) => tx.id)), JSON.stringify(['b']));
+}
+
 const tests = [
   testStorageDefaultsAndIgnoresLocalStorage,
   testSaveDoesNotUseLocalStorage,
@@ -313,7 +338,8 @@ const tests = [
   testLegacyExpenseCategoriesMapToFourBudgets,
   testCloudStateMappingKeepsBudgetAndTransactions,
   testCloudUsesSharedLoginEmail,
-  testCategoryBudgetDetailShowsSpentBeforeBudget
+  testCategoryBudgetDetailShowsSpentBeforeBudget,
+  testCategoryFilterCombinesWithMonthTypeAndQuery
 ];
 
 for (const test of tests) {

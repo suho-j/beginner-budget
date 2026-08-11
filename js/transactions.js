@@ -157,10 +157,12 @@
     const month = filters.month || '';
     const monthStartDay = window.BudgetStorage.normalizeMonthStartDay(filters.monthStartDay || 1);
     const type = filters.type || 'all';
+    const category = filters.category || 'all';
     const query = String(filters.query || '').trim().toLocaleLowerCase('ko-KR');
     return transactions
       .filter((tx) => !month || window.BudgetStorage.isDateInBudgetMonth(tx.date, month, monthStartDay))
       .filter((tx) => type === 'all' || tx.type === type)
+      .filter((tx) => category === 'all' || tx.category === category)
       .filter((tx) => {
         if (!query) return true;
         return [tx.date, typeLabelsForSearch(tx.type), tx.category, tx.memo]
