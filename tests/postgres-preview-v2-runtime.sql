@@ -118,12 +118,28 @@ begin
 end;
 $function$;
 
-insert into public.preview_v2_test_invariants (name, value) values
-  ('production-settings', public.preview_v2_test_hash('public.budget_settings')),
-  ('production-transactions', public.preview_v2_test_hash('public.transactions')),
-  ('v1-settings', public.preview_v2_test_hash('public.preview_budget_settings')),
-  ('v1-transactions', public.preview_v2_test_hash('public.preview_transactions')),
-  ('v1-marker', public.preview_v2_test_hash('public.preview_seed_metadata'));
+create or replace function public.preview_v2_capture_fixture_snapshot(p_prefix text)
+returns void
+language plpgsql
+as $function$
+begin
+  insert into public.preview_v2_test_invariants (name, value) values
+    (p_prefix || '-production-settings-hash', public.preview_v2_test_hash('public.budget_settings')),
+    (p_prefix || '-production-settings-count', (select count(*)::text from public.budget_settings)),
+    (p_prefix || '-production-transactions-hash', public.preview_v2_test_hash('public.transactions')),
+    (p_prefix || '-production-transactions-count', (select count(*)::text from public.transactions)),
+    (p_prefix || '-v1-settings-hash', public.preview_v2_test_hash('public.preview_budget_settings')),
+    (p_prefix || '-v1-settings-count', (select count(*)::text from public.preview_budget_settings)),
+    (p_prefix || '-v1-transactions-hash', public.preview_v2_test_hash('public.preview_transactions')),
+    (p_prefix || '-v1-transactions-count', (select count(*)::text from public.preview_transactions)),
+    (p_prefix || '-v1-marker-hash', public.preview_v2_test_hash('public.preview_seed_metadata')),
+    (p_prefix || '-v1-marker-count', (select count(*)::text from public.preview_seed_metadata));
+end;
+$function$;
+
+-- This immutable baseline is never updated. Later intentional fixture changes use a
+-- distinct snapshot prefix so the original production/V1 evidence remains auditable.
+select public.preview_v2_capture_fixture_snapshot('original');
 
 \ir ../docs/supabase-preview-v2-setup.sql
 
@@ -137,6 +153,38 @@ begin
   end if;
 end;
 $function$;
+
+create or replace function public.preview_v2_assert_fixture_snapshot(p_prefix text, p_phase text)
+returns void
+language plpgsql
+as $function$
+declare
+  v_mismatch boolean;
+begin
+  select exists (
+    select 1
+    from (values
+      ('production-settings-hash', public.preview_v2_test_hash('public.budget_settings')),
+      ('production-settings-count', (select count(*)::text from public.budget_settings)),
+      ('production-transactions-hash', public.preview_v2_test_hash('public.transactions')),
+      ('production-transactions-count', (select count(*)::text from public.transactions)),
+      ('v1-settings-hash', public.preview_v2_test_hash('public.preview_budget_settings')),
+      ('v1-settings-count', (select count(*)::text from public.preview_budget_settings)),
+      ('v1-transactions-hash', public.preview_v2_test_hash('public.preview_transactions')),
+      ('v1-transactions-count', (select count(*)::text from public.preview_transactions)),
+      ('v1-marker-hash', public.preview_v2_test_hash('public.preview_seed_metadata')),
+      ('v1-marker-count', (select count(*)::text from public.preview_seed_metadata))
+    ) as current_fixture(suffix, value)
+    left join public.preview_v2_test_invariants as expected
+      on expected.name = p_prefix || '-' || current_fixture.suffix
+    where expected.value is distinct from current_fixture.value
+  ) into v_mismatch;
+
+  perform public.preview_v2_assert(not v_mismatch, p_phase || ' changed production or V1 fixtures');
+end;
+$function$;
+
+select public.preview_v2_assert_fixture_snapshot('original', 'first setup');
 
 select public.preview_v2_assert(
   not exists (
@@ -174,6 +222,16 @@ update public.budget_settings
 set monthly_budget = 610000
 where user_id = '00000000-0000-0000-0000-0000000000a1';
 
+select public.preview_v2_assert(
+  (select monthly_budget = 610000 from public.budget_settings
+   where user_id = '00000000-0000-0000-0000-0000000000a1')
+  and (select count(*) = 2 from public.budget_settings)
+  and (select count(*) = 2 from public.transactions),
+  'the deliberate production fixture mutation must affect only user A budget'
+);
+
+select public.preview_v2_capture_fixture_snapshot('post-deliberate');
+
 update public.preview_v2_budget_settings
 set monthly_budget = 620000
 where user_id = '00000000-0000-0000-0000-0000000000a1';
@@ -197,6 +255,8 @@ select public.preview_v2_assert(
    from preview_v2_before_rerun),
   'marker rerun must preserve modified V2 byte-for-byte'
 );
+
+select public.preview_v2_assert_fixture_snapshot('post-deliberate', 'marker rerun');
 
 select public.preview_v2_assert(
   not has_function_privilege('public', 'public.replace_preview_v2_budget_state(integer,jsonb,jsonb,timestamptz,jsonb)', 'EXECUTE')
@@ -387,27 +447,16 @@ select public.preview_v2_assert(
   'different users must each retain the same deterministic ID once'
 );
 
-select public.preview_v2_assert(
-  (select value = public.preview_v2_test_hash('public.preview_budget_settings')
-   from public.preview_v2_test_invariants where name = 'v1-settings')
-  and (select value = public.preview_v2_test_hash('public.preview_transactions')
-       from public.preview_v2_test_invariants where name = 'v1-transactions')
-  and (select value = public.preview_v2_test_hash('public.preview_seed_metadata')
-       from public.preview_v2_test_invariants where name = 'v1-marker'),
-  'V1 fixtures must remain invariant'
-);
-
--- Production was deliberately changed for the marker-rerun test. Capture the post-change
--- invariant, then require the concurrent seed/RPC phase to preserve it byte-for-byte.
-delete from public.transactions;
-update public.preview_v2_test_invariants set value = public.preview_v2_test_hash('public.budget_settings')
-where name = 'production-settings';
-update public.preview_v2_test_invariants set value = public.preview_v2_test_hash('public.transactions')
-where name = 'production-transactions';
+select public.preview_v2_assert_fixture_snapshot('post-deliberate', 'RPC and deterministic ID tests');
 
 create table public.preview_v2_runtime_barrier (
   participant text primary key,
   ready boolean not null default false,
+  backend_pid integer,
+  seed_started boolean not null default false,
+  release_seed boolean not null default false,
+  release_rpc boolean not null default false,
+  observed_wait boolean not null default false,
   finished boolean not null default false,
   duplicate_ready boolean not null default false,
   duplicate_result text

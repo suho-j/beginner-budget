@@ -91,17 +91,20 @@ try {
   $sessionA = @'
 \set ON_ERROR_STOP on
 set statement_timeout = '12s';
-update public.preview_v2_runtime_barrier set ready = true where participant = 'seed';
+set application_name = 'preview-v2-seed-session';
+update public.preview_v2_runtime_barrier
+set ready = true, backend_pid = pg_backend_pid()
+where participant = 'seed';
 do $wait$
 declare v_deadline timestamptz := clock_timestamp() + interval '10 seconds';
 begin
-  while (select count(*) from public.preview_v2_runtime_barrier where ready) <> 2 loop
-    if clock_timestamp() >= v_deadline then raise exception 'barrier ready timeout'; end if;
+  while not (select release_seed from public.preview_v2_runtime_barrier where participant = 'seed') loop
+    if clock_timestamp() >= v_deadline then raise exception 'seed release timeout'; end if;
     perform pg_sleep(0.05);
   end loop;
 end;
 $wait$;
-select pg_sleep(0.25);
+update public.preview_v2_runtime_barrier set seed_started = true where participant = 'seed';
 \ir /tmp/seed-concurrency.sql
 update public.preview_v2_runtime_barrier set finished = true where participant = 'seed';
 do $wait$
@@ -146,7 +149,10 @@ where participant = 'seed';
   $sessionB = @'
 \set ON_ERROR_STOP on
 set statement_timeout = '12s';
-update public.preview_v2_runtime_barrier set ready = true where participant = 'rpc';
+set application_name = 'preview-v2-rpc-session';
+update public.preview_v2_runtime_barrier
+set ready = true, backend_pid = pg_backend_pid()
+where participant = 'rpc';
 select set_config(
   'preview_v2.proposed_budget',
   (select monthly_budget::text from public.budget_settings
@@ -161,6 +167,15 @@ select set_config(
 );
 begin;
 lock table public.preview_v2_transactions in share row exclusive mode;
+do $wait$
+declare v_deadline timestamptz := clock_timestamp() + interval '10 seconds';
+begin
+  while not (select release_rpc from public.preview_v2_runtime_barrier where participant = 'rpc') loop
+    if clock_timestamp() >= v_deadline then raise exception 'RPC release timeout'; end if;
+    perform pg_sleep(0.05);
+  end loop;
+end;
+$wait$;
 select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000a1', true);
 set local role authenticated;
 select * from public.replace_preview_v2_budget_state(
@@ -211,10 +226,102 @@ set duplicate_result = current_setting('preview_v2.duplicate_result')
 where participant = 'rpc';
 '@
 
+  $lockController = @'
+\set ON_ERROR_STOP on
+set statement_timeout = '12s';
+do $observe_rpc_lock$
+declare
+  v_deadline timestamptz := clock_timestamp() + interval '10 seconds';
+  v_rpc_pid integer;
+begin
+  loop
+    select max(backend_pid) filter (where participant = 'rpc')
+    into v_rpc_pid
+    from public.preview_v2_runtime_barrier
+    where ready;
+
+    exit when v_rpc_pid is not null
+      and exists (
+        select 1 from pg_catalog.pg_locks
+        where pid = v_rpc_pid
+          and relation = 'public.preview_v2_transactions'::regclass
+          and mode = 'ShareRowExclusiveLock'
+          and granted
+      );
+    if clock_timestamp() >= v_deadline then
+      raise exception 'RPC lock acquisition was not observed';
+    end if;
+    perform pg_sleep(0.05);
+  end loop;
+end;
+$observe_rpc_lock$;
+
+-- Phase 1 has committed, so session A can now see this release flag.
+update public.preview_v2_runtime_barrier
+set release_seed = true
+where participant = 'seed';
+
+do $observe_seed_wait$
+declare
+  v_deadline timestamptz := clock_timestamp() + interval '10 seconds';
+  v_seed_pid integer;
+  v_rpc_pid integer;
+begin
+  select max(backend_pid) filter (where participant = 'seed'),
+         max(backend_pid) filter (where participant = 'rpc')
+  into v_seed_pid, v_rpc_pid
+  from public.preview_v2_runtime_barrier
+  where ready;
+
+  if v_seed_pid is null or v_rpc_pid is null then
+    raise exception 'concurrency backend PIDs disappeared before lock observation';
+  end if;
+  loop
+    exit when exists (
+      select 1
+      from public.preview_v2_runtime_barrier
+      where participant = 'seed' and seed_started
+    ) and exists (
+      select 1
+      from pg_catalog.pg_locks as waiting_lock
+      join pg_catalog.pg_stat_activity as waiting_activity
+        on waiting_activity.pid = waiting_lock.pid
+      where waiting_lock.pid = v_seed_pid
+        and waiting_lock.relation = 'public.preview_v2_transactions'::regclass
+        and waiting_lock.mode = 'ShareRowExclusiveLock'
+        and not waiting_lock.granted
+        and waiting_lock.waitstart is not null
+        and waiting_activity.wait_event_type = 'Lock'
+        and exists (
+          select 1
+          from pg_catalog.pg_locks as holder_lock
+          where holder_lock.pid = v_rpc_pid
+            and holder_lock.relation = waiting_lock.relation
+            and holder_lock.mode = 'ShareRowExclusiveLock'
+            and holder_lock.granted
+        )
+    );
+    if clock_timestamp() >= v_deadline then
+      raise exception 'seed relation-lock wait was not observed';
+    end if;
+    perform pg_sleep(0.05);
+  end loop;
+end;
+$observe_seed_wait$;
+
+-- Phase 2 has committed; this one autocommit statement records the evidence and
+-- releases session B without hiding either change inside a procedural block.
+update public.preview_v2_runtime_barrier
+set observed_wait = case when participant = 'seed' then true else observed_wait end,
+    release_rpc = case when participant = 'rpc' then true else release_rpc end
+where participant in ('seed', 'rpc');
+'@
+
   $finalAssertions = @'
 \set ON_ERROR_STOP on
 select public.preview_v2_assert(
-  (select count(*) = 2 from public.preview_v2_runtime_barrier where ready and finished and duplicate_ready),
+  (select count(*) = 2 from public.preview_v2_runtime_barrier where ready and finished and duplicate_ready)
+    and (select observed_wait from public.preview_v2_runtime_barrier where participant = 'seed'),
   'both concurrency sessions must complete'
 );
 select public.preview_v2_assert(
@@ -229,21 +336,10 @@ select public.preview_v2_assert(
   'same-user deterministic ID must exist exactly once'
 );
 select public.preview_v2_assert(
-  (select value = public.preview_v2_test_hash('public.budget_settings')
-   from public.preview_v2_test_invariants where name = 'production-settings')
-  and (select value = public.preview_v2_test_hash('public.transactions')
-       from public.preview_v2_test_invariants where name = 'production-transactions'),
-  'production fixtures must remain invariant during concurrent seed/RPC'
+  (select observed_wait from public.preview_v2_runtime_barrier where participant = 'seed'),
+  'controller must observe seed waiting on the RPC relation lock'
 );
-select public.preview_v2_assert(
-  (select value = public.preview_v2_test_hash('public.preview_budget_settings')
-   from public.preview_v2_test_invariants where name = 'v1-settings')
-  and (select value = public.preview_v2_test_hash('public.preview_transactions')
-       from public.preview_v2_test_invariants where name = 'v1-transactions')
-  and (select value = public.preview_v2_test_hash('public.preview_seed_metadata')
-       from public.preview_v2_test_invariants where name = 'v1-marker'),
-  'V1 fixtures must remain invariant during concurrent seed/RPC'
-);
+select public.preview_v2_assert_fixture_snapshot('post-deliberate', 'concurrent seed and RPC');
 select public.preview_v2_assert(
   exists (select 1 from public.preview_v2_seed_metadata where seed_key = 'production_snapshot_v2'),
   'concurrent seed must commit its marker'
@@ -252,13 +348,16 @@ select public.preview_v2_assert(
 
   $sessionAPath = Join-Path $runDirectory 'session-a.sql'
   $sessionBPath = Join-Path $runDirectory 'session-b.sql'
+  $lockControllerPath = Join-Path $runDirectory 'lock-controller.sql'
   $finalPath = Join-Path $runDirectory 'final.sql'
   Write-Utf8NoBom -Path $sessionAPath -Content $sessionA
   Write-Utf8NoBom -Path $sessionBPath -Content $sessionB
+  Write-Utf8NoBom -Path $lockControllerPath -Content $lockController
   Write-Utf8NoBom -Path $finalPath -Content $finalAssertions
   Invoke-Docker @('cp', $seedConcurrencyPath, "${containerId}:/tmp/seed-concurrency.sql") | Out-Null
   Invoke-Docker @('cp', $sessionAPath, "${containerId}:/tmp/session-a.sql") | Out-Null
   Invoke-Docker @('cp', $sessionBPath, "${containerId}:/tmp/session-b.sql") | Out-Null
+  Invoke-Docker @('cp', $lockControllerPath, "${containerId}:/tmp/lock-controller.sql") | Out-Null
   Invoke-Docker @('cp', $finalPath, "${containerId}:/tmp/final.sql") | Out-Null
 
   $sessionALog = Join-Path $runDirectory 'session-a.log'
@@ -272,6 +371,13 @@ select public.preview_v2_assert(
     (Start-Process -FilePath $dockerExecutable -ArgumentList ($commonArguments + @('-f', '/tmp/session-b.sql')) -RedirectStandardOutput $sessionBLog -RedirectStandardError $sessionBError -PassThru -WindowStyle Hidden)
   )
   foreach ($process in $sessionProcesses) { $null = $process.Handle }
+
+  # The controller proves real lock overlap through pg_locks/pg_stat_activity before
+  # it releases the RPC transaction. No timing sleep is accepted as overlap evidence.
+  Invoke-Docker @(
+    'exec', $containerId, 'psql', '-v', 'ON_ERROR_STOP=1',
+    '-U', 'postgres', '-d', $database, '-f', '/tmp/lock-controller.sql'
+  ) | Out-Null
 
   $deadline = [DateTime]::UtcNow.AddSeconds(15)
   while ([DateTime]::UtcNow -lt $deadline -and @($sessionProcesses | Where-Object { -not $_.HasExited }).Count -gt 0) {
