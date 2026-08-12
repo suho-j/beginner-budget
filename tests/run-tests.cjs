@@ -2552,6 +2552,16 @@ function testAppMarkupProvidesTabsCalendarEditDialogAndPreviewWarning() {
   assert.doesNotMatch(cloudDownload.source, /\bvisually-hidden\b/, 'load-error retry must be visibly available');
 }
 
+function testAppSkipLinkTargetsFocusableMainContent() {
+  const source = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+  assert.match(source, /<a\b[^>]*\bhref="#main-content"[^>]*>/i, 'skip link must target the main content');
+  assert.match(
+    source,
+    /<main\b(?=[^>]*\bid="main-content")(?=[^>]*\btabindex="-1")[^>]*>/i,
+    'skip-link target must accept programmatic keyboard focus'
+  );
+}
+
 function testAppStylesCoverTabsCalendarDialogAndMobile() {
   const source = fs.readFileSync(path.join(__dirname, '..', 'css/style.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
   const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -7058,6 +7068,7 @@ const tests = [
   testUiRendersRecurringOccurrencesAndTemplatesSafely,
   testUiRecurringDialogsAndTemplateFocusFlow,
   testAppMarkupProvidesTabsCalendarEditDialogAndPreviewWarning,
+  testAppSkipLinkTargetsFocusableMainContent,
   testAppStylesCoverTabsCalendarDialogAndMobile,
   testAppMarkupProvidesRecurringSectionsAndDialogContracts,
   testAppStylesCoverRecurringCardsDialogAndMobile,
