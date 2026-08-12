@@ -918,8 +918,10 @@ function createAppHarness(options = {}) {
         dialogOpen: target.recurringConfirmDialog.open
       });
       recurringConfirmReturnFocus = null;
+      this.fillRecurringExpenseCategoryOptions(target);
+      const defaultCategory = window.BudgetStorage.EXPENSE_CATEGORIES[0] || '';
       target.recurringTemplateMemo.value = '';
-      target.recurringTemplateCategory.value = '';
+      target.recurringTemplateCategory.value = defaultCategory;
       target.recurringTemplateAmount.value = '';
       target.recurringTemplateDay.value = '';
       delete target.recurringTemplateForm.dataset.templateId;
@@ -929,7 +931,7 @@ function createAppHarness(options = {}) {
       target.recurringConfirmScheduledDate.textContent = '';
       target.recurringConfirmDate.value = '';
       target.recurringConfirmAmount.value = '';
-      target.recurringConfirmCategory.value = '';
+      target.recurringConfirmCategory.value = defaultCategory;
       target.recurringConfirmMemo.value = '';
       delete target.recurringConfirmDialog.dataset.transactionId;
       this.setMessage(target.recurringConfirmMessage, '', null);
@@ -6073,12 +6075,15 @@ async function testAppRecurringLifecycleCoversImportResetSampleDownloadAndLogout
 
   function assertRecurringUiCleared(harness) {
     const { elements } = harness;
+    const defaultCategory = harness.window.BudgetStorage.EXPENSE_CATEGORIES[0] || '';
     assert.deepStrictEqual({
       memo: elements.recurringTemplateMemo.value,
       category: elements.recurringTemplateCategory.value,
       amount: elements.recurringTemplateAmount.value,
       dayOfMonth: elements.recurringTemplateDay.value
-    }, { memo: '', category: '', amount: '', dayOfMonth: '' });
+    }, { memo: '', category: defaultCategory, amount: '', dayOfMonth: '' });
+    assert.strictEqual(harness.window.BudgetStorage.EXPENSE_CATEGORIES.includes(elements.recurringTemplateCategory.value), true);
+    assert.notStrictEqual(elements.recurringTemplateCategory.value, '의류비', 'private edited category is not retained');
     assert.strictEqual(elements.recurringTemplateForm.dataset.templateId, undefined);
     assert.strictEqual(elements.recurringTemplateSave.textContent, '반복지출 등록');
     assert.strictEqual(elements.recurringTemplateCancel.hidden, true);
@@ -6089,7 +6094,9 @@ async function testAppRecurringLifecycleCoversImportResetSampleDownloadAndLogout
       amount: elements.recurringConfirmAmount.value,
       category: elements.recurringConfirmCategory.value,
       memo: elements.recurringConfirmMemo.value
-    }, { scheduledDate: '', date: '', amount: '', category: '', memo: '' });
+    }, { scheduledDate: '', date: '', amount: '', category: defaultCategory, memo: '' });
+    assert.strictEqual(harness.window.BudgetStorage.EXPENSE_CATEGORIES.includes(elements.recurringConfirmCategory.value), true);
+    assert.notStrictEqual(elements.recurringConfirmCategory.value, '배달비', 'private confirmation category is not retained');
     assert.strictEqual(elements.recurringConfirmDialog.dataset.transactionId, undefined);
     assert.strictEqual(elements.recurringConfirmMessage.textContent, '');
     assert.strictEqual(elements.recurringConfirmDialog.open, false);
@@ -6108,6 +6115,7 @@ async function testAppRecurringLifecycleCoversImportResetSampleDownloadAndLogout
     assert.ok(recordButton, `record action exists for ${suffix}`);
     await harness.elements.recurringTemplateList.dispatch('click', { target: editButton });
     harness.elements.recurringTemplateMemo.value = `편집 중 ${suffix}`;
+    harness.elements.recurringTemplateCategory.value = '의류비';
     harness.elements.recurringTemplateAmount.value = '777000';
     harness.elements.recurringTemplateMessage.textContent = `템플릿 메시지 ${suffix}`;
     await harness.elements.recurringUpcomingList.dispatch('click', { target: recordButton });
@@ -6531,6 +6539,8 @@ async function testAppRecurringLifecycleCoversImportResetSampleDownloadAndLogout
     .querySelector('[data-action="edit-recurring-template"]');
   uiContext.window.BudgetUI.beginRecurringTemplateEdit(recurringDom.elements, oldTemplate, staleEditTrigger);
   uiContext.window.BudgetUI.openRecurringConfirmDialog(recurringDom.elements, uiOccurrences[0], staleRecordTrigger);
+  recurringDom.elements.recurringTemplateCategory.value = '의류비';
+  recurringDom.elements.recurringConfirmCategory.value = '배달비';
   recurringDom.elements.recurringTemplateMessage.textContent = '지울 메시지';
   recurringDom.elements.recurringConfirmMessage.textContent = '지울 확인 메시지';
   const unrelatedFocus = uiContext.document.createElement('button');
@@ -6538,10 +6548,26 @@ async function testAppRecurringLifecycleCoversImportResetSampleDownloadAndLogout
   unrelatedFocus.focus();
   uiContext.window.BudgetUI.resetRecurringExpenseUi(recurringDom.elements);
   uiContext.window.BudgetUI.resetRecurringExpenseUi(recurringDom.elements);
+  const resetExpenseCategories = uiContext.window.BudgetStorage.EXPENSE_CATEGORIES;
   assert.strictEqual(uiContext.document.activeElement, unrelatedFocus, 'forced cleanup never restores stale focus');
   assert.strictEqual(recurringDom.elements.recurringConfirmDialog.open, false);
   assert.strictEqual(recurringDom.elements.recurringTemplateForm.dataset.templateId, undefined);
   assert.strictEqual(recurringDom.elements.recurringConfirmDialog.dataset.transactionId, undefined);
+  assert.strictEqual(recurringDom.elements.recurringTemplateCategory.value, resetExpenseCategories[0]);
+  assert.strictEqual(recurringDom.elements.recurringConfirmCategory.value, resetExpenseCategories[0]);
+  assert.deepStrictEqual(
+    recurringDom.elements.recurringTemplateCategory.children.map((option) => option.value),
+    resetExpenseCategories
+  );
+  assert.deepStrictEqual(
+    recurringDom.elements.recurringConfirmCategory.children.map((option) => option.value),
+    resetExpenseCategories
+  );
+  assert.strictEqual(
+    [...recurringDom.elements.recurringTemplateCategory.children, ...recurringDom.elements.recurringConfirmCategory.children]
+      .some((option) => uiContext.window.BudgetStorage.INCOME_CATEGORIES.includes(option.value)),
+    false
+  );
   recurringDom.elements.recurringConfirmDialog.open = true;
   uiContext.window.BudgetUI.closeRecurringConfirmDialog(recurringDom.elements);
   assert.strictEqual(uiContext.document.activeElement, recurringDom.elements.recurringUpcomingHeading);

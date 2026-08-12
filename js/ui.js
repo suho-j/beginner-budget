@@ -590,9 +590,11 @@
   function resetRecurringExpenseUi(elements) {
     recurringTemplateFocusState = null;
     recurringConfirmFocusState = null;
+    fillRecurringExpenseCategoryOptions(elements);
+    const defaultCategory = window.BudgetStorage.EXPENSE_CATEGORIES[0] || '';
 
     elements.recurringTemplateMemo.value = '';
-    elements.recurringTemplateCategory.value = '';
+    elements.recurringTemplateCategory.value = defaultCategory;
     elements.recurringTemplateAmount.value = '';
     elements.recurringTemplateDay.value = '';
     delete elements.recurringTemplateForm.dataset.templateId;
@@ -604,7 +606,7 @@
     elements.recurringConfirmScheduledDate.textContent = '';
     elements.recurringConfirmDate.value = '';
     elements.recurringConfirmAmount.value = '';
-    elements.recurringConfirmCategory.value = '';
+    elements.recurringConfirmCategory.value = defaultCategory;
     elements.recurringConfirmMemo.value = '';
     delete elements.recurringConfirmDialog.dataset.transactionId;
     setMessage(elements.recurringConfirmMessage, '', null);
