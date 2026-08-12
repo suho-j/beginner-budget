@@ -3277,8 +3277,72 @@ function testPreviewV2SupabaseSetupCreatesIsolatedRlsObjects() {
   assert.match(schemaGuard, /using errcode = '55000'/i);
   assert.doesNotMatch(
     schemaGuard,
-    /\b(?:insert\s+into|update|delete\s+from|alter\s+table|grant|revoke)\b/i,
+    /^\s*(?:insert\s+into|update|delete\s+from|alter\s+table|grant|revoke)\b/im,
     'catalog validation must be read-only and fail closed'
+  );
+
+  const typedForeignKeyColumnAggregations = schemaGuard.match(
+    /select array_agg\(attribute_record\.attname::text order by key_column\.ordinality\)[\s\S]*?from unnest\(constraint_record\.(?:conkey|confkey)\)/gi
+  ) || [];
+  assert.strictEqual(
+    typedForeignKeyColumnAggregations.length,
+    4,
+    'all four FK source/target column aggregations must cast pg_attribute.attname to text'
+  );
+
+  assert.match(schemaGuard, /from pg_catalog\.pg_policy as policy_record/i);
+  assert.match(schemaGuard, /policy_record\.polpermissive/i);
+  assert.match(schemaGuard, /unnest\(policy_record\.polroles\)/i);
+  assert.match(schemaGuard, /role_record\.rolname::text/i);
+  assert.match(schemaGuard, /pg_catalog\.pg_get_expr\(policy_record\.polqual, policy_record\.polrelid\)/i);
+  assert.match(schemaGuard, /pg_catalog\.pg_get_expr\(policy_record\.polwithcheck, policy_record\.polrelid\)/i);
+  for (const expectedPolicy of [
+    "'preview_v2_budget_settings', 'Preview V2 users can select own settings', 'r'",
+    "'preview_v2_budget_settings', 'Preview V2 users can insert own settings', 'a'",
+    "'preview_v2_budget_settings', 'Preview V2 users can update own settings', 'w'",
+    "'preview_v2_transactions', 'Preview V2 users can select own transactions', 'r'",
+    "'preview_v2_transactions', 'Preview V2 users can insert own transactions', 'a'",
+    "'preview_v2_transactions', 'Preview V2 users can update own transactions', 'w'",
+    "'preview_v2_transactions', 'Preview V2 users can delete own transactions', 'd'"
+  ]) {
+    assert.ok(compactSchemaGuard.includes(expectedPolicy.toLowerCase()), `exact policy missing from catalog guard: ${expectedPolicy}`);
+  }
+  assert.match(schemaGuard, /array\['authenticated'\]::text\[\]/i);
+  assert.match(schemaGuard, /'auth\.uid\(\)=user_id'/i);
+  assert.match(
+    schemaGuard,
+    /actual_policies[\s\S]*expected_policies[\s\S]*policy_differences[\s\S]*except[\s\S]*except/i
+  );
+  assert.match(
+    schemaGuard,
+    /if v_policy_count <> 0 and \(v_policy_count <> 7 or v_has_policy_drift\) then[\s\S]*raise exception 'preview V2 RLS policy contract drifted'[\s\S]*using errcode = '55000'/i
+  );
+  assert.doesNotMatch(schemaGuard, /'true'\s*,\s*'true'/i, 'permissive USING(true) must not be accepted');
+
+  assert.match(schemaGuard, /from pg_catalog\.pg_index as index_record/i);
+  assert.match(schemaGuard, /where index_record\.indisunique/i);
+  assert.match(schemaGuard, /index_record\.indisprimary/i);
+  assert.match(schemaGuard, /index_record\.indisvalid/i);
+  assert.match(schemaGuard, /index_record\.indisready/i);
+  assert.match(schemaGuard, /index_record\.indexprs is null/i);
+  assert.match(schemaGuard, /index_record\.indpred is null/i);
+  assert.match(schemaGuard, /index_record\.indnkeyatts/i);
+  assert.match(schemaGuard, /index_record\.indnatts/i);
+  assert.match(
+    schemaGuard,
+    /'preview_v2_transactions', true, true, true, false, true, true, 2, 2, array\['user_id', 'id'\]::text\[\]/i
+  );
+  assert.match(
+    schemaGuard,
+    /if v_unique_index_count <> 3 or v_has_unique_index_drift then[\s\S]*raise exception 'preview V2 unique index contract drifted'[\s\S]*using errcode = '55000'/i
+  );
+  const expectedUniqueStart = schemaGuard.indexOf('expected_unique_indexes');
+  const expectedUniqueEnd = schemaGuard.indexOf('unique_index_differences', expectedUniqueStart);
+  assert.ok(expectedUniqueStart >= 0 && expectedUniqueEnd > expectedUniqueStart);
+  assert.doesNotMatch(
+    schemaGuard.slice(expectedUniqueStart, expectedUniqueEnd),
+    /'preview_v2_transactions'[^\n]*array\['id'\]::text\[\]/i,
+    'global UNIQUE(id) must not be an accepted V2 index contract'
   );
 
   for (const expectedColumns of [

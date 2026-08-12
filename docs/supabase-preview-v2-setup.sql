@@ -48,6 +48,10 @@ do $schema_guard$
 declare
   v_columns text[];
   v_primary_key_columns text[];
+  v_policy_count bigint;
+  v_has_policy_drift boolean;
+  v_unique_index_count bigint;
+  v_has_unique_index_drift boolean;
 begin
   select array_agg(
     attribute_record.attname
@@ -71,7 +75,7 @@ begin
     raise exception 'preview_v2_budget_settings column contract drifted' using errcode = '55000';
   end if;
 
-  select array_agg(attribute_record.attname order by key_column.ordinality)
+  select array_agg(attribute_record.attname::text order by key_column.ordinality)
   into v_primary_key_columns
   from pg_catalog.pg_constraint as constraint_record
   cross join lateral unnest(constraint_record.conkey)
@@ -95,7 +99,7 @@ begin
       and constraint_record.confrelid = 'auth.users'::regclass
       and constraint_record.confdeltype = 'c'
       and (
-        select array_agg(attribute_record.attname order by key_column.ordinality)
+        select array_agg(attribute_record.attname::text order by key_column.ordinality)
         from unnest(constraint_record.conkey)
           with ordinality as key_column(attnum, ordinality)
         join pg_catalog.pg_attribute as attribute_record
@@ -103,7 +107,7 @@ begin
           and attribute_record.attnum = key_column.attnum
       ) = array['user_id']::text[]
       and (
-        select array_agg(attribute_record.attname order by key_column.ordinality)
+        select array_agg(attribute_record.attname::text order by key_column.ordinality)
         from unnest(constraint_record.confkey)
           with ordinality as key_column(attnum, ordinality)
         join pg_catalog.pg_attribute as attribute_record
@@ -153,7 +157,7 @@ begin
     raise exception 'preview_v2_transactions column contract drifted' using errcode = '55000';
   end if;
 
-  select array_agg(attribute_record.attname order by key_column.ordinality)
+  select array_agg(attribute_record.attname::text order by key_column.ordinality)
   into v_primary_key_columns
   from pg_catalog.pg_constraint as constraint_record
   cross join lateral unnest(constraint_record.conkey)
@@ -177,7 +181,7 @@ begin
       and constraint_record.confrelid = 'auth.users'::regclass
       and constraint_record.confdeltype = 'c'
       and (
-        select array_agg(attribute_record.attname order by key_column.ordinality)
+        select array_agg(attribute_record.attname::text order by key_column.ordinality)
         from unnest(constraint_record.conkey)
           with ordinality as key_column(attnum, ordinality)
         join pg_catalog.pg_attribute as attribute_record
@@ -185,7 +189,7 @@ begin
           and attribute_record.attnum = key_column.attnum
       ) = array['user_id']::text[]
       and (
-        select array_agg(attribute_record.attname order by key_column.ordinality)
+        select array_agg(attribute_record.attname::text order by key_column.ordinality)
         from unnest(constraint_record.confkey)
           with ordinality as key_column(attnum, ordinality)
         join pg_catalog.pg_attribute as attribute_record
@@ -275,7 +279,7 @@ begin
     raise exception 'preview_v2_seed_metadata column contract drifted' using errcode = '55000';
   end if;
 
-  select array_agg(attribute_record.attname order by key_column.ordinality)
+  select array_agg(attribute_record.attname::text order by key_column.ordinality)
   into v_primary_key_columns
   from pg_catalog.pg_constraint as constraint_record
   cross join lateral unnest(constraint_record.conkey)
@@ -328,6 +332,165 @@ begin
       )
   ) then
     raise exception 'preview_v2_seed_metadata transaction count check drifted' using errcode = '55000';
+  end if;
+
+  with actual_unique_indexes as (
+    select
+      table_record.relname::text as table_name,
+      index_record.indisprimary,
+      index_record.indisvalid,
+      index_record.indisready,
+      index_record.indisexclusion,
+      index_record.indexprs is null as has_no_expressions,
+      index_record.indpred is null as has_no_predicate,
+      index_record.indnkeyatts::integer as key_attribute_count,
+      index_record.indnatts::integer as total_attribute_count,
+      coalesce((
+        select array_agg(attribute_record.attname::text order by key_column.ordinality)
+        from unnest(index_record.indkey::smallint[])
+          with ordinality as key_column(attnum, ordinality)
+        join pg_catalog.pg_attribute as attribute_record
+          on attribute_record.attrelid = index_record.indrelid
+          and attribute_record.attnum = key_column.attnum
+        where key_column.ordinality <= index_record.indnkeyatts
+          and key_column.attnum > 0
+      ), array[]::text[]) as key_columns
+    from pg_catalog.pg_index as index_record
+    join pg_catalog.pg_class as table_record
+      on table_record.oid = index_record.indrelid
+    join pg_catalog.pg_namespace as namespace_record
+      on namespace_record.oid = table_record.relnamespace
+    where index_record.indisunique
+      and namespace_record.nspname = 'public'
+      and table_record.relname in (
+        'preview_v2_budget_settings',
+        'preview_v2_transactions',
+        'preview_v2_seed_metadata'
+      )
+  ),
+  expected_unique_indexes (
+    table_name,
+    indisprimary,
+    indisvalid,
+    indisready,
+    indisexclusion,
+    has_no_expressions,
+    has_no_predicate,
+    key_attribute_count,
+    total_attribute_count,
+    key_columns
+  ) as (
+    values
+      ('preview_v2_budget_settings', true, true, true, false, true, true, 1, 1, array['user_id']::text[]),
+      ('preview_v2_transactions', true, true, true, false, true, true, 2, 2, array['user_id', 'id']::text[]),
+      ('preview_v2_seed_metadata', true, true, true, false, true, true, 1, 1, array['seed_key']::text[])
+  ),
+  actual_unique_index_differences as (
+    select * from actual_unique_indexes
+    except
+    select * from expected_unique_indexes
+  ),
+  expected_unique_index_differences as (
+    select * from expected_unique_indexes
+    except
+    select * from actual_unique_indexes
+  ),
+  unique_index_differences as (
+    select * from actual_unique_index_differences
+    union all
+    select * from expected_unique_index_differences
+  )
+  select
+    (select count(*) from actual_unique_indexes),
+    exists (select 1 from unique_index_differences)
+  into v_unique_index_count, v_has_unique_index_drift;
+
+  if v_unique_index_count <> 3 or v_has_unique_index_drift then
+    raise exception 'preview V2 unique index contract drifted' using errcode = '55000';
+  end if;
+
+  with actual_policies as (
+    select
+      table_record.relname::text as table_name,
+      policy_record.polname::text as policy_name,
+      policy_record.polcmd::text as command,
+      policy_record.polpermissive as is_permissive,
+      coalesce((
+        select array_agg(role_record.rolname::text order by role_record.rolname::text)
+        from unnest(policy_record.polroles) as policy_role(role_oid)
+        join pg_catalog.pg_roles as role_record
+          on role_record.oid = policy_role.role_oid
+      ), array[]::text[]) as roles,
+      coalesce(
+        trim(both '()' from regexp_replace(
+          pg_catalog.pg_get_expr(policy_record.polqual, policy_record.polrelid),
+          '\s+',
+          '',
+          'g'
+        )),
+        ''
+      ) as using_expression,
+      coalesce(
+        trim(both '()' from regexp_replace(
+          pg_catalog.pg_get_expr(policy_record.polwithcheck, policy_record.polrelid),
+          '\s+',
+          '',
+          'g'
+        )),
+        ''
+      ) as check_expression
+    from pg_catalog.pg_policy as policy_record
+    join pg_catalog.pg_class as table_record
+      on table_record.oid = policy_record.polrelid
+    join pg_catalog.pg_namespace as namespace_record
+      on namespace_record.oid = table_record.relnamespace
+    where namespace_record.nspname = 'public'
+      and table_record.relname in (
+        'preview_v2_budget_settings',
+        'preview_v2_transactions',
+        'preview_v2_seed_metadata'
+      )
+  ),
+  expected_policies (
+    table_name,
+    policy_name,
+    command,
+    is_permissive,
+    roles,
+    using_expression,
+    check_expression
+  ) as (
+    values
+      ('preview_v2_budget_settings', 'Preview V2 users can select own settings', 'r', true, array['authenticated']::text[], 'auth.uid()=user_id', ''),
+      ('preview_v2_budget_settings', 'Preview V2 users can insert own settings', 'a', true, array['authenticated']::text[], '', 'auth.uid()=user_id'),
+      ('preview_v2_budget_settings', 'Preview V2 users can update own settings', 'w', true, array['authenticated']::text[], 'auth.uid()=user_id', 'auth.uid()=user_id'),
+      ('preview_v2_transactions', 'Preview V2 users can select own transactions', 'r', true, array['authenticated']::text[], 'auth.uid()=user_id', ''),
+      ('preview_v2_transactions', 'Preview V2 users can insert own transactions', 'a', true, array['authenticated']::text[], '', 'auth.uid()=user_id'),
+      ('preview_v2_transactions', 'Preview V2 users can update own transactions', 'w', true, array['authenticated']::text[], 'auth.uid()=user_id', 'auth.uid()=user_id'),
+      ('preview_v2_transactions', 'Preview V2 users can delete own transactions', 'd', true, array['authenticated']::text[], 'auth.uid()=user_id', '')
+  ),
+  actual_policy_differences as (
+    select * from actual_policies
+    except
+    select * from expected_policies
+  ),
+  expected_policy_differences as (
+    select * from expected_policies
+    except
+    select * from actual_policies
+  ),
+  policy_differences as (
+    select * from actual_policy_differences
+    union all
+    select * from expected_policy_differences
+  )
+  select
+    (select count(*) from actual_policies),
+    exists (select 1 from policy_differences)
+  into v_policy_count, v_has_policy_drift;
+
+  if v_policy_count <> 0 and (v_policy_count <> 7 or v_has_policy_drift) then
+    raise exception 'preview V2 RLS policy contract drifted' using errcode = '55000';
   end if;
 end;
 $schema_guard$;
