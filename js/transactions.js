@@ -659,6 +659,17 @@
         ...parsed,
         recurringExpenseTemplates: eligibleTemplates
       });
+      const hasLinkedRecurringIncome = sourceVersion >= 2 && normalized.transactions.some((transaction) => (
+        transaction.type === 'income'
+        && isRecurringExpenseTransaction(normalized, transaction)
+      ));
+      if (hasLinkedRecurringIncome) {
+        return {
+          ok: false,
+          state: null,
+          errors: [error('importData', '반복 지출로 연결된 거래는 지출 유형이어야 해요.')]
+        };
+      }
       if (normalized.transactions.length === 0 && normalized.recurringExpenseTemplates.length === 0) {
         return { ok: false, state: null, errors: [error('importData', '유효한 거래나 반복 지출이 없어 가져오기를 중단했어요.')] };
       }

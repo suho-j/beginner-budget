@@ -109,6 +109,7 @@
         setCloudReadiness('load-error', signedInUser);
         if (target !== elements.globalMessage) setGlobalMessage(message, 'error');
       }
+      if (pendingUi && pendingUi.focusMessageOnFailure) pendingUi.messageElement.focus();
       return { ok: false, blocked: false, value: null };
     } finally {
       if (pendingUi) pendingUi.button.removeAttribute('aria-busy');
@@ -354,7 +355,8 @@
       undefined,
       {
         button: event.submitter || elements.recurringTemplateSave,
-        messageElement: elements.recurringTemplateMessage
+        messageElement: elements.recurringTemplateMessage,
+        focusMessageOnFailure: true
       }
     );
     if (!saved) return;

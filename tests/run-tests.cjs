@@ -1891,6 +1891,56 @@ function testRecurringImportExportAllowsTemplateOnlyAndRejectsFutureVersion() {
   assert.strictEqual(duplicateDecisionId.errors[0].field, 'importData');
   assert.match(duplicateDecisionId.errors[0].message, /중복.*ID/);
 
+  const boundaryTemplate = {
+    ...template,
+    id: 'rt-boundary',
+    dayOfMonth: 10,
+    startsOn: '2026-08-20'
+  };
+  const linkedIncomeTransaction = {
+    id: transactions.recurringTransactionId(boundaryTemplate.id, '2026-08'),
+    date: '2026-08-05',
+    type: 'income',
+    category: '월급',
+    amount: 100000,
+    memo: '위조된 반복 수입',
+    source: 'user'
+  };
+  const linkedIncomeState = storage.normalizeState({
+    version: 2,
+    recurringExpenseTemplates: [boundaryTemplate],
+    transactions: [linkedIncomeTransaction]
+  });
+  assert.strictEqual(
+    transactions.isRecurringExpenseTransaction(linkedIncomeState, linkedIncomeState.transactions[0]),
+    true,
+    'registration-month deterministic IDs stay linked even when the edited scheduled day precedes startsOn'
+  );
+  const linkedIncomeImport = transactions.importState(JSON.stringify(linkedIncomeState));
+  assert.strictEqual(linkedIncomeImport.ok, false);
+  assert.strictEqual(linkedIncomeImport.state, null);
+  assert.match(linkedIncomeImport.errors[0].message, /반복 지출.*지출 유형/);
+
+  const beforeStartsOnIncome = {
+    ...linkedIncomeTransaction,
+    id: transactions.recurringTransactionId(boundaryTemplate.id, '2026-07'),
+    date: '2026-07-10'
+  };
+  const beforeStartsOnState = storage.normalizeState({
+    version: 2,
+    recurringExpenseTemplates: [boundaryTemplate],
+    transactions: [beforeStartsOnIncome]
+  });
+  assert.strictEqual(
+    transactions.isRecurringExpenseTransaction(beforeStartsOnState, beforeStartsOnState.transactions[0]),
+    false,
+    'deterministic-looking IDs before the template registration month are not linked'
+  );
+  const beforeStartsOnImport = transactions.importState(JSON.stringify(beforeStartsOnState));
+  assert.strictEqual(beforeStartsOnImport.ok, true);
+  assert.strictEqual(beforeStartsOnImport.state.transactions[0].id, beforeStartsOnIncome.id);
+  assert.strictEqual(beforeStartsOnImport.state.transactions[0].type, 'income');
+
   const legacyTransaction = {
     id: 'legacy-v1',
     date: '2026-08-01',
@@ -5413,6 +5463,7 @@ async function testAppRecurringTemplateCrudIsRemoteFirst() {
   const renderCountBeforeFailure = harness.records.recurringTemplateRenders.length;
   const templateFailureGate = createDeferred();
   saveOutcomes.push(templateFailureGate);
+  harness.elements.recurringTemplateSave.focus();
   const failingTemplateSave = harness.elements.recurringTemplateForm.dispatch('submit', {
     submitter: harness.elements.recurringTemplateSave
   });
@@ -5432,6 +5483,7 @@ async function testAppRecurringTemplateCrudIsRemoteFirst() {
   assert.strictEqual(allWrites().every((control) => !control.disabled), true);
   assert.strictEqual(harness.elements.recurringTemplateCancel.disabled, false);
   assert.strictEqual(harness.elements.recurringTemplateSave.getAttribute('aria-busy'), null);
+  assert.strictEqual(harness.document.activeElement, harness.elements.recurringTemplateMessage);
 
   const editGate = createDeferred();
   saveOutcomes.push(editGate);
@@ -6439,6 +6491,43 @@ async function testAppRecurringLifecycleCoversImportResetSampleDownloadAndLogout
   assert.strictEqual(duplicateImport.records.recurringUiResets.length, duplicateResetCount);
   assert.match(duplicateMessage, /중복.*ID/);
   assert.strictEqual(duplicateImport.elements.importFile.value, '');
+
+  const linkedIncomeTransaction = {
+    id: `tx-recurring-${importedTemplates[0].id}-${currentMonth}`,
+    date: `${currentMonth}-15`,
+    type: 'income',
+    category: '월급',
+    amount: importedTemplates[0].amount,
+    memo: '위조된 반복 수입',
+    source: 'user'
+  };
+  const linkedIncomeText = JSON.stringify({
+    ...storage.defaultState(),
+    version: 2,
+    recurringExpenseTemplates: [importedTemplates[0]],
+    transactions: [linkedIncomeTransaction]
+  });
+  const linkedIncomeImport = createAppHarness({
+    cloudState: oldState,
+    importText: linkedIncomeText,
+    importFile: { name: 'linked-income.json', size: Buffer.byteLength(linkedIncomeText) },
+    confirmResults: [true]
+  });
+  await linkedIncomeImport.init();
+  const linkedIncomeUi = await prepareStaleRecurringUi(linkedIncomeImport, '반복 수입 백업');
+  const linkedIncomeStateBefore = await exportedState(linkedIncomeImport);
+  const linkedIncomeResetCount = linkedIncomeImport.records.recurringUiResets.length;
+  linkedIncomeImport.elements.importFile.value = 'linked-income.json';
+  await linkedIncomeImport.elements.importFile.dispatch('change');
+  await linkedIncomeImport.flushFileReaders();
+  const linkedIncomeMessage = linkedIncomeImport.elements.toolMessage.textContent;
+  assertOnlyWholeStateWrite(linkedIncomeImport, 0);
+  assert.deepStrictEqual(await exportedState(linkedIncomeImport), linkedIncomeStateBefore);
+  assertRecurringUiPreserved(linkedIncomeImport, linkedIncomeUi, false);
+  assert.strictEqual(linkedIncomeImport.records.recurringUiResets.length, linkedIncomeResetCount);
+  assert.strictEqual(linkedIncomeImport.records.confirmCalls.length, 0);
+  assert.match(linkedIncomeMessage, /반복 지출.*지출 유형/);
+  assert.strictEqual(linkedIncomeImport.elements.importFile.value, '');
 
   const readerFailure = createAppHarness({
     cloudState: oldState,
