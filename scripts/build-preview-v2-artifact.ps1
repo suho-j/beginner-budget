@@ -8,9 +8,14 @@ param(
   [ValidateSet('None', 'AfterV2Swap', 'AfterIndexWrite', 'AfterReadmeWrite')]
   [string]$FailureInjection = 'None',
   [Parameter(ParameterSetName = 'Build', DontShow)]
-  [ValidateSet('None', 'DeployReadmeBeforePublish', 'CleanupFailureAfterSuccess')]
+  [ValidateSet(
+    'None', 'DeployReadmeBeforePublish', 'CleanupFailureAfterSuccess',
+    'HoldPublishLock', 'ExternalBeforeFirstWrite', 'ExternalAfterV2Swap'
+  )]
   [string]$SelfTestScenario = 'None',
-  [Parameter(Mandatory, ParameterSetName = 'SelfTest')][switch]$SelfTest
+  [Parameter(Mandatory, ParameterSetName = 'SelfTest')][switch]$SelfTest,
+  [Parameter(ParameterSetName = 'SelfTest', DontShow)]
+  [ValidateSet('All', 'Concurrency')][string]$SelfTestFilter = 'All'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -287,6 +292,143 @@ function Assert-DeployOnlyExpectedChanges {
   }
 }
 
+function Get-RepositoryGitDirectory {
+  param([Parameter(Mandatory)][string]$Root)
+
+  $gitDirectoryText = ((Invoke-RepositoryGit -Root $Root -Arguments @('rev-parse', '--git-dir')) -join '').Trim()
+  if ([System.IO.Path]::IsPathRooted($gitDirectoryText)) {
+    return [System.IO.Path]::GetFullPath($gitDirectoryText).TrimEnd('\', '/')
+  }
+  return [System.IO.Path]::GetFullPath((Join-Path $Root $gitDirectoryText)).TrimEnd('\', '/')
+}
+
+function Get-DeployLockName {
+  param([Parameter(Mandatory)][string]$Root)
+
+  $normalizedRoot = [System.IO.Path]::GetFullPath($Root).TrimEnd('\', '/').Replace('\', '/').ToLowerInvariant()
+  $sha256 = [System.Security.Cryptography.SHA256]::Create()
+  try {
+    $hash = $sha256.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($normalizedRoot))
+  } finally {
+    $sha256.Dispose()
+  }
+  $hex = -join @($hash | ForEach-Object { $_.ToString('x2') })
+  return "Local\CodexPreviewV2Artifact_$hex"
+}
+
+function Enter-DeployPublishLock {
+  param(
+    [Parameter(Mandatory)][string]$Root,
+    [int]$TimeoutMilliseconds = 1000
+  )
+
+  $mutex = [System.Threading.Mutex]::new($false, (Get-DeployLockName -Root $Root))
+  $ownsMutex = $false
+  $lockStream = $null
+  $lockPath = $null
+  try {
+    try {
+      $ownsMutex = $mutex.WaitOne($TimeoutMilliseconds)
+    } catch [System.Threading.AbandonedMutexException] {
+      $ownsMutex = $true
+    }
+    if (-not $ownsMutex) {
+      throw 'Another V2 artifact publish holds the deploy-root mutex.'
+    }
+
+    $gitDirectory = Get-RepositoryGitDirectory -Root $Root
+    $lockPath = Join-Path $gitDirectory 'codex-preview-v2-artifact.lock'
+    try {
+      $lockStream = [System.IO.File]::Open(
+        $lockPath,
+        [System.IO.FileMode]::OpenOrCreate,
+        [System.IO.FileAccess]::ReadWrite,
+        [System.IO.FileShare]::None
+      )
+      $lockStream.SetLength(0)
+      $lockBytes = [System.Text.Encoding]::UTF8.GetBytes("PID=$PID`n")
+      $lockStream.Write($lockBytes, 0, $lockBytes.Length)
+      $lockStream.Flush($true)
+    } catch {
+      throw "Another V2 artifact publish holds the deploy-root file lock: $_"
+    }
+
+    return [pscustomobject]@{
+      Mutex = $mutex
+      OwnsMutex = $ownsMutex
+      FileStream = $lockStream
+      LockPath = $lockPath
+    }
+  } catch {
+    if ($null -ne $lockStream) { $lockStream.Dispose() }
+    if ($ownsMutex) {
+      try { $mutex.ReleaseMutex() } catch { Write-Warning "V2 artifact mutex release warning: $_" }
+    }
+    $mutex.Dispose()
+    throw
+  }
+}
+
+function Exit-DeployPublishLock {
+  param($Lock)
+
+  if ($null -eq $Lock) { return }
+  try {
+    if ($null -ne $Lock.FileStream) { $Lock.FileStream.Dispose() }
+    if ($Lock.LockPath -and (Test-Path -LiteralPath $Lock.LockPath -PathType Leaf)) {
+      Remove-Item -LiteralPath $Lock.LockPath -Force
+    }
+  } catch {
+    Write-Warning "V2 artifact file-lock cleanup warning: $_"
+  } finally {
+    try {
+      if ($Lock.OwnsMutex) { $Lock.Mutex.ReleaseMutex() }
+    } catch {
+      Write-Warning "V2 artifact mutex release warning: $_"
+    } finally {
+      $Lock.Mutex.Dispose()
+    }
+  }
+}
+
+function Assert-MutableSnapshotCas {
+  param(
+    [Parameter(Mandatory)][string]$Root,
+    [Parameter(Mandatory)][string[]]$Expected,
+    [Parameter(Mandatory)][string]$Phase
+  )
+
+  $current = Get-MutableDeploySnapshot -Root $Root
+  if (Compare-Object $Expected $current) {
+    throw "Deploy mutable-state CAS conflict before $Phase; concurrent bytes were preserved."
+  }
+}
+
+function Invoke-SelfTestLockHold {
+  param(
+    [Parameter(Mandatory)][string]$LockPath,
+    [Parameter(Mandatory)][string]$Scenario
+  )
+
+  if ($Scenario -ne 'HoldPublishLock') { return }
+  $readyPath = $LockPath + '.selftest.ready'
+  $releasePath = $LockPath + '.selftest.release'
+  Write-Utf8NoBom -Path $readyPath -Content 'ready'
+  $deadline = [DateTime]::UtcNow.AddSeconds(15)
+  try {
+    while (-not (Test-Path -LiteralPath $releasePath -PathType Leaf)) {
+      if ([DateTime]::UtcNow -ge $deadline) { throw 'Self-test publish-lock release timeout.' }
+      Start-Sleep -Milliseconds 50
+    }
+  } finally {
+    foreach ($markerPath in @($readyPath, $releasePath)) {
+      if (Test-Path -LiteralPath $markerPath) {
+        Remove-Item -LiteralPath $markerPath -Force -ErrorAction SilentlyContinue
+      }
+    }
+  }
+}
+
 function Assert-SelfTestScenarioAllowed {
   param(
     [Parameter(Mandatory)][string]$Scenario,
@@ -328,16 +470,22 @@ function Restore-DeployState {
     [Parameter(Mandatory)][string]$BackupRoot,
     [Parameter(Mandatory)][bool]$HadIndex,
     [Parameter(Mandatory)][bool]$HadReadme,
-    [Parameter(Mandatory)][bool]$HadV2
+    [Parameter(Mandatory)][bool]$HadV2,
+    [Parameter(Mandatory)][string[]]$ExpectedMutable
   )
 
+  $restoreExpected = @($ExpectedMutable)
   $deployV2 = Join-Path $Root 'v2'
   Assert-DirectDeployTarget -Root $Root -Path $deployV2 -AllowedNames @('v2')
   if (Test-Path -LiteralPath $deployV2) {
+    Assert-MutableSnapshotCas -Root $Root -Expected $restoreExpected -Phase 'rollback V2 removal'
     Remove-Item -LiteralPath $deployV2 -Recurse -Force
+    $restoreExpected = Get-MutableDeploySnapshot -Root $Root
   }
   if ($HadV2) {
-    Move-Item -LiteralPath (Join-Path $BackupRoot 'v2') -Destination $deployV2
+    Assert-MutableSnapshotCas -Root $Root -Expected $restoreExpected -Phase 'rollback V2 restoration'
+    Copy-Item -LiteralPath (Join-Path $BackupRoot 'v2') -Destination $deployV2 -Recurse
+    $restoreExpected = Get-MutableDeploySnapshot -Root $Root
   }
 
   foreach ($item in @(
@@ -347,14 +495,20 @@ function Restore-DeployState {
     $target = Join-Path $Root $item.Name
     Assert-DirectDeployTarget -Root $Root -Path $target -AllowedNames @('index.html', 'README.md')
     if ($item.HadFile) {
+      Assert-MutableSnapshotCas -Root $Root -Expected $restoreExpected -Phase "rollback $($item.Name) restoration"
       Copy-Item -LiteralPath (Join-Path $BackupRoot $item.Name) -Destination $target -Force
+      $restoreExpected = Get-MutableDeploySnapshot -Root $Root
     } elseif (Test-Path -LiteralPath $target) {
+      Assert-MutableSnapshotCas -Root $Root -Expected $restoreExpected -Phase "rollback $($item.Name) removal"
       Remove-Item -LiteralPath $target -Force
+      $restoreExpected = Get-MutableDeploySnapshot -Root $Root
     }
   }
+  return @($restoreExpected)
 }
 
 function Invoke-ArtifactSelfTest {
+  param([ValidateSet('All', 'Concurrency')][string]$Filter = 'All')
   $selfTestTempRoot = Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::LocalApplicationData)) 'Temp'
   $selfTestRoot = Join-Path $selfTestTempRoot ('beginner-budget-v2-artifact-selftest-' + [guid]::NewGuid().ToString('N'))
   $selfTestBuiltAt = '2026-08-12T00:00:00Z'
@@ -445,6 +599,58 @@ function Invoke-ArtifactSelfTest {
     return [pscustomobject]@{ ExitCode = $exitCode; Output = ($output -join "`n") }
   }
 
+  function Start-SelfTestBuild {
+    param($Fixture, [string[]]$ExtraArguments = @())
+    $arguments = @(
+      '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $PSCommandPath,
+      '-SourceRoot', $Fixture.Source, '-DeployRoot', $Fixture.Deploy,
+      '-SourceCommit', $Fixture.Commit, '-BuiltAtUtc', $selfTestBuiltAt
+    ) + $ExtraArguments
+    $powershellExecutable = (Get-Command powershell -CommandType Application -ErrorAction Stop).Source
+    $quotedArguments = @($arguments | ForEach-Object {
+      $argumentText = [string]$_
+      if ($argumentText -match '[\s"]') {
+        '"' + $argumentText.Replace('\', '\').Replace('"', '\"') + '"'
+      } else {
+        $argumentText
+      }
+    })
+    $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+    $startInfo.FileName = $powershellExecutable
+    $startInfo.Arguments = $quotedArguments -join ' '
+    $startInfo.UseShellExecute = $false
+    $startInfo.CreateNoWindow = $true
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+    $process = [System.Diagnostics.Process]::new()
+    $process.StartInfo = $startInfo
+    $oldSelfTestEnvironment = [Environment]::GetEnvironmentVariable(
+      'BEGINNER_BUDGET_ARTIFACT_SELF_TEST',
+      [EnvironmentVariableTarget]::Process
+    )
+    try {
+      [Environment]::SetEnvironmentVariable(
+        'BEGINNER_BUDGET_ARTIFACT_SELF_TEST', '1', [EnvironmentVariableTarget]::Process
+      )
+      if (-not $process.Start()) { throw 'Could not start artifact self-test subprocess.' }
+    } finally {
+      [Environment]::SetEnvironmentVariable(
+        'BEGINNER_BUDGET_ARTIFACT_SELF_TEST', $oldSelfTestEnvironment, [EnvironmentVariableTarget]::Process
+      )
+    }
+    return [pscustomobject]@{
+      Process = $process
+    }
+  }
+
+  function Get-SelfTestProcessOutput {
+    param($StartedProcess)
+    return @(
+      $StartedProcess.Process.StandardOutput.ReadToEnd()
+      $StartedProcess.Process.StandardError.ReadToEnd()
+    ) -join "`n"
+  }
+
   function Assert-SelfTestFailurePreservesDeploy {
     param($Fixture, [string[]]$ExtraArguments = @())
     $before = Get-SelfTestSnapshot $Fixture.Deploy
@@ -461,6 +667,7 @@ function Invoke-ArtifactSelfTest {
   try {
     New-Item -ItemType Directory -Path $selfTestRoot | Out-Null
 
+    if ($Filter -eq 'All') {
     $happy = New-SelfTestFixture 'happy'
     $happyResult = Invoke-SelfTestBuild $happy
     if ($happyResult.ExitCode -ne 0) { throw "Artifact happy self-test failed: $($happyResult.Output)" }
@@ -538,8 +745,93 @@ function Invoke-ArtifactSelfTest {
     if (-not (Test-Path -LiteralPath (Join-Path $cleanupFailure.Deploy 'v2/version.json'))) {
       throw 'Cleanup warning self-test did not retain the successful artifact.'
     }
+    }
 
-    Write-Output 'V2 artifact self-tests passed: happy, dirty, subdir, branch, stale, rollback, commit-bytes, concurrent, cleanup-warning'
+    $lockedFixture = New-SelfTestFixture 'publish-lock'
+    $lockFilePath = Join-Path $lockedFixture.Deploy '.git/codex-preview-v2-artifact.lock'
+    $readyPath = $lockFilePath + '.selftest.ready'
+    $releasePath = $lockFilePath + '.selftest.release'
+    $firstBuild = Start-SelfTestBuild $lockedFixture @('-SelfTestScenario', 'HoldPublishLock')
+    try {
+      $readyDeadline = [DateTime]::UtcNow.AddSeconds(20)
+      while (-not (Test-Path -LiteralPath $readyPath -PathType Leaf)) {
+        if ($firstBuild.Process.HasExited) {
+          $earlyOutput = Get-SelfTestProcessOutput $firstBuild
+          throw "First publish-lock self-test process exited early: $earlyOutput"
+        }
+        if ([DateTime]::UtcNow -ge $readyDeadline) { throw 'Publish-lock self-test ready timeout.' }
+        Start-Sleep -Milliseconds 50
+      }
+
+      $lockedBefore = Get-SelfTestSnapshot $lockedFixture.Deploy
+      $secondBuild = Invoke-SelfTestBuild $lockedFixture
+      if ($secondBuild.ExitCode -eq 0 -or -not $secondBuild.Output.Contains('holds the deploy-root mutex')) {
+        throw "Second concurrent artifact build did not fail on the publish lock: $($secondBuild.Output)"
+      }
+      if (Compare-Object $lockedBefore (Get-SelfTestSnapshot $lockedFixture.Deploy)) {
+        throw 'Second concurrent artifact build mutated deploy bytes while the first held the lock.'
+      }
+      Write-SelfTestFile -Path $releasePath -Content 'release'
+      if (-not $firstBuild.Process.WaitForExit(30000)) {
+        throw 'First publish-lock self-test process did not finish after release.'
+      }
+      $firstBuild.Process.Refresh()
+      $firstOutput = Get-SelfTestProcessOutput $firstBuild
+      if ($firstBuild.Process.ExitCode -ne 0) {
+        throw "First publish-lock self-test process failed after release: $firstOutput"
+      }
+      if (Test-Path -LiteralPath $lockFilePath -PathType Leaf) {
+        throw 'Publish-lock file remained after successful concurrent self-test.'
+      }
+    } finally {
+      if (-not $firstBuild.Process.HasExited) {
+        Write-SelfTestFile -Path $releasePath -Content 'release'
+        if (-not $firstBuild.Process.WaitForExit(5000)) {
+          Stop-Process -Id $firstBuild.Process.Id -Force -ErrorAction SilentlyContinue
+        }
+      }
+    }
+
+    $beforeFirstWrite = New-SelfTestFixture 'external-before-first-write'
+    $beforeFirstSnapshot = Get-SelfTestSnapshot $beforeFirstWrite.Deploy
+    $beforeFirstResult = Invoke-SelfTestBuild $beforeFirstWrite @('-SelfTestScenario', 'ExternalBeforeFirstWrite')
+    if ($beforeFirstResult.ExitCode -eq 0 -or -not $beforeFirstResult.Output.Contains('CAS conflict before V2 removal')) {
+      throw "External-before-first-write self-test did not fail at CAS: $($beforeFirstResult.Output)"
+    }
+    if ((Get-Content -Raw -LiteralPath (Join-Path $beforeFirstWrite.Deploy 'README.md')) -ne 'external bytes before first write') {
+      throw 'External-before-first-write self-test erased concurrent README bytes.'
+    }
+    $beforeFirstAfter = Get-SelfTestSnapshot $beforeFirstWrite.Deploy
+    if (Compare-Object @($beforeFirstSnapshot | Where-Object { -not $_.StartsWith('README.md ') }) `
+        @($beforeFirstAfter | Where-Object { -not $_.StartsWith('README.md ') })) {
+      throw 'External-before-first-write self-test made an artifact mutation before CAS rejection.'
+    }
+
+    $afterV2Swap = New-SelfTestFixture 'external-after-v2-swap'
+    $afterV2Result = Invoke-SelfTestBuild $afterV2Swap @(
+      '-SelfTestScenario', 'ExternalAfterV2Swap', '-FailureInjection', 'AfterV2Swap'
+    )
+    if ($afterV2Result.ExitCode -eq 0 `
+      -or -not $afterV2Result.Output.Contains('rollback refused or failed') `
+      -or -not $afterV2Result.Output.Contains('CAS conflict before rollback eligibility')) {
+      throw "External-after-V2-swap rollback self-test did not preserve the conflict: $($afterV2Result.Output)"
+    }
+    if ((Get-Content -Raw -LiteralPath (Join-Path $afterV2Swap.Deploy 'README.md')) -ne 'external bytes after V2 swap') {
+      throw 'Rollback erased concurrent README bytes after the V2 swap.'
+    }
+    if (-not (Test-Path -LiteralPath (Join-Path $afterV2Swap.Deploy 'v2/version.json')) `
+      -or (Test-Path -LiteralPath (Join-Path $afterV2Swap.Deploy 'v2/old.txt'))) {
+      throw 'Rollback-conflict self-test did not leave the explicit partial V2 state for human recovery.'
+    }
+    if ((Get-Content -Raw -LiteralPath (Join-Path $afterV2Swap.Deploy 'index.html')) -ne 'original root') {
+      throw 'Rollback-conflict self-test unexpectedly changed the root index.'
+    }
+
+    if ($Filter -eq 'Concurrency') {
+      Write-Output 'V2 artifact concurrency self-tests passed: publish-lock, CAS-conflicts'
+    } else {
+      Write-Output 'V2 artifact self-tests passed: happy, dirty, subdir, branch, stale, rollback, commit-bytes, prepublish, cleanup-warning, publish-lock, CAS-conflicts'
+    }
   } finally {
     if (Test-Path -LiteralPath $selfTestRoot) {
       $resolvedSelfTestRoot = (Resolve-Path -LiteralPath $selfTestRoot).Path
@@ -559,7 +851,7 @@ function Invoke-ArtifactSelfTest {
 }
 
 if ($SelfTest) {
-  Invoke-ArtifactSelfTest
+  Invoke-ArtifactSelfTest -Filter $SelfTestFilter
   exit 0
 }
 
@@ -621,6 +913,8 @@ $stagedV2Root = Join-Path $payloadRoot 'v2'
 $backupRoot = Join-Path $runRoot 'backup'
 $archivePath = Join-Path $runRoot 'source-commit.tar'
 $deployMutationStarted = $false
+$publishLock = $null
+$lastWrittenExpected = @($mutableBefore)
 $hadIndex = Test-Path -LiteralPath (Join-Path $deployRoot 'index.html') -PathType Leaf
 $hadReadme = Test-Path -LiteralPath (Join-Path $deployRoot 'README.md') -PathType Leaf
 $hadV2 = Test-Path -LiteralPath (Join-Path $deployRoot 'v2') -PathType Container
@@ -664,28 +958,50 @@ try {
   $expectedMutableAfter = Get-MutableDeploySnapshot -Root $payloadRoot
   Assert-SourceStable -Root $sourceRoot -ExpectedCommit $sourceCommitNormalized
 
+  $publishLock = Enter-DeployPublishLock -Root $deployRoot
+  Invoke-SelfTestLockHold -LockPath $publishLock.LockPath -Scenario $SelfTestScenario
   if ($SelfTestScenario -eq 'DeployReadmeBeforePublish') {
     Write-Utf8NoBom -Path (Join-Path $deployRoot 'README.md') -Content 'concurrent deploy mutation'
   }
   Assert-DeployStableBeforePublish -Root $deployRoot -ExpectedHead $deployHeadBefore `
     -V1Root $v1Root -ExpectedV1 $v1Before -ExpectedMutable $mutableBefore
+  $lastWrittenExpected = Get-MutableDeploySnapshot -Root $deployRoot
 
   if ($hadIndex) { Copy-Item -LiteralPath (Join-Path $deployRoot 'index.html') -Destination (Join-Path $backupRoot 'index.html') }
   if ($hadReadme) { Copy-Item -LiteralPath (Join-Path $deployRoot 'README.md') -Destination (Join-Path $backupRoot 'README.md') }
   if ($hadV2) { Copy-Item -LiteralPath (Join-Path $deployRoot 'v2') -Destination (Join-Path $backupRoot 'v2') -Recurse }
 
+  if ($SelfTestScenario -eq 'ExternalBeforeFirstWrite') {
+    Write-Utf8NoBom -Path (Join-Path $deployRoot 'README.md') -Content 'external bytes before first write'
+  }
+
   $deployV2 = Join-Path $deployRoot 'v2'
   Assert-DirectDeployTarget -Root $deployRoot -Path $deployV2 -AllowedNames @('v2')
+  if ($hadV2) {
+    Assert-MutableSnapshotCas -Root $deployRoot -Expected $lastWrittenExpected -Phase 'V2 removal'
+    $deployMutationStarted = $true
+    Remove-Item -LiteralPath $deployV2 -Recurse -Force
+    $lastWrittenExpected = Get-MutableDeploySnapshot -Root $deployRoot
+  }
+  Assert-MutableSnapshotCas -Root $deployRoot -Expected $lastWrittenExpected -Phase 'V2 publish'
   $deployMutationStarted = $true
-  if ($hadV2) { Remove-Item -LiteralPath $deployV2 -Recurse -Force }
   Move-Item -LiteralPath $stagedV2Root -Destination $deployV2
+  $lastWrittenExpected = Get-MutableDeploySnapshot -Root $deployRoot
+  if ($SelfTestScenario -eq 'ExternalAfterV2Swap') {
+    Write-Utf8NoBom -Path (Join-Path $deployRoot 'README.md') -Content 'external bytes after V2 swap'
+  }
   if ($FailureInjection -eq 'AfterV2Swap') { throw 'Injected artifact failure after V2 swap.' }
 
+  Assert-MutableSnapshotCas -Root $deployRoot -Expected $lastWrittenExpected -Phase 'root index publish'
   Copy-Item -LiteralPath (Join-Path $payloadRoot 'index.html') -Destination (Join-Path $deployRoot 'index.html') -Force
+  $lastWrittenExpected = Get-MutableDeploySnapshot -Root $deployRoot
   if ($FailureInjection -eq 'AfterIndexWrite') { throw 'Injected artifact failure after index write.' }
+  Assert-MutableSnapshotCas -Root $deployRoot -Expected $lastWrittenExpected -Phase 'README publish'
   Copy-Item -LiteralPath (Join-Path $payloadRoot 'README.md') -Destination (Join-Path $deployRoot 'README.md') -Force
+  $lastWrittenExpected = Get-MutableDeploySnapshot -Root $deployRoot
   if ($FailureInjection -eq 'AfterReadmeWrite') { throw 'Injected artifact failure after README write.' }
 
+  Assert-MutableSnapshotCas -Root $deployRoot -Expected $lastWrittenExpected -Phase 'final validation'
   Assert-V2Artifact -ArtifactRoot $deployV2 -ExpectedCommit $sourceCommitNormalized -ExpectedBuiltAt $BuiltAtUtc
   Assert-CommitMatchesArtifact -Source $sourceRoot -Commit $sourceCommitNormalized -ArtifactRoot $deployV2
   if (Compare-Object $expectedMutableAfter (Get-MutableDeploySnapshot -Root $deployRoot)) {
@@ -704,16 +1020,19 @@ try {
   $operationError = $_
   if ($deployMutationStarted) {
     try {
-      Restore-DeployState -Root $deployRoot -BackupRoot $backupRoot -HadIndex $hadIndex -HadReadme $hadReadme -HadV2 $hadV2
+      Assert-MutableSnapshotCas -Root $deployRoot -Expected $lastWrittenExpected -Phase 'rollback eligibility'
+      $null = Restore-DeployState -Root $deployRoot -BackupRoot $backupRoot -HadIndex $hadIndex `
+        -HadReadme $hadReadme -HadV2 $hadV2 -ExpectedMutable $lastWrittenExpected
       if (Compare-Object $mutableBefore (Get-MutableDeploySnapshot -Root $deployRoot)) {
         throw 'Restored deploy files do not match their pre-run hashes.'
       }
     } catch {
-      throw "Artifact creation failed and rollback also failed. Original: $operationError Rollback: $_"
+      throw "Artifact creation failed; rollback refused or failed so concurrent bytes remain untouched. Original: $operationError Recovery: $_"
     }
   }
   throw $operationError
 } finally {
+  Exit-DeployPublishLock -Lock $publishLock
   try {
     if (Test-Path -LiteralPath $runRoot) {
       $resolvedRunRoot = (Resolve-Path -LiteralPath $runRoot).Path
