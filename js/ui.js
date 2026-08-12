@@ -458,7 +458,7 @@
           )
         )
       ) return false;
-      current = current.parentElement || current.parentNode;
+      current = current.parentElement;
     }
     return true;
   }
@@ -579,12 +579,10 @@
     const nextOccurrenceAction = focusState && focusState.nextTransactionId
       ? actions.find((button) => button.dataset.recurringTransactionId === focusState.nextTransactionId)
       : null;
-    const remainingAction = actions.find((button) => button.dataset.recurringTransactionId !== transactionId);
     focusFirstEligible([
       focusState && focusState.element,
       sameOccurrenceAction,
       nextOccurrenceAction,
-      remainingAction,
       elements.recurringUpcomingHeading
     ]);
   }

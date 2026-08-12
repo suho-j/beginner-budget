@@ -115,6 +115,10 @@ function createUiContext() {
       this.open = false;
     }
 
+    get parentElement() {
+      return this.parentNode instanceof FakeElement ? this.parentNode : null;
+    }
+
     set textContent(value) {
       this._textContent = String(value);
       this.children.forEach((child) => { child.parentNode = null; });
@@ -232,8 +236,8 @@ function createUiContext() {
     closest(selector) {
       let current = this;
       while (current) {
-        if (current.matches(selector)) return current;
-        current = current.parentNode;
+        if (typeof current.matches === 'function' && current.matches(selector)) return current;
+        current = current.parentElement;
       }
       return null;
     }
@@ -249,9 +253,12 @@ function createUiContext() {
         if (
           current.hidden
           || current.inert
-          || current.getAttribute('aria-hidden') === 'true'
+          || (
+            typeof current.getAttribute === 'function'
+            && current.getAttribute('aria-hidden') === 'true'
+          )
         ) return;
-        current = current.parentNode;
+        current = current.parentElement;
       }
       if (this.disabled) return;
       this.ownerDocument.activeElement = this;
@@ -269,6 +276,7 @@ function createUiContext() {
 
   document = {
     activeElement: null,
+    hidden: false,
     createElement(tagName) {
       const element = new FakeElement(tagName);
       element.ownerDocument = document;
@@ -285,6 +293,7 @@ function createUiContext() {
     }
   };
   document.body = document.createElement('body');
+  document.body.parentNode = document;
 
   const window = {
     BudgetStorage: {
@@ -2935,6 +2944,14 @@ function testUiRecurringDialogsAndTemplateFocusFlow() {
   const { window, document } = createUiContext();
   const { elements } = createRecurringUiDom(window, document);
   const [first, second] = recurringOccurrencesFixture();
+  const third = {
+    ...second,
+    templateId: 'rt-third',
+    scheduledDate: '2026-08-22',
+    transactionId: 'tx-recurring-rt-third-2026-08',
+    memo: '세 번째 예정',
+    amount: 33000
+  };
   window.BudgetUI.renderUpcomingRecurringExpenses(elements, [first, second]);
   let firstAction = elements.recurringUpcomingList.querySelector('[data-recurring-transaction-id="tx-recurring-rt-malicious-2026-08"]');
 
@@ -3016,6 +3033,50 @@ function testUiRecurringDialogsAndTemplateFocusFlow() {
   disabledRenderedNext.disabled = true;
   window.BudgetUI.closeRecurringConfirmDialog(elements);
   assert.strictEqual(document.activeElement, elements.recurringUpcomingHeading, 'aria-hidden ancestors are skipped');
+
+  window.BudgetUI.renderUpcomingRecurringExpenses(elements, [first, second, third]);
+  let threeActions = elements.recurringUpcomingList.querySelectorAll('[data-action="record-recurring-expense"]');
+  window.BudgetUI.openRecurringConfirmDialog(elements, second, threeActions[1]);
+  window.BudgetUI.renderUpcomingRecurringExpenses(elements, [first, second, third]);
+  threeActions = elements.recurringUpcomingList.querySelectorAll('[data-action="record-recurring-expense"]');
+  threeActions[1].disabled = true;
+  threeActions[2].disabled = true;
+  window.BudgetUI.closeRecurringConfirmDialog(elements);
+  assert.strictEqual(
+    document.activeElement,
+    elements.recurringUpcomingHeading,
+    'middle cancel skips disabled same and captured-next actions without moving to the previous occurrence'
+  );
+
+  window.BudgetUI.renderUpcomingRecurringExpenses(elements, [first, second, third]);
+  threeActions = elements.recurringUpcomingList.querySelectorAll('[data-action="record-recurring-expense"]');
+  window.BudgetUI.openRecurringConfirmDialog(elements, second, threeActions[1]);
+  window.BudgetUI.renderUpcomingRecurringExpenses(elements, [first]);
+  window.BudgetUI.closeRecurringConfirmDialog(elements);
+  assert.strictEqual(
+    document.activeElement,
+    elements.recurringUpcomingHeading,
+    'middle cancel never falls back to an eligible previous occurrence'
+  );
+
+  window.BudgetUI.renderUpcomingRecurringExpenses(elements, [first, second, third]);
+  threeActions = elements.recurringUpcomingList.querySelectorAll('[data-action="record-recurring-expense"]');
+  window.BudgetUI.openRecurringConfirmDialog(elements, third, threeActions[2]);
+  window.BudgetUI.renderUpcomingRecurringExpenses(elements, [first, second]);
+  window.BudgetUI.closeRecurringConfirmDialog(elements);
+  assert.strictEqual(
+    document.activeElement,
+    elements.recurringUpcomingHeading,
+    'last cancel never falls back to an eligible previous occurrence'
+  );
+
+  document.hidden = true;
+  window.BudgetUI.renderUpcomingRecurringExpenses(elements, [first]);
+  firstAction = elements.recurringUpcomingList.querySelector('[data-action="record-recurring-expense"]');
+  window.BudgetUI.openRecurringConfirmDialog(elements, first, firstAction);
+  window.BudgetUI.closeRecurringConfirmDialog(elements);
+  assert.strictEqual(document.activeElement, firstAction, 'Page Visibility does not hide visible element targets');
+  document.hidden = false;
 
   window.BudgetUI.renderUpcomingRecurringExpenses(elements, [first]);
   firstAction = elements.recurringUpcomingList.querySelector('[data-action="record-recurring-expense"]');
