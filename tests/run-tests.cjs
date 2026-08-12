@@ -782,6 +782,308 @@ function testRecurringDatesClampLeapYearsAndBudgetBoundaries() {
   assert.strictEqual(storage.scheduledDateForMonth('2026-06', 5.5), '');
 }
 
+function testRecurringTemplateCrudValidatesAndPreservesIdentity() {
+  const win = createContext();
+  const original = win.BudgetStorage.normalizeState({
+    transactions: [
+      { id: 'tx-existing', date: '2026-05-03', type: 'expense', category: '생활비', amount: 5000, memo: '기존 거래', source: 'user' }
+    ],
+    recurringExpenseTemplates: [
+      { id: 'rt-other', memo: '통신비', category: '비상금', amount: 30000, dayOfMonth: 20, startsOn: '2026-01-01' }
+    ]
+  });
+  const originalSnapshot = JSON.stringify(original);
+
+  assert.deepStrictEqual(plain(win.BudgetTransactions.canonicalizeRecurringExpenseTemplateInput({
+    memo: '  월세  ', category: '  생활비  ', amount: '550,000', dayOfMonth: '05'
+  })), { memo: '월세', category: '생활비', amount: 550000, dayOfMonth: 5 });
+
+  const added = win.BudgetTransactions.addRecurringExpenseTemplate(original, {
+    memo: '  월세  ', category: '생활비', amount: '550,000', dayOfMonth: '5'
+  }, new Date(2026, 4, 9, 23, 30));
+  assert.strictEqual(added.ok, true);
+  assert.match(added.template.id, /^rt-[A-Za-z0-9._:-]+$/);
+  assert.match(win.BudgetStorage.createId(), /^tx-[A-Za-z0-9._:-]+$/);
+  assert.deepStrictEqual(plain(added.template), {
+    id: added.template.id,
+    memo: '월세',
+    category: '생활비',
+    amount: 550000,
+    dayOfMonth: 5,
+    startsOn: '2026-05-09'
+  });
+  assert.notStrictEqual(added.state, original);
+  assert.notStrictEqual(added.state.recurringExpenseTemplates, original.recurringExpenseTemplates);
+  assert.strictEqual(added.state.transactions, original.transactions);
+  assert.strictEqual(JSON.stringify(original), originalSnapshot);
+
+  const invalidInput = { memo: '   ', category: '월급', amount: '0', dayOfMonth: '1.5' };
+  const invalidValidation = win.BudgetTransactions.validateRecurringExpenseTemplate(invalidInput);
+  assert.strictEqual(invalidValidation.valid, false);
+  assert.deepStrictEqual(plain(invalidValidation.errors.map((item) => item.field)), [
+    'memo', 'category', 'amount', 'dayOfMonth'
+  ]);
+  assert.strictEqual(invalidValidation.errors.every((item) => (
+    Object.keys(item).sort().join(',') === 'field,message' && typeof item.message === 'string' && item.message.length > 0
+  )), true);
+  const tooLong = win.BudgetTransactions.validateRecurringExpenseTemplate({
+    memo: '가'.repeat(win.BudgetStorage.MAX_MEMO_LENGTH + 1),
+    category: '생활비',
+    amount: 1,
+    dayOfMonth: 1
+  });
+  assert.strictEqual(tooLong.valid, false);
+  assert.strictEqual(tooLong.errors[0].field, 'memo');
+  const invalidAdd = win.BudgetTransactions.addRecurringExpenseTemplate(original, invalidInput, new Date(2026, 4, 9));
+  assert.strictEqual(invalidAdd.ok, false);
+  assert.strictEqual(invalidAdd.state, original);
+
+  const updated = win.BudgetTransactions.updateRecurringExpenseTemplate(added.state, added.template.id, {
+    id: 'rt-replacement-is-ignored',
+    startsOn: '2099-12-31',
+    memo: '  관리비  ',
+    category: '비상금',
+    amount: '45,000',
+    dayOfMonth: '31'
+  });
+  assert.strictEqual(updated.ok, true);
+  assert.deepStrictEqual(plain(updated.template), {
+    id: added.template.id,
+    memo: '관리비',
+    category: '비상금',
+    amount: 45000,
+    dayOfMonth: 31,
+    startsOn: '2026-05-09'
+  });
+  assert.strictEqual(updated.state.recurringExpenseTemplates[0], added.state.recurringExpenseTemplates[0]);
+  assert.strictEqual(added.state.recurringExpenseTemplates.at(-1).memo, '월세');
+  assert.strictEqual(updated.state.transactions, added.state.transactions);
+
+  const missing = win.BudgetTransactions.updateRecurringExpenseTemplate(added.state, 'rt-missing', {
+    memo: '관리비', category: '비상금', amount: 45000, dayOfMonth: 31
+  });
+  assert.strictEqual(missing.ok, false);
+  assert.strictEqual(missing.state, added.state);
+  assert.strictEqual(missing.errors[0].field, 'recurringExpenseTemplate');
+
+  const beforeDelete = JSON.stringify(updated.state);
+  const deleted = win.BudgetTransactions.deleteRecurringExpenseTemplate(updated.state, added.template.id);
+  assert.notStrictEqual(deleted, updated.state);
+  assert.notStrictEqual(deleted.recurringExpenseTemplates, updated.state.recurringExpenseTemplates);
+  assert.deepStrictEqual(plain(deleted.recurringExpenseTemplates.map((template) => template.id)), ['rt-other']);
+  assert.strictEqual(deleted.transactions, updated.state.transactions);
+  assert.strictEqual(JSON.stringify(updated.state), beforeDelete);
+
+  const fullState = {
+    ...original,
+    recurringExpenseTemplates: Array.from({ length: 100 }, (_, index) => ({
+      id: `rt-cap-${index}`,
+      memo: `반복 ${index}`,
+      category: '생활비',
+      amount: index + 1,
+      dayOfMonth: 1,
+      startsOn: '2026-01-01'
+    }))
+  };
+  const fullSnapshot = JSON.stringify(fullState);
+  const capped = win.BudgetTransactions.addRecurringExpenseTemplate(fullState, {
+    memo: '추가 반복', category: '생활비', amount: 1000, dayOfMonth: 1
+  }, new Date(2026, 4, 9));
+  assert.strictEqual(capped.ok, false);
+  assert.strictEqual(capped.state, fullState);
+  assert.strictEqual(capped.errors[0].field, 'recurringExpenseTemplates');
+  assert.match(capped.errors[0].message, /100/);
+  assert.strictEqual(JSON.stringify(fullState), fullSnapshot);
+}
+
+function testRecurringOccurrencesUseDeterministicIdsAndStatuses() {
+  const win = createContext();
+  const today = new Date(2026, 5, 5, 12, 0);
+  const dayFiveState = win.BudgetStorage.normalizeState({
+    monthStartDay: 25,
+    recurringExpenseTemplates: [
+      { id: 'rt-day-five', memo: '정기 결제', category: '생활비', amount: 5000, dayOfMonth: 5, startsOn: '2026-01-01' }
+    ],
+    transactions: []
+  });
+  const selectedPeriod = win.BudgetTransactions.deriveRecurringExpenseOccurrences(dayFiveState, '2026-05', today);
+  const adjacentPeriod = win.BudgetTransactions.deriveRecurringExpenseOccurrences(dayFiveState, '2026-06', today);
+  assert.deepStrictEqual(plain(selectedPeriod.map((item) => item.scheduledDate)), ['2026-06-05']);
+  assert.deepStrictEqual(plain(adjacentPeriod.map((item) => item.scheduledDate)), ['2026-07-05']);
+  assert.strictEqual(selectedPeriod[0].transactionId, 'tx-recurring-rt-day-five-2026-06');
+  assert.strictEqual(adjacentPeriod.some((item) => item.transactionId === selectedPeriod[0].transactionId), false);
+  assert.strictEqual(win.BudgetTransactions.recurringTransactionId('rt-day-five', '2026-06'), 'tx-recurring-rt-day-five-2026-06');
+  assert.strictEqual(win.BudgetTransactions.recurringTransactionId('tx-wrong', '2026-06'), '');
+  assert.strictEqual(win.BudgetTransactions.recurringTransactionId('rt-day-five', '2026-13'), '');
+
+  const actualRecorded = {
+    id: 'tx-recurring-rt-recorded-2026-05',
+    date: '2026-06-20',
+    type: 'expense',
+    category: '배달비',
+    amount: 98765,
+    memo: '실제 확정값',
+    source: 'user'
+  };
+  const statusState = win.BudgetStorage.normalizeState({
+    monthStartDay: 25,
+    recurringExpenseTemplates: [
+      { id: 'rt-recorded', memo: '기록됨', category: '생활비', amount: 1000, dayOfMonth: 26, startsOn: '2026-01-01' },
+      { id: 'rt-overdue-early', memo: '먼저', category: '생활비', amount: 2000, dayOfMonth: 27, startsOn: '2026-01-01' },
+      { id: 'rt-overdue-b', memo: 'B 메모', category: '생활비', amount: 3000, dayOfMonth: 1, startsOn: '2026-01-01' },
+      { id: 'rt-overdue-a2', memo: 'A 메모', category: '생활비', amount: 4000, dayOfMonth: 1, startsOn: '2026-01-01' },
+      { id: 'rt-overdue-a1', memo: 'A 메모', category: '생활비', amount: 5000, dayOfMonth: 1, startsOn: '2026-01-01' },
+      { id: 'rt-today', memo: '오늘', category: '생활비', amount: 6000, dayOfMonth: 5, startsOn: '2026-01-01' },
+      { id: 'rt-upcoming', memo: '예정', category: '생활비', amount: 7000, dayOfMonth: 10, startsOn: '2026-01-01' }
+    ],
+    transactions: [actualRecorded]
+  });
+  const occurrences = win.BudgetTransactions.deriveRecurringExpenseOccurrences(statusState, '2026-05', today);
+  assert.deepStrictEqual(plain(occurrences.map((item) => (
+    `${item.status}:${item.scheduledDate}:${item.memo}:${item.templateId}`
+  ))), [
+    'overdue:2026-05-27:먼저:rt-overdue-early',
+    'overdue:2026-06-01:A 메모:rt-overdue-a1',
+    'overdue:2026-06-01:A 메모:rt-overdue-a2',
+    'overdue:2026-06-01:B 메모:rt-overdue-b',
+    'today:2026-06-05:오늘:rt-today',
+    'upcoming:2026-06-10:예정:rt-upcoming',
+    'recorded:2026-05-26:기록됨:rt-recorded'
+  ]);
+  const recorded = occurrences.at(-1);
+  assert.strictEqual(recorded.transactionId, 'tx-recurring-rt-recorded-2026-05');
+  assert.strictEqual(recorded.amount, 1000);
+  assert.deepStrictEqual(plain(recorded.transaction), actualRecorded);
+  assert.deepStrictEqual(Object.keys(plain(recorded)), [
+    'templateId', 'scheduledMonth', 'scheduledDate', 'transactionId', 'memo', 'category', 'amount', 'status', 'transaction'
+  ]);
+
+  const editedDayState = win.BudgetStorage.normalizeState({
+    ...statusState,
+    recurringExpenseTemplates: statusState.recurringExpenseTemplates.map((template) => (
+      template.id === 'rt-recorded' ? { ...template, dayOfMonth: 31 } : template
+    ))
+  });
+  const afterDayEdit = win.BudgetTransactions.deriveRecurringExpenseOccurrences(editedDayState, '2026-05', today)
+    .find((item) => item.templateId === 'rt-recorded');
+  assert.strictEqual(afterDayEdit.scheduledMonth, '2026-05');
+  assert.strictEqual(afterDayEdit.scheduledDate, '2026-05-31');
+  assert.strictEqual(afterDayEdit.transactionId, 'tx-recurring-rt-recorded-2026-05');
+  assert.strictEqual(afterDayEdit.status, 'recorded');
+  assert.deepStrictEqual(plain(afterDayEdit.transaction), actualRecorded);
+
+  const startsOnState = win.BudgetStorage.normalizeState({
+    monthStartDay: 25,
+    recurringExpenseTemplates: [
+      { id: 'rt-too-early', memo: '아직 시작 전', category: '생활비', amount: 1000, dayOfMonth: 1, startsOn: '2026-06-02' },
+      { id: 'rt-after-start', memo: '시작 후', category: '생활비', amount: 1000, dayOfMonth: 10, startsOn: '2026-06-02' }
+    ]
+  });
+  const afterStartsOn = win.BudgetTransactions.deriveRecurringExpenseOccurrences(startsOnState, '2026-05', today);
+  assert.deepStrictEqual(plain(afterStartsOn.map((item) => item.templateId)), ['rt-after-start']);
+}
+
+function testRecurringTransactionCandidateValidatesWithoutChangingSummaries() {
+  const win = createContext();
+  const state = win.BudgetStorage.normalizeState({
+    monthStartDay: 25,
+    recurringExpenseTemplates: [
+      { id: 'rt-rent', memo: '월세', category: '생활비', amount: 500000, dayOfMonth: 5, startsOn: '2026-01-01' }
+    ],
+    transactions: [
+      { id: 'tx-existing', date: '2026-05-30', type: 'expense', category: '생활비', amount: 1000, memo: '기존', source: 'user' }
+    ]
+  });
+  const snapshot = JSON.stringify(state);
+  const monthBudget = win.BudgetStorage.budgetForMonth(state, '2026-05');
+  const beforeSummary = win.BudgetTransactions.summarize(
+    state.transactions,
+    monthBudget.monthlyBudget,
+    '2026-05',
+    new Date(2026, 5, 1),
+    monthBudget.categoryBudgets,
+    state.monthStartDay
+  );
+  const occurrence = win.BudgetTransactions.deriveRecurringExpenseOccurrences(
+    state, '2026-05', new Date(2026, 5, 1)
+  )[0];
+  const afterDeriveSummary = win.BudgetTransactions.summarize(
+    state.transactions,
+    monthBudget.monthlyBudget,
+    '2026-05',
+    new Date(2026, 5, 1),
+    monthBudget.categoryBudgets,
+    state.monthStartDay
+  );
+  assert.deepStrictEqual(plain(afterDeriveSummary), plain(beforeSummary));
+  assert.strictEqual(JSON.stringify(state), snapshot);
+
+  const confirmed = win.BudgetTransactions.addRecurringExpenseTransaction(state, occurrence, {
+    date: '2026-06-07',
+    type: 'income',
+    category: '배달비',
+    amount: '12,000',
+    memo: '  실제 결제  '
+  });
+  assert.strictEqual(confirmed.ok, true);
+  assert.deepStrictEqual(plain(confirmed.transaction), {
+    id: 'tx-recurring-rt-rent-2026-06',
+    date: '2026-06-07',
+    type: 'expense',
+    category: '배달비',
+    amount: 12000,
+    memo: '실제 결제',
+    source: 'user'
+  });
+  assert.notStrictEqual(confirmed.state, state);
+  assert.notStrictEqual(confirmed.state.transactions, state.transactions);
+  assert.strictEqual(confirmed.state.transactions.length, state.transactions.length + 1);
+  assert.strictEqual(confirmed.state.transactions[0], confirmed.transaction);
+  assert.strictEqual(JSON.stringify(state), snapshot);
+  const afterSummary = win.BudgetTransactions.summarize(
+    confirmed.state.transactions,
+    monthBudget.monthlyBudget,
+    '2026-05',
+    new Date(2026, 5, 1),
+    monthBudget.categoryBudgets,
+    state.monthStartDay
+  );
+  assert.strictEqual(afterSummary.expense, beforeSummary.expense + 12000);
+  assert.strictEqual(afterSummary.count, beforeSummary.count + 1);
+
+  const invalidIdentity = win.BudgetTransactions.addRecurringExpenseTransaction(state, {
+    ...occurrence,
+    scheduledDate: '2026-06-06',
+    transactionId: 'tx-recurring-rt-rent-2026-05'
+  }, {
+    date: '2026-06-07', category: '생활비', amount: 1000, memo: ''
+  });
+  assert.strictEqual(invalidIdentity.ok, false);
+  assert.strictEqual(invalidIdentity.state, state);
+  assert.strictEqual(invalidIdentity.transaction, null);
+  assert.strictEqual(invalidIdentity.errors[0].field, 'recurringExpenseOccurrence');
+
+  const invalidForm = win.BudgetTransactions.addRecurringExpenseTransaction(state, occurrence, {
+    date: '2026-02-30',
+    category: '월급',
+    amount: '0',
+    memo: '가'.repeat(win.BudgetStorage.MAX_MEMO_LENGTH + 1)
+  });
+  assert.strictEqual(invalidForm.ok, false);
+  assert.strictEqual(invalidForm.state, state);
+  assert.deepStrictEqual(plain(invalidForm.errors.map((item) => item.field)), ['date', 'category', 'amount', 'memo']);
+
+  const confirmedSnapshot = JSON.stringify(confirmed.state);
+  const duplicate = win.BudgetTransactions.addRecurringExpenseTransaction(confirmed.state, occurrence, {
+    date: '2026-06-08', category: '생활비', amount: '1,000', memo: '중복'
+  });
+  assert.strictEqual(duplicate.ok, false);
+  assert.strictEqual(duplicate.state, confirmed.state);
+  assert.strictEqual(duplicate.transaction, null);
+  assert.strictEqual(duplicate.errors[0].field, 'transaction');
+  assert.strictEqual(JSON.stringify(confirmed.state), confirmedSnapshot);
+}
+
 function testNormalizationDropsInvalidRowsAndDeduplicatesIds() {
   const win = createContext();
   const state = win.BudgetStorage.normalizeState({
@@ -2919,6 +3221,9 @@ const tests = [
   testV2StatePromotesV1AndNormalizesRecurringTemplates,
   testRecurringTemplateNormalizationDropsInvalidDuplicatesAndCapsAt100,
   testRecurringDatesClampLeapYearsAndBudgetBoundaries,
+  testRecurringTemplateCrudValidatesAndPreservesIdentity,
+  testRecurringOccurrencesUseDeterministicIdsAndStatuses,
+  testRecurringTransactionCandidateValidatesWithoutChangingSummaries,
   testNormalizationDropsInvalidRowsAndDeduplicatesIds,
   testTransactionIdsUseSafeOpaqueAsciiContract,
   testDatabaseIntegerBoundsAreEnforced,

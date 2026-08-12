@@ -59,6 +59,243 @@
     return { valid: errors.length === 0, errors, value: normalized };
   }
 
+  function canonicalizeRecurringExpenseTemplateInput(input = {}) {
+    const value = input && typeof input === 'object' ? input : {};
+    const rawDayOfMonth = value.dayOfMonth;
+    const dayOfMonth = (
+      typeof rawDayOfMonth === 'number'
+      || (typeof rawDayOfMonth === 'string' && rawDayOfMonth.trim() !== '')
+    ) ? Number(rawDayOfMonth) : NaN;
+    return {
+      memo: String(value.memo || '').trim(),
+      category: String(value.category || '').trim(),
+      amount: parseMoneyInput(value.amount),
+      dayOfMonth
+    };
+  }
+
+  function validateRecurringExpenseTemplate(input) {
+    const errors = [];
+    const normalized = canonicalizeRecurringExpenseTemplateInput(input);
+
+    if (!normalized.memo || normalized.memo.length > window.BudgetStorage.MAX_MEMO_LENGTH) {
+      errors.push(error('memo', '메모는 1자 이상 80자 이내로 입력해 주세요.'));
+    }
+    if (!EXPENSE_CATEGORIES.includes(normalized.category)) {
+      errors.push(error('category', '지출 카테고리를 골라 주세요.'));
+    }
+    if (!window.BudgetStorage.isPositiveInteger(normalized.amount)) {
+      errors.push(error('amount', '금액은 1원 이상 2,147,483,647원 이하의 숫자로 입력해 주세요. 쉼표(예: 12,000)도 사용할 수 있어요.'));
+    }
+    if (!Number.isInteger(normalized.dayOfMonth) || normalized.dayOfMonth < 1 || normalized.dayOfMonth > 31) {
+      errors.push(error('dayOfMonth', '발생일은 1일부터 31일 사이로 입력해 주세요.'));
+    }
+
+    return { valid: errors.length === 0, errors, value: normalized };
+  }
+
+  function addRecurringExpenseTemplate(state, input, today = new Date()) {
+    const validation = validateRecurringExpenseTemplate(input);
+    if (!validation.valid) {
+      return { state, ok: false, template: null, errors: validation.errors };
+    }
+
+    const templates = Array.isArray(state.recurringExpenseTemplates) ? state.recurringExpenseTemplates : [];
+    if (templates.length >= window.BudgetStorage.MAX_RECURRING_EXPENSE_TEMPLATES) {
+      return {
+        state,
+        ok: false,
+        template: null,
+        errors: [error('recurringExpenseTemplates', '반복 지출은 최대 100개까지 등록할 수 있어요.')]
+      };
+    }
+
+    const template = {
+      id: window.BudgetStorage.createId('rt'),
+      ...validation.value,
+      startsOn: window.BudgetStorage.localDateString(today)
+    };
+    return {
+      state: { ...state, recurringExpenseTemplates: [...templates, template] },
+      ok: true,
+      template,
+      errors: []
+    };
+  }
+
+  function updateRecurringExpenseTemplate(state, id, input) {
+    const templates = Array.isArray(state.recurringExpenseTemplates) ? state.recurringExpenseTemplates : [];
+    const index = templates.findIndex((template) => template.id === id);
+    if (index < 0) {
+      return {
+        state,
+        ok: false,
+        template: null,
+        errors: [error('recurringExpenseTemplate', '수정할 반복 지출을 찾지 못했어요.')]
+      };
+    }
+
+    const validation = validateRecurringExpenseTemplate(input);
+    if (!validation.valid) {
+      return { state, ok: false, template: null, errors: validation.errors };
+    }
+
+    const previous = templates[index];
+    const template = {
+      id: previous.id,
+      ...validation.value,
+      startsOn: previous.startsOn
+    };
+    const recurringExpenseTemplates = templates.slice();
+    recurringExpenseTemplates[index] = template;
+    return {
+      state: { ...state, recurringExpenseTemplates },
+      ok: true,
+      template,
+      errors: []
+    };
+  }
+
+  function deleteRecurringExpenseTemplate(state, id) {
+    const templates = Array.isArray(state.recurringExpenseTemplates) ? state.recurringExpenseTemplates : [];
+    return {
+      ...state,
+      recurringExpenseTemplates: templates.filter((template) => template.id !== id)
+    };
+  }
+
+  function recurringTransactionId(templateId, scheduledMonth) {
+    if (
+      typeof templateId !== 'string'
+      || !window.BudgetStorage.RECURRING_TEMPLATE_ID_PATTERN.test(templateId)
+      || !window.BudgetStorage.isValidMonthString(scheduledMonth)
+    ) {
+      return '';
+    }
+    return `tx-recurring-${templateId}-${scheduledMonth}`;
+  }
+
+  function deriveRecurringExpenseOccurrences(state, budgetMonth, today = new Date()) {
+    if (!window.BudgetStorage.isValidMonthString(budgetMonth)) return [];
+
+    const normalized = window.BudgetStorage.normalizeState(state);
+    const range = window.BudgetStorage.periodRangeForMonth(budgetMonth, normalized.monthStartDay);
+    const firstMonth = range.start.slice(0, 7);
+    const lastMonth = range.end.slice(0, 7);
+    const todayString = window.BudgetStorage.localDateString(today);
+    const transactionsById = new Map(normalized.transactions.map((transaction) => [transaction.id, transaction]));
+    const occurrences = [];
+
+    for (
+      let scheduledMonth = firstMonth;
+      ;
+      scheduledMonth = window.BudgetStorage.addMonthsToMonth(scheduledMonth, 1)
+    ) {
+      normalized.recurringExpenseTemplates.forEach((template) => {
+        const scheduledDate = window.BudgetStorage.scheduledDateForMonth(scheduledMonth, template.dayOfMonth);
+        if (!scheduledDate || scheduledDate < range.start || scheduledDate > range.end || scheduledDate < template.startsOn) {
+          return;
+        }
+
+        const transactionId = recurringTransactionId(template.id, scheduledMonth);
+        const transaction = transactionsById.get(transactionId) || null;
+        const status = transaction
+          ? 'recorded'
+          : scheduledDate < todayString
+            ? 'overdue'
+            : scheduledDate === todayString
+              ? 'today'
+              : 'upcoming';
+        occurrences.push({
+          templateId: template.id,
+          scheduledMonth,
+          scheduledDate,
+          transactionId,
+          memo: template.memo,
+          category: template.category,
+          amount: template.amount,
+          status,
+          transaction
+        });
+      });
+
+      if (scheduledMonth === lastMonth) break;
+    }
+
+    const statusOrder = { overdue: 0, today: 1, upcoming: 2, recorded: 3 };
+    return occurrences.sort((a, b) => (
+      statusOrder[a.status] - statusOrder[b.status]
+      || a.scheduledDate.localeCompare(b.scheduledDate)
+      || a.memo.localeCompare(b.memo, 'ko-KR')
+      || a.templateId.localeCompare(b.templateId)
+    ));
+  }
+
+  function recurringOccurrenceIdentity(state, occurrence) {
+    if (!occurrence || typeof occurrence !== 'object') return null;
+    const normalized = window.BudgetStorage.normalizeState(state);
+    const template = normalized.recurringExpenseTemplates.find((item) => item.id === occurrence.templateId);
+    if (!template || !window.BudgetStorage.isValidMonthString(occurrence.scheduledMonth)) return null;
+
+    const scheduledDate = window.BudgetStorage.scheduledDateForMonth(
+      occurrence.scheduledMonth,
+      template.dayOfMonth
+    );
+    const transactionId = recurringTransactionId(template.id, occurrence.scheduledMonth);
+    if (
+      !scheduledDate
+      || scheduledDate < template.startsOn
+      || occurrence.scheduledDate !== scheduledDate
+      || occurrence.transactionId !== transactionId
+    ) {
+      return null;
+    }
+    return { normalized, template, scheduledDate, transactionId };
+  }
+
+  function addRecurringExpenseTransaction(state, occurrence, input) {
+    const identity = recurringOccurrenceIdentity(state, occurrence);
+    if (!identity) {
+      return {
+        state,
+        ok: false,
+        transaction: null,
+        errors: [error('recurringExpenseOccurrence', '확정할 반복 지출 일정을 다시 확인해 주세요.')]
+      };
+    }
+
+    const validation = validateTransaction({ ...(input || {}), type: 'expense' });
+    if (!validation.valid) {
+      return { state, ok: false, transaction: null, errors: validation.errors };
+    }
+    if (identity.normalized.transactions.some((transaction) => transaction.id === identity.transactionId)) {
+      return {
+        state,
+        ok: false,
+        transaction: null,
+        errors: [error('transaction', '이미 확정한 반복 지출이에요.')]
+      };
+    }
+
+    const value = validation.value;
+    const transaction = {
+      id: identity.transactionId,
+      date: value.date,
+      type: 'expense',
+      category: value.category,
+      amount: value.amount,
+      memo: value.memo,
+      source: 'user'
+    };
+    const transactions = Array.isArray(state.transactions) ? state.transactions : [];
+    return {
+      state: { ...state, transactions: [transaction, ...transactions] },
+      ok: true,
+      transaction,
+      errors: []
+    };
+  }
+
   function addTransaction(state, input) {
     const validation = validateTransaction(input);
     if (!validation.valid) {
@@ -370,6 +607,14 @@
     parseMoneyInput,
     canonicalizeTransactionInput,
     validateTransaction,
+    canonicalizeRecurringExpenseTemplateInput,
+    validateRecurringExpenseTemplate,
+    addRecurringExpenseTemplate,
+    updateRecurringExpenseTemplate,
+    deleteRecurringExpenseTemplate,
+    recurringTransactionId,
+    deriveRecurringExpenseOccurrences,
+    addRecurringExpenseTransaction,
     addTransaction,
     updateTransaction,
     deleteTransaction,
