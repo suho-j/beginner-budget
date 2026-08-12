@@ -1,11 +1,50 @@
 # 개선 진단 및 반복 로그
 
-## 현재 현황
+## 2026-08-12 · V2 반복지출과 예정 내역
+
+### 구현 기준과 상태
+
+- 문서 수정 직전 확인한 마지막 기능 구현 SHA: `20eddaf476edfc1cb9ceaaaf9ffa953e3a0f1e94`
+- 개발 브랜치: `guardian/budget-preview-v2`
+- 상태 계약: version 2, `recurringExpenseTemplates`, 결정적 반복 거래 ID
+- V2 저장 대상: `preview_v2_budget_settings`, `preview_v2_transactions`, `replace_preview_v2_budget_state`
+- V1 `/v1/`과 V2 `/v2/`는 병렬 격리하고 운영과 V1 객체·데이터·파일은 수정하지 않는다.
+
+### 사용자 기능
+
+- 설정 탭에 반복지출 템플릿 등록·수정·삭제를 추가했다. 템플릿은 이름, 지출 카테고리, 예상 금액, 매월 결제일을 가지며 별도의 다섯 번째 탭을 만들지 않았다.
+- 홈 탭에서 선택한 예산 기간의 반복지출을 `지남`, `오늘`, `예정`, `기록됨` 상태와 예상 합계로 볼 수 있게 했다.
+- 예정 항목을 지출로 기록하기 전 사용일·실제 금액·카테고리·메모를 바꿀 수 있게 했다. 미확정 금액은 실제 합계에 포함하지 않는다.
+- 31일 설정은 짧은 달의 마지막 날에 표시하되 설정값은 31로 유지한다.
+- 확정 거래 수정은 기록 상태를 유지하고, 거래 삭제는 예정 항목을 다시 보이게 한다. 템플릿 변경은 이미 확정된 거래를 바꾸지 않는다.
+
+### 데이터·동시성 안전성
+
+- 템플릿은 settings `category_budgets.__recurring_expense_templates` 예약 키에 저장하고 일반 카테고리 예산에서 제외한다.
+- 템플릿 CRUD는 설정 `updated_at` CAS를 사용하는 원격 우선 저장이다.
+- 반복 거래 ID는 원래 예정 월을 사용한 `tx-recurring-<templateId>-<YYYY-MM>`으로 결정한다.
+- 확정은 순수 insert이며 upsert하지 않는다. 정확한 `23505`에만 재다운로드해 이미 기록된 행을 확인한다.
+- V2 transactions PK를 `(user_id, id)`로 두어 다른 사용자가 같은 결정적 ID를 가질 수 있고, 같은 사용자 중복만 막는다.
+- V2 SQL은 잘못된 PK·FK·CHECK, rogue RLS policy, 전역 unique를 적용 전에 거부하고 운영→V2 일회 seed와 `production_snapshot_v2` marker를 제공한다.
+- JSON 백업은 version 2와 템플릿을 포함하며 V1/버전 누락 백업은 빈 템플릿으로 승격하고 미래 버전과 손상 배열은 거부한다.
+
+### 자동 검증과 대기 중인 근거
+
+- 마지막 기능 구현 SHA를 기준으로 작성한 문서 동기화 작업 트리에서 `node tests/run-tests.cjs`가 정확히 `87 tests passed`로 끝났다.
+- 같은 작업 트리에서 여섯 JavaScript 문법 검사, 8개 대상 파일의 strict UTF-8 읽기, Markdown 상대 링크, 변경 범위·cache-buster, `git diff --check`가 통과했다.
+- PostgreSQL 17 격리 런타임: **PENDING — Task 13**
+- 실제 Supabase V2 SQL 적용, 두 사용자 RLS·인증 저장, QA 정리: **PENDING — Task 14**
+- 배포 산출물 생성과 공개 `/v2/`: **PENDING — Tasks 15~16**
+- 공개 URL의 source SHA, 데스크톱·360×800·키보드·포커스·live region·콘솔 QA: **PENDING**
+
+따라서 이 항목은 기능 코드와 자동 검증 계약을 기록한 것이며 DB 런타임, 인증 저장, 공개 배포 완료를 주장하지 않는다. 최종 공개 산출물이 생기면 `/v2/version.json`의 `sourceCommit`을 배포 source SHA의 기준으로 삼는다. QA는 실행별 `QA-V2-RECURRING-<yyyyMMdd-HHmmss>` 접두사와 생성 즉시 기록한 exact 템플릿·거래 ID로 정리하며, 브라우저 전체 월과 V2 DB 양쪽 0건 및 운영·V1 count/hash 불변까지 확인한다.
+
+## V1 당시 현황
 
 - 형태: 빌드 없는 정적 HTML/CSS/JavaScript 앱
 - 저장: Supabase Auth + RLS, 브라우저 `localStorage`에 가계부 데이터 저장 안 함
 - 운영 저장 대상: `budget_settings`, `transactions`, `replace_budget_state`
-- 로컬·미리보기 저장 대상: `preview_budget_settings`, `preview_transactions`, `replace_preview_budget_state`
+- V1 로컬·미리보기 저장 대상: `preview_budget_settings`, `preview_transactions`, `replace_preview_budget_state`
 - 개발 브랜치: `guardian/budget-preview-v1`
 - V1 앱·SQL 검증 소스: `eaad4ba`
 - 운영 `origin/master`: `0d487df` 유지
@@ -50,7 +89,7 @@
 - `git diff --check`와 `git diff --check origin/master..HEAD`: 통과
 - `origin/master`가 개발 소스의 조상임을 확인했고 운영 브랜치는 `0d487df` 그대로다.
 
-미리보기 격리 변경에서는 환경별 download/save/insert/update/delete/upload 대상, 운영 객체 비변경, snapshot seed, RLS·권한·트리거·5인자 CAS·오버로드 제거 구조까지 포함해 `65 tests passed`를 확인했다. fail-closed 환경 경계, 충돌 시 전체 rollback, 일회 marker·재실행 불변, 운영 쓰기 중단·canonical 비교 runbook을 보강한 현재 자동 검증은 `67 tests passed`이다. 기존 `eaad4ba`의 60개 테스트 근거와 로컬 UI 스모크 근거는 그대로 보존한다.
+미리보기 격리 변경에서는 환경별 download/save/insert/update/delete/upload 대상, 운영 객체 비변경, snapshot seed, RLS·권한·트리거·5인자 CAS·오버로드 제거 구조까지 포함해 `65 tests passed`를 확인했다. fail-closed 환경 경계, 충돌 시 전체 rollback, 일회 marker·재실행 불변, 운영 쓰기 중단·canonical 비교 runbook을 보강한 당시 마지막 V1 자동 검증은 `67 tests passed`였다. 기존 `eaad4ba`의 60개 테스트 근거와 로컬 UI 스모크 근거는 그대로 보존한다.
 
 동시성·데이터 안전 관련 주요 커밋:
 
@@ -76,7 +115,7 @@
 - 데스크톱과 360×800 스크린샷을 눈으로 확인했을 때 레이아웃이 일관됐다.
 - 로그인 세션·비밀번호를 사용하지 않았고 운영 데이터 변경은 0건이었다.
 
-### 아직 필요한 런타임 근거
+### V1 당시 남아 있던 런타임 근거
 
 - `docs/supabase-preview-setup.sql`은 저장소에만 있으며 Supabase에 아직 적용하지 않았다.
 - preview 두 테이블·RLS·권한·트리거·RPC와 운영→preview 일회성 복사의 실제 DB 검증이 남아 있다.
@@ -85,7 +124,7 @@
 - 공개 `/beginner-budget-preview/v1/` 배포, 소스 SHA 매니페스트 확인, 공개 URL 재검증이 남아 있다.
 - `docs/supabase-setup.sql` 운영 적용과 운영 승격은 사용자가 미리보기 URL을 선택한 뒤까지 대기한다.
 
-따라서 현재 결과는 **코드·자동 테스트와 이전 로컬 비로그인 UI 스모크 근거 확보**이며, 미리보기 인증 저장 흐름, DB 격리 SQL 런타임, 공개 미리보기 검증 완료를 뜻하지 않는다.
+따라서 당시 결과는 **코드·자동 테스트와 이전 로컬 비로그인 UI 스모크 근거 확보**였으며, 미리보기 인증 저장 흐름, DB 격리 SQL 런타임, 공개 미리보기 검증 완료를 뜻하지 않았다.
 
 ### 최초 seed와 최종 운영 승격 하드 게이트
 

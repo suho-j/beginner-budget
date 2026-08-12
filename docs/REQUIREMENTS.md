@@ -1,5 +1,7 @@
 # 요구사항
 
+> **역사 문서 / 현재 기준으로 대체됨:** 이 문서는 초기 MVP 요구사항을 보존한 기록입니다. 현재 V2 요구사항과 범위는 [V2 반복지출 설계](superpowers/specs/2026-08-12-budget-recurring-upcoming-v2-design.md)와 [V2 구현·검증 계획](superpowers/plans/2026-08-12-budget-recurring-upcoming-v2.md)을 따릅니다. 현재 가계부 데이터는 Supabase Auth + RLS에 저장하며, 브라우저 `localStorage`에는 예산·거래·반복지출 데이터를 저장하지 않습니다. 아래 본문은 당시 맥락이며 현재 계약으로 사용하지 않습니다.
+
 ## 목표
 
 처음 가계부를 쓰는 사용자가 복잡한 설정 없이 이번 달 돈 흐름을 이해하고 거래를 기록할 수 있게 한다.

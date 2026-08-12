@@ -1,5 +1,7 @@
 # 처음 가계부 구현 계획
 
+> **역사 문서 / 현재 기준으로 대체됨:** 이 문서는 서버·반복 거래를 제외했던 초기 MVP 계획을 보존한 기록입니다. 현재 V2 설계와 실행 기준은 [V2 반복지출 설계](superpowers/specs/2026-08-12-budget-recurring-upcoming-v2-design.md)와 [V2 구현·검증 계획](superpowers/plans/2026-08-12-budget-recurring-upcoming-v2.md)을 따릅니다. 현재 저장 방식은 Supabase Auth + RLS이며 브라우저 `localStorage`에는 가계부 데이터를 저장하지 않습니다. 반복지출과 예정 내역은 현재 범위에 포함됩니다. 아래 본문은 당시 맥락이며 현재 계약으로 사용하지 않습니다.
+
 > **Hermes 작업 방식:** 서브에이전트로 조사, 구현, 검토를 분리하고 메인 에이전트가 설계와 품질 게이트를 관리한다.
 
 ## 목표
