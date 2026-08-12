@@ -80,3 +80,8 @@ git diff --check origin/master..HEAD
 기존 V1 앱·운영 SQL 소스 `eaad4ba`에서 기록한 `60 tests passed`와 이전 미리보기 격리의 `65 tests passed` 근거는 유지합니다. 2026-08-12 fail-closed 환경 경계와 원자적 일회 seed 강화를 포함해 `67 tests passed`를 확인했습니다. 미리보기 SQL 적용, 실제 로그인 저장, 공개 URL 스모크는 아직 남아 있으므로 공개 미리보기 준비 완료로 간주하지 않습니다.
 
 운영 데이터 보존을 포함한 상세 절차는 [테스트 계획](TEST_PLAN.md)을 따릅니다.
+
+## 개발 설계 문서
+
+- [V1 탭·수정·캘린더·미리보기 배포 설계](superpowers/specs/2026-08-11-budget-tabs-edit-calendar-preview-design.md)
+- [V2 반복지출·예정 내역 설계](superpowers/specs/2026-08-12-budget-recurring-upcoming-v2-design.md)
