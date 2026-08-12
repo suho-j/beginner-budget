@@ -270,7 +270,7 @@ function createUiContext() {
 
 function createSupabaseFake(options = {}) {
   const calls = [];
-  const settingsTables = new Set(['budget_settings', 'preview_budget_settings']);
+  const settingsTables = new Set(['budget_settings', 'preview_budget_settings', 'preview_v2_budget_settings']);
   const emptyActions = new Set(options.emptyActions || []);
   const rpcErrors = options.rpcErrors || {};
   const rpcData = options.rpcData || {};
@@ -340,7 +340,11 @@ function createSupabaseFake(options = {}) {
         ? (configuredError instanceof Error ? configuredError : new Error(String(configuredError)))
         : null;
       let data = rpcData[name];
-      if (data === undefined && ['replace_budget_state', 'replace_preview_budget_state'].includes(name)) {
+      if (data === undefined && [
+        'replace_budget_state',
+        'replace_preview_budget_state',
+        'replace_preview_v2_budget_state'
+      ].includes(name)) {
         data = [{
           uploaded_count: Array.isArray(args.p_transactions) ? args.p_transactions.length : 0,
           updated_at: options.rpcUpdatedAt || '2026-08-12T00:00:00.000Z'
@@ -1674,7 +1678,7 @@ function testCloudStateMappingKeepsBudgetAndTransactions() {
   state = win.BudgetTransactions.setMonthlyBudget(state, 900000, '2026-06').state;
   const mapped = win.BudgetCloud.stateToRemote(state, 'user-1');
   assert.strictEqual(JSON.stringify(mapped.settings), JSON.stringify({
-    user_id: 'user-1', monthly_budget: 800000, category_budgets: { 생활비: 200000, __month_start_day: 25, __monthly_budgets: { '2026-06': { monthlyBudget: 900000, categoryBudgets: { 생활비: 200000 } } } }
+    user_id: 'user-1', monthly_budget: 800000, category_budgets: { 생활비: 200000, __month_start_day: 25, __monthly_budgets: { '2026-06': { monthlyBudget: 900000, categoryBudgets: { 생활비: 200000 } } }, __recurring_expense_templates: [] }
   }));
   assert.strictEqual(JSON.stringify(mapped.transactions), JSON.stringify([
     { id: 'tx-a', user_id: 'user-1', date: '2026-05-02', type: 'expense', category: '생활비', amount: 120000, memo: '마트', source: 'user' }
@@ -1694,14 +1698,178 @@ function testCloudUsesSharedLoginEmail() {
   assert.strictEqual(win.BudgetCloud.LOGIN_EMAIL, 'ho910728@naver.com');
 }
 
+async function testCloudMapsRecurringTemplatesThroughEverySettingsPath() {
+  const template = {
+    id: 'rt-rent',
+    memo: '월세',
+    category: '생활비',
+    amount: 550000,
+    dayOfMonth: 5,
+    startsOn: '2026-08-12'
+  };
+  const fake = createSupabaseFake({
+    settingsRow: {
+      monthly_budget: 800000,
+      category_budgets: {
+        생활비: 200000,
+        __month_start_day: 1,
+        __monthly_budgets: {},
+        __recurring_expense_templates: [template]
+      },
+      updated_at: '2026-08-12T00:00:00.000Z'
+    }
+  });
+  const win = createContext({ supabase: fake.supabase });
+
+  const downloaded = await win.BudgetCloud.downloadState();
+  await win.BudgetCloud.saveSettings(downloaded);
+  await win.BudgetCloud.uploadState(downloaded, downloaded);
+
+  const settingsWrite = fake.calls.find((call) => (
+    call.table === 'budget_settings' && call.action === 'update'
+  ));
+  const stateReplacement = fake.calls.find((call) => (
+    call.action === 'rpc' && call.name === 'replace_budget_state'
+  ));
+  assert.deepStrictEqual(plain(downloaded.recurringExpenseTemplates), [template]);
+  assert.strictEqual(
+    Object.prototype.hasOwnProperty.call(downloaded.categoryBudgets, '__recurring_expense_templates'),
+    false
+  );
+  assert.deepStrictEqual(plain(downloaded.categoryBudgets), { 생활비: 200000 });
+  assert.deepStrictEqual(
+    plain(settingsWrite.payload.category_budgets.__recurring_expense_templates),
+    [template]
+  );
+  assert.deepStrictEqual(
+    plain(stateReplacement.args.p_category_budgets.__recurring_expense_templates),
+    [template]
+  );
+}
+
+async function testCloudRoutesEveryNonProductionOperationToPreviewV2() {
+  const previewCases = [
+    { origin: 'http://localhost:8765', protocol: 'http:', hostname: 'localhost', port: '8765', pathname: '/' },
+    { origin: 'http://127.0.0.1:8765', protocol: 'http:', hostname: '127.0.0.1', port: '8765', pathname: '/anything/' },
+    { origin: 'https://suho-j.github.io', protocol: 'https:', hostname: 'suho-j.github.io', port: '', pathname: '/beginner-budget-preview/v2/' },
+    { origin: 'https://suho-j.github.io', protocol: 'https:', hostname: 'suho-j.github.io', port: '', pathname: '/beginner-budget-preview/v2' },
+    { origin: 'https://budget-staging.internal', protocol: 'https:', hostname: 'budget-staging.internal', port: '', pathname: '/beginner-budget/' },
+    { origin: 'https://budget.example.com', protocol: 'https:', hostname: 'budget.example.com', port: '', pathname: '/custom/' },
+    { origin: 'null', protocol: 'file:', hostname: '', port: '', pathname: '/C:/budget/index.html' },
+    { origin: '', protocol: '', hostname: '', port: '', pathname: '/' }
+  ];
+  const expectedEnvironment = {
+    name: 'preview-v2',
+    isPreview: true,
+    settingsTable: 'preview_v2_budget_settings',
+    transactionsTable: 'preview_v2_transactions',
+    stateRpc: 'replace_preview_v2_budget_state'
+  };
+
+  for (const location of previewCases) {
+    const fake = createSupabaseFake({
+      settingsRow: {
+        monthly_budget: 600000,
+        category_budgets: {},
+        updated_at: '2026-08-12T00:00:00.000Z'
+      }
+    });
+    const win = createContext({ supabase: fake.supabase, location });
+    const state = win.BudgetStorage.normalizeState({
+      transactions: [
+        {
+          id: 'tx-v2-route',
+          date: '2026-08-12',
+          type: 'expense',
+          category: '생활비',
+          amount: 1000,
+          memo: 'V2 경로',
+          source: 'user'
+        }
+      ]
+    });
+
+    assert.deepStrictEqual(plain(win.BudgetCloud.ENVIRONMENT), expectedEnvironment);
+    assert.deepStrictEqual(Object.keys(win.BudgetCloud.ENVIRONMENT), [
+      'name', 'isPreview', 'settingsTable', 'transactionsTable', 'stateRpc'
+    ]);
+    await win.BudgetCloud.downloadState();
+    await win.BudgetCloud.saveSettings(state);
+    await win.BudgetCloud.insertTransaction(state.transactions[0]);
+    await win.BudgetCloud.updateTransaction(state.transactions[0], state.transactions[0]);
+    await win.BudgetCloud.deleteTransaction(state.transactions[0].id, state.transactions[0]);
+    await win.BudgetCloud.uploadState(state, state);
+
+    const tableCalls = fake.calls.filter((call) => call.table);
+    assert.deepStrictEqual(tableCalls.map((call) => call.table), [
+      'preview_v2_budget_settings',
+      'preview_v2_transactions',
+      'preview_v2_budget_settings',
+      'preview_v2_transactions',
+      'preview_v2_transactions',
+      'preview_v2_transactions'
+    ]);
+    assert.strictEqual(
+      fake.calls.some((call) => (
+        call.table === 'preview_budget_settings'
+        || call.table === 'preview_transactions'
+        || call.name === 'replace_preview_budget_state'
+      )),
+      false
+    );
+    assert.strictEqual(
+      fake.calls.some((call) => call.action === 'rpc' && call.name === 'replace_preview_v2_budget_state'),
+      true
+    );
+    assert.strictEqual(
+      fake.calls.some((call) => call.table === 'preview_v2_transactions' && call.action === 'upsert'),
+      false
+    );
+  }
+
+  const production = createContext({
+    location: {
+      origin: 'https://suho-j.github.io',
+      protocol: 'https:',
+      hostname: 'suho-j.github.io',
+      port: '',
+      pathname: '/beginner-budget/'
+    }
+  });
+  assert.deepStrictEqual(plain(production.BudgetCloud.ENVIRONMENT), {
+    name: 'production',
+    isPreview: false,
+    settingsTable: 'budget_settings',
+    transactionsTable: 'transactions',
+    stateRpc: 'replace_budget_state'
+  });
+}
+
+function testCloudClassifiesOnlyDuplicateTransactionErrors() {
+  const isDuplicate = createContext().BudgetCloud.isDuplicateTransactionError;
+
+  assert.strictEqual(typeof isDuplicate, 'function');
+  assert.strictEqual(isDuplicate({ code: '23505' }), true);
+  [
+    { code: '40001' },
+    { code: 23505 },
+    { code: 'HTTP 409' },
+    { status: 409 },
+    { message: 'duplicate key value violates unique constraint' },
+    new Error('duplicate transaction'),
+    null,
+    undefined
+  ].forEach((error) => assert.strictEqual(isDuplicate(error), false));
+}
+
 async function testCloudRoutesEveryOperationByRuntimeEnvironment() {
   const previewCase = (location) => ({
     location,
-    name: 'preview',
+    name: 'preview-v2',
     isPreview: true,
-    settingsTable: 'preview_budget_settings',
-    transactionsTable: 'preview_transactions',
-    stateRpc: 'replace_preview_budget_state'
+    settingsTable: 'preview_v2_budget_settings',
+    transactionsTable: 'preview_v2_transactions',
+    stateRpc: 'replace_preview_v2_budget_state'
   });
   const cases = [
     previewCase({ protocol: 'file:', hostname: '', pathname: '/C:/budget/index.html' }),
@@ -2535,7 +2703,8 @@ async function testCloudReplacesWholeStateWithOneRpc() {
       __month_start_day: 25,
       __monthly_budgets: {
         '2026-05': { monthlyBudget: 800000, categoryBudgets: { 배달비: 100000 } }
-      }
+      },
+      __recurring_expense_templates: []
     },
     p_transactions: [
       { id: 'tx-a', date: '2026-05-25', type: 'expense', category: '생활비', amount: 12000, memo: '마트', source: 'user' }
@@ -3484,6 +3653,9 @@ const tests = [
   testLegacyExpenseCategoriesMapToFourBudgets,
   testCloudStateMappingKeepsBudgetAndTransactions,
   testCloudUsesSharedLoginEmail,
+  testCloudMapsRecurringTemplatesThroughEverySettingsPath,
+  testCloudRoutesEveryNonProductionOperationToPreviewV2,
+  testCloudClassifiesOnlyDuplicateTransactionErrors,
   testCloudRoutesEveryOperationByRuntimeEnvironment,
   testCategoryBudgetDetailShowsSpentBeforeBudget,
   testUiExportsTabEditAndCalendarRenderers,

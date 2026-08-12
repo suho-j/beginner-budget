@@ -11,11 +11,11 @@
   const IS_PRODUCTION = runtimeOrigin === 'https://suho-j.github.io'
     && runtimePathname === '/beginner-budget/';
   const IS_PREVIEW = !IS_PRODUCTION;
-  const SETTINGS_TABLE = IS_PREVIEW ? 'preview_budget_settings' : 'budget_settings';
-  const TRANSACTIONS_TABLE = IS_PREVIEW ? 'preview_transactions' : 'transactions';
-  const STATE_REPLACEMENT_RPC = IS_PREVIEW ? 'replace_preview_budget_state' : 'replace_budget_state';
+  const SETTINGS_TABLE = IS_PREVIEW ? 'preview_v2_budget_settings' : 'budget_settings';
+  const TRANSACTIONS_TABLE = IS_PREVIEW ? 'preview_v2_transactions' : 'transactions';
+  const STATE_REPLACEMENT_RPC = IS_PREVIEW ? 'replace_preview_v2_budget_state' : 'replace_budget_state';
   const ENVIRONMENT = Object.freeze({
-    name: IS_PREVIEW ? 'preview' : 'production',
+    name: IS_PREVIEW ? 'preview-v2' : 'production',
     isPreview: IS_PREVIEW,
     settingsTable: SETTINGS_TABLE,
     transactionsTable: TRANSACTIONS_TABLE,
@@ -31,6 +31,10 @@
     return error;
   }
 
+  function isDuplicateTransactionError(error) {
+    return Boolean(error && error.code === '23505');
+  }
+
   function isConfigured() {
     return Boolean(SUPABASE_URL && SUPABASE_ANON_KEY && window.supabase && typeof window.supabase.createClient === 'function');
   }
@@ -43,17 +47,22 @@
     return client;
   }
 
+  function categoryBudgetsToRemote(state) {
+    return {
+      ...(state.categoryBudgets || {}),
+      __month_start_day: state.monthStartDay,
+      __monthly_budgets: state.monthlyBudgets || {},
+      __recurring_expense_templates: state.recurringExpenseTemplates || []
+    };
+  }
+
   function stateToRemote(state, userId) {
     const normalized = window.BudgetStorage.normalizeState(state);
     return {
       settings: {
         user_id: userId,
         monthly_budget: normalized.monthlyBudget,
-        category_budgets: {
-          ...(normalized.categoryBudgets || {}),
-          __month_start_day: normalized.monthStartDay,
-          __monthly_budgets: normalized.monthlyBudgets || {}
-        }
+        category_budgets: categoryBudgetsToRemote(normalized)
       },
       transactions: normalized.transactions.map((tx) => ({
         id: tx.id,
@@ -115,11 +124,7 @@
     const normalized = window.BudgetStorage.normalizeState(state);
     return {
       p_monthly_budget: normalized.monthlyBudget,
-      p_category_budgets: {
-        ...(normalized.categoryBudgets || {}),
-        __month_start_day: normalized.monthStartDay,
-        __monthly_budgets: normalized.monthlyBudgets || {}
-      },
+      p_category_budgets: categoryBudgetsToRemote(normalized),
       p_transactions: transactionRowsForState(normalized),
       p_expected_updated_at: settingsVersion,
       p_expected_transactions: transactionRowsForState(expectedState)
@@ -148,6 +153,7 @@
       categoryBudgets: remoteBudgets,
       monthStartDay: remoteBudgets.__month_start_day,
       monthlyBudgets: remoteBudgets.__monthly_budgets,
+      recurringExpenseTemplates: remoteBudgets.__recurring_expense_templates,
       transactions: (rows || []).map((row) => ({
         id: row.id,
         date: row.date,
@@ -320,6 +326,7 @@
     SUPABASE_ANON_KEY,
     LOGIN_EMAIL,
     ENVIRONMENT,
+    isDuplicateTransactionError,
     isConfigured,
     getClient,
     stateToRemote,
