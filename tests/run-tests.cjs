@@ -4950,6 +4950,239 @@ function testPreviewV2SupabaseSetupCreatesIsolatedRlsObjects() {
   assert.doesNotMatch(executable, /create or replace function public\.(?:set_preview_budget_settings_updated_at|replace_preview_budget_state)\b/i);
 }
 
+function testPreviewV2LiveConcurrencyRunnerContract() {
+  const runnerPath = path.join(__dirname, 'run-preview-v2-live-concurrency.ps1');
+  assert.strictEqual(fs.existsSync(runnerPath), true, 'reviewed committed-concurrency runner must exist');
+  const source = fs.readFileSync(runnerPath, 'utf8');
+  const executable = source.replace(/#[^\r\n]*/g, '');
+
+  for (const parameter of ['ProjectRef', 'QaUserA', 'QaUserB', 'RunId', 'QaMarker', 'PgHost', 'PgPort', 'PgDatabase', 'PgUser', 'PgSslMode', 'SslRootCertificate', 'EvidenceDirectory']) {
+    assert.match(source, new RegExp(`\\$${parameter}\\b`), `runner requires ${parameter}`);
+  }
+  assert.match(source, /ValidatePattern\('\^\[a-z\]\[a-z0-9-\]\{4,39\}\$'\)/i);
+  assert.match(source, /ValidatePattern\('\^\[0-9a-fA-F\]\{8\}-/i);
+  assert.match(source, /QA-V2-RECURRING-/i);
+  assert.match(source, /Read-Host[^\r\n]*-AsSecureString/i);
+  assert.match(source, /SecureStringToGlobalAllocUnicode/i);
+  assert.match(source, /Marshal\]::ReadInt16/i);
+  assert.match(source, /ZeroFreeGlobalAllocUnicode/i);
+  assert.match(source, /RedirectStandardInput\s*=\s*\$true/i);
+  assert.match(source, /StandardInput\.WriteLine/i);
+  const unsafeLibpqEnvironment = [
+    'PGPASSWORD', 'PGPASSFILE', 'PGHOSTADDR', 'PGSERVICE', 'PGSERVICEFILE',
+    'PGHOST', 'PGPORT', 'PGDATABASE', 'PGUSER', 'PGOPTIONS', 'PGTARGETSESSIONATTRS'
+  ];
+  for (const variable of unsafeLibpqEnvironment) {
+    assert.match(source, new RegExp(`['\"]${variable}['\"]`), `runner must enumerate unsafe inherited ${variable}`);
+  }
+  assert.match(source, /EnvironmentVariables\.Remove\(\$unsafeName\)/i);
+  assert.match(source, /GetEnvironmentVariable\(\$unsafeName\s*,\s*'Process'\)/i);
+  const parameterBlock = source.slice(source.indexOf('param('), source.indexOf('$ErrorActionPreference'));
+  assert.doesNotMatch(parameterBlock, /\b(?:Password|AccessToken|ServiceRoleKey)\b/i);
+  assert.match(source, /\$psqlArguments\s*=\s*@\([\s\S]*'-W'[\s\S]*'-f'/i, 'psql must require password authentication and fixed SQL files');
+  const withoutEnvironmentGuards = source
+    .replace(/[^\r\n]*['\"]PGPASSWORD['\"][^\r\n]*/gi, '')
+    .replace(/[^\r\n]*['\"]PGPASSFILE['\"][^\r\n]*/gi, '');
+  assert.doesNotMatch(withoutEnvironmentGuards, /PGPASSWORD|PGPASSFILE|--password/i, 'runner must never use password args, env, or files');
+  assert.doesNotMatch(source, /PtrToString|NetworkCredential|ConvertTo-SecureString[^\r\n]*-AsPlainText/i, 'password must never become a managed plaintext string');
+  assert.match(source, /credential-transport-preflight/i);
+  assert.match(source, /Type WRITERS-STOPPED after confirming all production, V1, V2, local authenticated tabs, and API writers are stopped and will remain stopped through exact cleanup/i);
+  assert.match(source, /writersConsent\s+-cne\s+['"]WRITERS-STOPPED['"]/i);
+  assert.match(source, /writersStoppedConfirmed\s*=\s*\$true/i);
+  assert.match(parameterBlock, /ValidateSet\('verify-full'\)\]\[string\]\$PgSslMode/i, 'production connections must verify both the CA and hostname');
+  assert.doesNotMatch(parameterBlock, /ValidateSet\([^\r\n]*['"]require['"]/i, 'sslmode=require is not sufficient for a production password connection');
+  assert.match(source, /function\s+Initialize-SslRootCertificate/i);
+  assert.match(source, /X509Certificate2/i);
+  assert.match(source, /BEGIN CERTIFICATE/i);
+  assert.match(source, /ReparsePoint/i);
+  assert.match(source, /sslRootCertificateSha256/i);
+  assert.match(source, /docker-ca-host-container-sha256-match/i);
+  assert.match(source, /PGSSLROOTCERT=\$dockerSslRootCertificatePath/i);
+  assert.match(source, /ValidateSet\('Docker'\)\]\[string\]\$ClientMode\s*=\s*'Docker'/i);
+  assert.doesNotMatch(executable, /ClientMode\s*-ceq\s*'Native'|OSTYPE|Get-Command\s+psql\.exe/i, 'native mode cannot guarantee crash-recovery process ownership');
+  const unsafeDockerEnvironment = [
+    'DOCKER_HOST', 'DOCKER_CONTEXT', 'DOCKER_TLS_VERIFY',
+    'DOCKER_CERT_PATH', 'DOCKER_CONFIG'
+  ];
+  for (const variable of unsafeDockerEnvironment) {
+    assert.match(source, new RegExp(`['"]${variable}['"]`), `runner must reject inherited Docker override ${variable}`);
+  }
+  assert.match(source, /function\s+Initialize-LocalDockerContext/i);
+  assert.match(source, /GetEnvironmentVariable\(\$unsafeName\s*,\s*'Process'\)/i);
+  assert.match(source, /context','show/i);
+  assert.match(source, /context','inspect',\$(?:dockerContextName|contextName)/i);
+  assert.match(source, /npipe:\/{4}\.\/pipe\/(?:docker_engine|dockerDesktopLinuxEngine)/i, 'only exact local Windows Docker named pipes may receive credentials');
+  assert.match(source, /dockerContextSnapshotSha256/i);
+  assert.match(source, /docker-context-(?:snapshot|identity)/i);
+  assert.match(source, /@\('--host',\$dockerContextEndpoint\)\s*\+\s*\$Arguments/i, 'all post-validation Docker calls must pin the validated local daemon endpoint');
+  assert.match(source, /postgres:17\.6-alpine/i);
+  assert.match(source, /docker\s+image\s+inspect|@\('image','inspect'/i);
+  assert.match(source, /docker-image-single-snapshot/i);
+  assert.match(source, /dockerImageSnapshotSha256/i);
+  assert.match(source, /dockerImageImmutableIdentitySha256/i);
+  assert.match(source, /imageImmutableIdentitySha256/i);
+  assert.match(source, /function\s+Load-RecoveryEvidence/i);
+  assert.match(source, /image','inspect',\$dockerImageId/i, 'RecoveryOnly must inspect the persisted immutable image ID, never re-resolve the tag');
+  assert.match(source, /RecoveryOnly Docker immutable image identity mismatch/i);
+  assert.match(source, /RecoveryOnly Docker original image snapshot binding mismatch/i);
+  assert.doesNotMatch(source, /RecoveryOnly Docker image snapshot manifest mismatch/i, 'mutable tags and labels must not block immutable-ID recovery');
+  assert.ok(source.indexOf('Initialize-DockerClient') < source.indexOf("Read-Host 'Database password"), 'image identity and owned client must be validated before asking for the password');
+  assert.doesNotMatch(source, /docker-image-(?:id|digest)/i, 'image ID and digest must come from one inspect snapshot');
+  assert.match(source, /FileMode\]::CreateNew/i);
+  assert.match(source, /Flush\(\$true\)/i);
+  assert.match(source, /docker-client-intent-\*-0001-owner\.json/i);
+  assert.match(source, /docker-client-intent-\$\([^\r\n]+\)-0002-created\.json/i);
+  assert.doesNotMatch(source, /Join-Path\s+\$EvidenceDirectory\s+['"]docker-client-intent\.json['"]/i, 'ownership intent must never overwrite one mutable JSON file');
+  assert.match(source, /recordSha256/i);
+  assert.match(source, /previousRecordSha256/i);
+  assert.match(source, /Get-ValidDockerIntentOwners/i);
+  assert.match(source, /actualContainerId/i);
+  assert.match(source, /\[int\]\$created\.schemaVersion\s+-eq\s+1/i);
+  assert.match(source, /postgres@sha256:/i);
+  assert.match(source, /psql\s+\(PostgreSQL\)\s+17\.6/i);
+  assert.match(source, /\[Guid\]::NewGuid\(\)/i);
+  assert.match(source, /beginner-budget\.preview-v2-live-runner/i);
+  assert.match(source, /docker\s+cp|@\('cp'/i);
+  assert.match(source, /sha256sum/i);
+  assert.match(source, /docker-host-container-sha256-match/i);
+  assert.match(source, /function\s+Prepare-PsqlFile/i);
+  assert.match(source, /SQL was not pre-staged before execution/i);
+  assert.doesNotMatch(source.slice(source.indexOf('function Start-PsqlFile'), source.indexOf('function Complete-Psql')), /Copy-SqlToDockerClient/i, 'runtime start must execute only a pre-staged SQL file');
+  assert.match(source, /@\('exec','-i'/i);
+  assert.match(source, /PGAPPNAME=\$ApplicationName/i);
+  assert.match(source, /\[Parameter\(Mandatory\)\][^\r\n]*\[string\]\$ApplicationName/i);
+  assert.match(source, /current_setting\('application_name'\)\s*<>\s*\$app/i);
+  assert.doesNotMatch(executable, /@\('exec','-t'/i, 'docker psql must never allocate a TTY');
+  assert.doesNotMatch(executable, /docker\s+pull|@\('pull'/i, 'runner must never implicitly pull or mutate the image cache');
+  assert.match(source, /function\s+Remove-OwnedDockerClient/i);
+  assert.match(source, /docker-container-cleanup/i);
+  assert.match(source, /docker-daemon-health-after-cleanup/i);
+  assert.match(source, /containerId\s*-cne\s*\$dockerClientContainerId/i);
+  assert.match(source, /function\s+Reset-DockerClientForCleanup/i);
+  assert.match(source, /dockerClientPurpose/i);
+  const resetClientBody = source.slice(source.indexOf('function Reset-DockerClientForCleanup'), source.indexOf('function Copy-SqlToDockerClient'));
+  assert.ok(resetClientBody.indexOf('Remove-OwnedDockerClient') < resetClientBody.indexOf('New-OwnedDockerClient'), 'workload container must be absent before fresh cleanup client creation');
+  assert.doesNotMatch(resetClientBody, /dockerClientPurpose\s+-ne\s+['"]workload/i, 'every cleanup retry must rotate its current control client');
+  const staleRecoveryBody = source.slice(source.indexOf('function Recover-StaleDockerClient'), source.indexOf('function New-OwnedDockerClient'));
+  assert.doesNotMatch(staleRecoveryBody, /\$dockerImageId|\$dockerRepoDigest/i, 'stale ownership removal must use the persisted immutable image identity, not the current tag');
+  assert.match(source, /\[switch\]\$RecoveryOnly/i);
+  assert.match(source, /function\s+Acquire-EvidenceLease/i);
+  assert.match(source, /FileMode\]::OpenOrCreate/i);
+  assert.match(source, /FileShare\]::None/i);
+  assert.match(source, /evidenceLeaseStream\.Dispose\(\)/i);
+  const runnerMain = source.slice(source.indexOf('$EvidenceDirectory=Assert-SafeEvidenceDirectory'));
+  assert.ok(runnerMain.indexOf('Acquire-EvidenceLease') < runnerMain.indexOf('Initialize-DockerClient'), 'exclusive evidence lease must precede all Docker side effects');
+  assert.ok(runnerMain.indexOf('Acquire-EvidenceLease') < runnerMain.indexOf('Read-Host'), 'exclusive evidence lease must precede confirmation/password prompts');
+  assert.ok(runnerMain.indexOf('try{') < runnerMain.indexOf('Acquire-EvidenceLease'), 'the process-lifetime cleanup boundary must begin before lease acquisition');
+  assert.ok(runnerMain.indexOf('Initialize-DockerClient') < runnerMain.indexOf("Read-Host 'Database password"), 'CA and immutable client validation must precede the password prompt');
+  const recoveryInitializer = source.slice(source.indexOf('function Initialize-DockerClient'), source.indexOf('function Assert-OwnedDockerClient'));
+  assert.ok(recoveryInitializer.indexOf('Initialize-LocalDockerContext') < recoveryInitializer.indexOf('Recover-StaleDockerClient'), 'local Docker context must be pinned before recovery container inspection or removal');
+  assert.ok(recoveryInitializer.indexOf('Initialize-LocalDockerContext') < recoveryInitializer.indexOf('Initialize-SslRootCertificate'), 'local Docker context must be pinned before copying CA material');
+  assert.ok(recoveryInitializer.indexOf('Recover-StaleDockerClient') < recoveryInitializer.indexOf('Load-RecoveryEvidence'), 'intent-only stale client recovery must precede manifest-required DB recovery');
+  assert.ok(recoveryInitializer.indexOf('Recover-StaleDockerClient') < recoveryInitializer.indexOf('Initialize-SslRootCertificate'), 'pre-manifest stale ownership recovery must not depend on the later CA input');
+  assert.ok(recoveryInitializer.indexOf('Initialize-SslRootCertificate') < recoveryInitializer.indexOf('New-OwnedDockerClient'), 'CA validation must precede owned client creation');
+  assert.ok(recoveryInitializer.indexOf('Load-RecoveryEvidence') < recoveryInitializer.indexOf('New-OwnedDockerClient'), 'manifest binding must precede recovery control client creation');
+  assert.match(source, /PGCONNECT_TIMEOUT/i);
+  assert.match(source, /\(?\s*2\s*\*\s*\$ObservationDeadlineSeconds\s*\)?\s*\+\s*7\s*-ge\s*\$WorkerDeadlineSeconds/i);
+  assert.doesNotMatch(executable, /['\"]6543['\"]/, 'transaction-mode pooler port 6543 cannot preserve backend-scoped locks');
+  assert.match(source, /PGPORT\s*-ceq\s*'5432'/i);
+  assert.doesNotMatch(source, /"\\\\set\b/i, 'PowerShell must write one psql meta-command backslash');
+
+  for (const phase of ['cas-stale', 'same-user-duplicate', 'cross-user-same-id']) {
+    assert.match(source, new RegExp(`'${phase}'`), `runner must isolate ${phase}`);
+  }
+  assert.match(source, /pg_advisory_lock/i);
+  assert.match(source, /pg_advisory_xact_lock/i);
+  assert.match(source, /pg_catalog\.pg_locks/i);
+  assert.match(source, /pg_catalog\.pg_stat_activity/i);
+  assert.match(source, /wait_event_type\s*=\s*'Lock'/i);
+  assert.match(source, /application_name/i);
+  assert.match(source, /pg_backend_pid\(\)/i);
+  assert.match(source, /ObservationDeadlineSeconds/i);
+  assert.match(source, /WorkerDeadlineSeconds/i);
+  assert.match(source, /Get-ExactSqlStateErrors/i);
+  assert.match(source, /ExitCode\s+-eq\s+3/i);
+  assert.match(source, /57P01/i);
+  assert.doesNotMatch(source, /Start-Sleep\s+-Seconds\s+(?:[1-9]|\d{2,})/i, 'sleep alone must never prove overlap');
+
+  assert.match(source, /FileMode\]::Append/i);
+  assert.match(source, /Flush\(\)/i);
+  for (const field of ['userId', 'id', 'memo', 'purpose', 'recordedAtUtc']) {
+    assert.match(source, new RegExp(`\\b${field}\\b`), `ledger records require ${field}`);
+  }
+  assert.match(source, /transactionIds/i);
+  assert.match(source, /templateIds/i);
+  assert.match(source, /delete from public\.preview_v2_transactions/i);
+  assert.match(source, /jsonb_array_elements/i);
+  assert.match(source, /qa_marker_leak_count/i);
+  assert.match(source, /settings_restore/i);
+  assert.match(source, /p_expected_updated_at/i);
+  assert.match(source, /cleanup_verified/i);
+  assert.match(source, /disposable_user_gate/i);
+  assert.match(source, /production_count/i);
+  assert.match(source, /preview_v1_count/i);
+  assert.match(source, /preview_v2_count/i);
+  assert.match(source, /pre_absent/i);
+  assert.match(source, /QA B to be production\/V1\/V2 data-absent/i);
+  assert.match(source, /userACanonicalBefore/i);
+  assert.doesNotMatch(source, /both QA users must be[^\r\n]*data-absent/i);
+  assert.match(source, /cleanup_attempted/i);
+  assert.match(source, /cleanupVerified/i);
+  assert.match(source, /\$script:committedFixturePossible\s*=\s*\$true/i);
+  assert.match(source, /RecoveryOnly fixture mismatch/i);
+  assert.match(source, /recovery-cleanup\.sql/i);
+  assert.match(source, /cleanupSqlSha256/i);
+  assert.match(source, /baselineInvariantSha256/i);
+  assert.match(source, /baselineUserASha256/i);
+  assert.match(source, /imageSnapshotSha256/i);
+  assert.match(source, /Get-Sha256Hex/i);
+  assert.doesNotMatch(source, /Start-PsqlFile[^\r\n]*-SqlPath\s+\$recoverySqlPath/i, 'stored recovery SQL must never be executed directly');
+  assert.match(source, /cleanup-attempt-\$cleanupAttemptNumber\.sql/i, 'cleanup must execute a freshly regenerated fixed SQL file');
+  assert.match(source, /function\s+Stop-RunServerBackends/i);
+  assert.match(source, /pg_catalog\.pg_terminate_backend/i);
+  assert.match(source, /server-worker-drain/i);
+  assert.match(source, /server-all-drain/i);
+  assert.match(source, /application_name\s+in/i);
+  assert.match(source, /pid\s*<>\s*pg_catalog\.pg_backend_pid\(\)/i);
+  assert.match(source, /backend_type\s*=\s*'client backend'/i);
+  assert.match(source, /datname\s*=\s*current_database\(\)/i);
+  assert.match(source, /usename\s*=\s*current_user/i);
+  assert.ok(source.indexOf('server-worker-terminate') < source.indexOf('server-worker-drain'), 'workers must be terminated before their zero-drain proof');
+  assert.ok(source.indexOf('server-worker-drain') < source.indexOf('server-controller-terminate'), 'workers must reach zero before controllers are terminated');
+  assert.ok(source.indexOf('server-controller-terminate') < source.indexOf('server-all-drain'), 'controllers terminate only after workers are gone');
+  assert.match(source, /exact_sqlstate/i);
+  assert.match(source, /classid/i);
+  assert.match(source, /objid/i);
+  assert.match(source, /objsubid/i);
+
+  assert.match(source, /production\.settings/i);
+  assert.match(source, /production\.transactions/i);
+  assert.match(source, /preview_v1\.settings/i);
+  assert.match(source, /preview_v1\.transactions/i);
+  assert.match(source, /invariant_hash/i);
+  assert.match(source, /full_hash/i);
+  assert.match(source, /Assert-InvariantSnapshotEqual/i);
+  assert.match(source, /userACanonicalBefore/i);
+  assert.match(source, /confirmationUtc/i);
+  assert.doesNotMatch(source, /full_dump/i);
+  assert.doesNotMatch(
+    executable,
+    /\b(?:insert\s+into|update|delete\s+from|truncate(?:\s+table)?|drop\s+table|alter\s+table)\s+public\.(?:budget_settings|transactions|preview_budget_settings|preview_transactions|preview_v2_seed_metadata)\b/i,
+    'runner must never DML production, V1, or the seed marker'
+  );
+  assert.doesNotMatch(source, /preview_v2_runtime_barrier/i, 'live runner must not create a persistent barrier');
+  assert.doesNotMatch(source, /category_budgets\s*-\s*'__recurring_expense_templates'/i, 'cleanup must not erase the full template collection');
+  assert.match(source, /category_budgets\s*=\s*\$ownedPayload/i, 'disposable settings cleanup requires exact marker-owned payload equality');
+  assert.doesNotMatch(source, /ConvertFrom-Json[\s\S]{0,500}(?:monthly_budget|category_budgets)\b/i, 'financial rows must stay inside PostgreSQL sessions');
+  assert.match(source, /Get-Process\s+-Id/i);
+  assert.match(source, /Stop-Process\s+-Id/i);
+  assert.ok(source.indexOf('foreach($p in @($activeWorkers))') < source.indexOf('foreach($p in @($activeControllers))'), 'ambiguous cleanup must stop workers before controllers');
+  const cleanupBody = source.slice(source.indexOf('function Invoke-ExactCleanup'), source.indexOf('$EvidenceDirectory=Assert-SafeEvidenceDirectory'));
+  assert.ok(cleanupBody.indexOf('Reset-DockerClientForCleanup') < cleanupBody.indexOf('Stop-RunServerBackends'), 'fresh cleanup client must replace the workload container before backend drain');
+  assert.ok(cleanupBody.indexOf('Stop-RunServerBackends') < cleanupBody.indexOf('Start-PsqlFile'), 'server backends must drain before cleanup DML');
+  assert.doesNotMatch(source, /Get-Process[^\r\n]*\|[^\r\n]*Stop-Process/i, 'cleanup must only stop owned process IDs');
+}
+
 function testPreviewV2SeedAndFiveArgumentCasNeverMutateV1OrProduction() {
   const source = fs.readFileSync(path.join(__dirname, '..', 'docs', 'supabase-preview-v2-setup.sql'), 'utf8');
   const executable = source.replace(/--[^\r\n]*/g, '');
@@ -7103,6 +7336,7 @@ const tests = [
   testPreviewSeedRunbookRequiresShortWriteFreeGateAndCanonicalComparison,
   testPreviewSupabaseSetupDefinesFullFiveArgumentCasAndDropsOverloads,
   testPreviewV2SupabaseSetupCreatesIsolatedRlsObjects,
+  testPreviewV2LiveConcurrencyRunnerContract,
   testPreviewV2SeedAndFiveArgumentCasNeverMutateV1OrProduction,
   testUiCloudStatusShowsLoadingRetryAndSignedOutStates,
   testAppShowsIsolatedCopyBannerOnlyInPreviewEnvironment,
