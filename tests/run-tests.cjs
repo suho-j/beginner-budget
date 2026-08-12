@@ -5215,6 +5215,7 @@ async function testAppRecurringTemplateCrudIsRemoteFirst() {
   assert.match(harness.elements.recurringTemplateMessage.textContent, /network offline/);
   assert.strictEqual(harness.records.cloudStatuses.at(-1).readiness, 'ready');
   assert.strictEqual(allWrites().every((control) => !control.disabled), true);
+  assert.strictEqual(harness.elements.recurringTemplateCancel.disabled, false);
 
   const editGate = createDeferred();
   saveOutcomes.push(editGate);
@@ -5228,6 +5229,13 @@ async function testAppRecurringTemplateCrudIsRemoteFirst() {
   assert.deepStrictEqual(formValues(), editValues);
   assert.strictEqual(harness.elements.recurringTemplateForm.dataset.templateId, editTemplate.id);
   assert.strictEqual(allWrites().every((control) => control.disabled), true);
+  assert.strictEqual(harness.elements.recurringTemplateCancel.disabled, true);
+  const templateClearsBeforeBusyCancel = harness.records.recurringTemplateClears.length;
+  await harness.elements.recurringTemplateCancel.dispatch('click');
+  assert.deepStrictEqual(formValues(), editValues);
+  assert.strictEqual(harness.elements.recurringTemplateForm.dataset.templateId, editTemplate.id);
+  assert.strictEqual(harness.records.recurringTemplateClears.length, templateClearsBeforeBusyCancel);
+  assert.strictEqual(harness.cloudCalls.saveSettings.length, 3);
   editGate.resolve({ ok: true });
   await editing;
   const afterEditState = await exportState();
@@ -5244,6 +5252,7 @@ async function testAppRecurringTemplateCrudIsRemoteFirst() {
   assert.strictEqual(harness.elements.recurringTemplateForm.dataset.templateId, undefined);
   assert.strictEqual(harness.document.activeElement, harness.elements.recurringTemplateHeading);
   assert.strictEqual(allWrites().every((control) => !control.disabled), true);
+  assert.strictEqual(harness.elements.recurringTemplateCancel.disabled, false);
   assertEveryRenderUsesRecurringDomain();
 
   const deleteEditButton = harness.dynamicControls.find((control) => (
@@ -5354,6 +5363,7 @@ async function testAppRecurringTemplateCrudIsRemoteFirst() {
   assert.match(conflictHarness.elements.globalMessage.textContent, /다른 브라우저/);
   assert.strictEqual(conflictHarness.records.cloudStatuses.at(-1).readiness, 'load-error');
   assert.strictEqual(allWrites(conflictHarness).every((control) => control.disabled), true);
+  assert.strictEqual(conflictHarness.elements.recurringTemplateCancel.disabled, false);
   await conflictHarness.elements.recurringTemplateForm.dispatch('submit', {
     submitter: conflictHarness.elements.recurringTemplateSave
   });
@@ -5495,6 +5505,29 @@ async function testAppRecurringConfirmationSerializesAndPreservesFailureInput() 
   assert.deepStrictEqual(await exportState(harness), exportedBefore);
   assert.deepStrictEqual(plain(harness.records.renderedSummaries.at(-1)), summaryBefore);
 
+  assert.strictEqual(harness.elements.recurringConfirmCancel.disabled, true);
+  const explicitBusyCancel = await harness.elements.recurringConfirmCancel.dispatch('click');
+  assert.strictEqual(explicitBusyCancel.defaultPrevented, true);
+  assert.strictEqual(harness.elements.recurringConfirmDialog.open, true);
+  assert.deepStrictEqual(confirmValues(harness), editedValues);
+  assert.strictEqual(harness.elements.recurringConfirmDialog.dataset.transactionId, deterministicId);
+  assert.strictEqual(harness.records.recurringConfirmCloses.length, 0);
+  assert.strictEqual(harness.cloudCalls.insertTransaction.length, 1);
+  assert.deepStrictEqual(await exportState(harness), exportedBefore);
+  assert.strictEqual(harness.elements.recurringConfirmMessage.textContent, '저장 중이에요. 완료될 때까지 기다려 주세요.');
+  assert.strictEqual(harness.document.activeElement, harness.elements.recurringConfirmMessage);
+
+  const nativeBusyCancel = await harness.elements.recurringConfirmDialog.dispatch('cancel');
+  assert.strictEqual(nativeBusyCancel.defaultPrevented, true);
+  assert.strictEqual(harness.elements.recurringConfirmDialog.open, true);
+  assert.deepStrictEqual(confirmValues(harness), editedValues);
+  assert.strictEqual(harness.elements.recurringConfirmDialog.dataset.transactionId, deterministicId);
+  assert.strictEqual(harness.records.recurringConfirmCloses.length, 0);
+  assert.strictEqual(harness.cloudCalls.insertTransaction.length, 1);
+  assert.deepStrictEqual(await exportState(harness), exportedBefore);
+  assert.strictEqual(harness.elements.recurringConfirmMessage.textContent, '저장 중이에요. 완료될 때까지 기다려 주세요.');
+  assert.strictEqual(harness.document.activeElement, harness.elements.recurringConfirmMessage);
+
   insertGate.resolve({ ok: true });
   await saving;
   const exportedAfter = await exportState(harness);
@@ -5512,6 +5545,7 @@ async function testAppRecurringConfirmationSerializesAndPreservesFailureInput() 
   assert.deepStrictEqual(confirmValues(harness), { date: '', amount: '', category: '', memo: '' });
   assert.strictEqual(harness.document.activeElement, harness.elements.recurringUpcomingHeading);
   assert.strictEqual(harness.elements.globalMessage.textContent, '기록했어요.');
+  assert.strictEqual(harness.elements.recurringConfirmCancel.disabled, false);
   assert.strictEqual(harness.document.querySelectorAll('[data-cloud-write]').every((control) => !control.disabled), true);
   assert.deepStrictEqual(writeCounts(harness), { insert: 1, update: 0, upsert: 0, upload: 0, delete: 0 });
 
@@ -5593,6 +5627,7 @@ async function testAppRecurringConfirmationSerializesAndPreservesFailureInput() 
   assert.strictEqual(failureHarness.document.activeElement, failureHarness.elements.recurringConfirmMessage);
   assert.strictEqual(failureHarness.records.cloudStatuses.at(-1).readiness, 'ready');
   assert.strictEqual(failureHarness.document.querySelectorAll('[data-cloud-write]').every((control) => !control.disabled), true);
+  assert.strictEqual(failureHarness.elements.recurringConfirmCancel.disabled, false);
 
   const nativeCancel = await failureHarness.elements.recurringConfirmDialog.dispatch('cancel');
   assert.strictEqual(nativeCancel.defaultPrevented, true);
@@ -5632,6 +5667,37 @@ async function testAppRecurringConfirmationSerializesAndPreservesFailureInput() 
   await deleteHarness.elements.list.dispatch('click', { target: deleteButton });
   assert.match(deleteHarness.records.confirmCalls.at(-1), /삭제하면 해당 예정 항목이 다시 나타나요\./);
   assert.strictEqual(deleteHarness.cloudCalls.deleteTransaction.length, 0);
+
+  const fakePrefixTransaction = {
+    ...confirmedTransaction,
+    id: `tx-recurring-imported-manual-${selectedMonth}`,
+    memo: '가져온 일반 거래'
+  };
+  const missingTemplateTransaction = {
+    ...confirmedTransaction,
+    id: transactions.recurringTransactionId('rt-deleted-template', selectedMonth),
+    memo: '삭제된 템플릿 거래'
+  };
+  const warningHarness = createAppHarness({
+    cloudState: storage.normalizeState({
+      ...initialState,
+      transactions: [fakePrefixTransaction, missingTemplateTransaction]
+    }),
+    confirm: () => false
+  });
+  await warningHarness.init();
+  for (const transaction of [fakePrefixTransaction, missingTemplateTransaction]) {
+    const button = warningHarness.createElement('button');
+    button.dataset.action = 'delete';
+    button.dataset.id = transaction.id;
+    button.closest = () => button;
+    await warningHarness.elements.list.dispatch('click', { target: button });
+    assert.doesNotMatch(
+      warningHarness.records.confirmCalls.at(-1),
+      /삭제하면 해당 예정 항목이 다시 나타나요\./
+    );
+  }
+  assert.strictEqual(warningHarness.cloudCalls.deleteTransaction.length, 0);
 }
 
 async function testAppRecurringDuplicateReloadsWithoutUpsert() {

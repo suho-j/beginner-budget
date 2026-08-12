@@ -18,6 +18,8 @@
     document.querySelectorAll('[data-cloud-write]').forEach((control) => {
       control.disabled = writeDisabled;
     });
+    elements.recurringTemplateCancel.disabled = mutationInFlight;
+    elements.recurringConfirmCancel.disabled = mutationInFlight;
     const canReadCloud = Boolean(signedInUser)
       && ['ready', 'load-error'].includes(cloudReadiness)
       && !mutationInFlight;
@@ -385,6 +387,15 @@
 
   function handleRecurringTemplateCancel(event) {
     event.preventDefault();
+    if (mutationInFlight) {
+      window.BudgetUI.setMessage(
+        elements.recurringTemplateMessage,
+        '저장 중이에요. 완료될 때까지 기다려 주세요.',
+        'error'
+      );
+      elements.recurringTemplateMessage.focus();
+      return;
+    }
     recurringTemplateEditId = '';
     window.BudgetUI.clearRecurringTemplateEdit(elements);
   }
@@ -473,7 +484,37 @@
 
   function handleRecurringConfirmCancel(event) {
     event.preventDefault();
+    if (mutationInFlight) {
+      window.BudgetUI.setMessage(
+        elements.recurringConfirmMessage,
+        '저장 중이에요. 완료될 때까지 기다려 주세요.',
+        'error'
+      );
+      elements.recurringConfirmMessage.focus();
+      return;
+    }
     window.BudgetUI.closeRecurringConfirmDialog(elements, { reason: 'cancel' });
+  }
+
+  function isCurrentRecurringTransaction(transaction) {
+    const transactionId = String(transaction && transaction.id || '');
+    const monthMatch = transactionId.match(/-(\d{4}-\d{2})$/);
+    if (!monthMatch || !window.BudgetStorage.isValidMonthString(monthMatch[1])) return false;
+    const scheduledMonth = monthMatch[1];
+    const templates = window.BudgetStorage.normalizeRecurringExpenseTemplates(
+      state.recurringExpenseTemplates
+    );
+    return templates.some((template) => {
+      const scheduledDate = window.BudgetStorage.scheduledDateForMonth(
+        scheduledMonth,
+        template.dayOfMonth
+      );
+      return Boolean(
+        scheduledDate
+        && scheduledDate >= template.startsOn
+        && window.BudgetTransactions.recurringTransactionId(template.id, scheduledMonth) === transactionId
+      );
+    });
   }
 
   async function handleTransactionAction(event) {
@@ -489,7 +530,7 @@
     if (button.dataset.action !== 'delete') return;
 
     const label = `${transaction.date} ${transaction.category} ${window.BudgetUI.formatWon(transaction.amount)}`;
-    const recurringWarning = transaction.id.startsWith('tx-recurring-')
+    const recurringWarning = isCurrentRecurringTransaction(transaction)
       ? '\n삭제하면 해당 예정 항목이 다시 나타나요.'
       : '';
     if (!window.confirm(`${label} 내역을 삭제할까요?${recurringWarning}`)) return;
