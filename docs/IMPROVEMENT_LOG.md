@@ -12,7 +12,7 @@
 
 ### 사용자 기능
 
-- 설정 탭에 반복지출 템플릿 등록·수정·삭제를 추가했다. 템플릿은 이름, 지출 카테고리, 예상 금액, 매월 결제일을 가지며 별도의 다섯 번째 탭을 만들지 않았다.
+- 설정 탭에 반복지출 템플릿 등록·수정·삭제를 추가했다. 템플릿은 이름, 지출 카테고리, 예상 금액, 매월 결제일을 가지며 별도의 다섯 번째 탭을 만들지 않았다. 화면의 이름은 저장 JSON에서 `memo` 필드이므로 QA marker는 템플릿 `memo`에 넣는다.
 - 홈 탭에서 선택한 예산 기간의 반복지출을 `지남`, `오늘`, `예정`, `기록됨` 상태와 예상 합계로 볼 수 있게 했다.
 - 예정 항목을 지출로 기록하기 전 사용일·실제 금액·카테고리·메모를 바꿀 수 있게 했다. 미확정 금액은 실제 합계에 포함하지 않는다.
 - 31일 설정은 짧은 달의 마지막 날에 표시하되 설정값은 31로 유지한다.
@@ -26,14 +26,17 @@
 - 확정은 순수 insert이며 upsert하지 않는다. 정확한 `23505`에만 재다운로드해 이미 기록된 행을 확인한다.
 - V2 transactions PK를 `(user_id, id)`로 두어 다른 사용자가 같은 결정적 ID를 가질 수 있고, 같은 사용자 중복만 막는다.
 - V2 SQL은 잘못된 PK·FK·CHECK, rogue RLS policy, 전역 unique를 적용 전에 거부하고 운영→V2 일회 seed와 `production_snapshot_v2` marker를 제공한다.
+- 실제 Supabase 적용은 서로 다른 QA A/B가 `auth.users`에 각각 정확히 한 행 존재해야 시작하는 hard gate다. 둘째 사용자가 없으면 writer 중단·setup·DML을 시작하지 않는다.
+- live RLS·단일 세션 CAS는 rollback-only로 검증하고, 교차 세션 stale·duplicate는 marker disposable fixture만 commit한 뒤 user-scoped exact ID로 정리한다. 동시성 barrier는 새 영속 객체 없이 advisory lock과 `application_name`·`pg_locks` 관찰을 사용한다.
+- live seed↔RPC 경합은 marker/data 파괴 없이는 만들 수 없어 실행하지 않는다. `NOT EXECUTED LIVE — destructive reset required`로 남기고 격리 PostgreSQL 17 증거만 참조한다.
 - JSON 백업은 version 2와 템플릿을 포함하며 V1/버전 누락 백업은 빈 템플릿으로 승격하고 미래 버전과 손상 배열은 거부한다.
 
 ### 자동 검증과 대기 중인 근거
 
 - 마지막 기능 구현 SHA를 기준으로 작성한 문서 동기화 작업 트리에서 `node tests/run-tests.cjs`가 정확히 `87 tests passed`로 끝났다.
 - 같은 작업 트리에서 여섯 JavaScript 문법 검사, 8개 대상 파일의 strict UTF-8 읽기, Markdown 상대 링크, 변경 범위·cache-buster, `git diff --check`가 통과했다.
-- PostgreSQL 17 격리 런타임: **PENDING — Task 13**
-- 실제 Supabase V2 SQL 적용, 두 사용자 RLS·인증 저장, QA 정리: **PENDING — Task 14**
+- PostgreSQL 17 격리 런타임: **PASS — Task 13**, 검증 SHA `10cd05693449cf154f3559ca3bb27928d613eb7d`, 두 session exit code 0, 잔여 컨테이너 0
+- 실제 Supabase V2 SQL 적용, 두 사용자 RLS·인증 저장, committed-concurrency runner, QA 정리: **PENDING — Task 14**
 - 배포 산출물 생성과 공개 `/v2/`: **PENDING — Tasks 15~16**
 - 공개 URL의 source SHA, 데스크톱·360×800·키보드·포커스·live region·콘솔 QA: **PENDING**
 

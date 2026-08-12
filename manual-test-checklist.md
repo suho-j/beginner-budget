@@ -13,16 +13,17 @@
 
 - [ ] 실행 ID, UTC 시작 시각, 증거 보관 위치를 기록했다.
 - [ ] 동결 전 백업을 받았다면 `PRELIMINARY-예비-권위없음`으로 표시했고 authoritative 자료·충돌 감사·복구 기준으로 사용하지 않았다.
-- [ ] `$qaMarker = 'QA-V2-RECURRING-' + (Get-Date -Format 'yyyyMMdd-HHmmss')`를 만들고 `templateIds = @()`, `transactionIds = @()`, `events = @()`인 실행 전체 append-only evidence ledger를 증거 위치에 저장했다. 각 ID 배열 항목은 `{ userId, id, memo, purpose, recordedAtUtc }` record이며 append 직후 파일도 갱신한다.
+- [ ] `$qaMarker = 'QA-V2-RECURRING-' + (Get-Date -Format 'yyyyMMdd-HHmmss')`를 만들고 `templateIds = @()`, `transactionIds = @()`, `events = @()`인 실행 전체 append-only evidence ledger를 증거 위치에 저장했다. 각 ID 배열 항목은 `{ userId, id, memo, purpose, recordedAtUtc }` record이며 append 직후 파일도 갱신한다. 템플릿은 화면 "이름"에 대응하는 실제 JSON `memo` 필드에 marker를 넣는다.
+- [ ] login/project ref 확인 뒤 writer 중단 전에 psql `auth_gate`를 실행해 서로 다른 A/B가 `auth.users`에 각각 정확히 한 행임을 확인했다. 실패했다면 창을 열지 않았다.
 - [ ] 운영·V1·V2·로컬의 모든 인증된 탭과 백그라운드/API writer를 멈췄다.
 - [ ] 탭·프로세스·API writer 동결을 명시적으로 확인하고 확인 시각을 기록했다.
-- [ ] **동결 확인 뒤** 운영 두 테이블의 새 authoritative 전체 백업을 만들었다. 동결 전 예비 백업을 재사용하지 않았다.
+- [ ] **동결 확인 뒤** 운영 두 테이블의 새 authoritative 전체 백업을 승인된 암호화 위치에 만들었다. evidence에는 백업 ID·시각·project ref만 남기고 금융 원문 백업을 복사하지 않았으며 동결 전 예비 백업을 재사용하지 않았다.
 - [ ] 같은 frozen snapshot에서 운영·V1 두 테이블의 사용자별 count와 `production/V1 invariant hash`를 기록했다.
 - [ ] settings invariant hash에 `user_id`, `monthly_budget`, `category_budgets`, UTC `updated_at`이 모두 포함된다.
 - [ ] transactions invariant hash에 `id`, `user_id`, `date`, `type`, `category`, `amount`, `memo`, `source`, UTC `created_at`이 모두 포함된다.
 - [ ] `to_regclass`로 V2 settings·transactions·seed metadata 각각을 `ABSENT` 또는 `EXISTS`로 기록했다.
-- [ ] ABSENT relation은 count·dump·hash 조회에서 참조하지 않았다.
-- [ ] EXISTS relation만 적용 전 count·모든 컬럼 full dump·full hash를 기록했고, 기존 객체를 삭제·truncate·수선하지 않았다.
+- [ ] ABSENT relation은 count·hash 조회에서 참조하지 않았다.
+- [ ] EXISTS relation만 적용 전 count·모든 컬럼 canonical hash를 기록했고 금융 행 원문을 출력하지 않았으며, 기존 객체를 삭제·truncate·수선하지 않았다.
 - [ ] metadata relation이 EXISTS일 때만 `production_snapshot_v2`를 조회해 marker `ABSENT` 또는 `EXISTS`와 정확한 행을 기록했다. metadata relation이 ABSENT라면 조회하지 않고 `marker ABSENT — metadata relation ABSENT`로 기록했다.
 - [ ] `A 최초 시드`, `A' 불완전 최초 설치`, `B 안전 재실행`, `중단` 중 하나를 기록했다.
 - [ ] marker가 EXISTS인데 V2 세 relation 중 하나라도 ABSENT인 모순 상태라면 SQL을 적용하지 않고 중단했다.
@@ -34,7 +35,7 @@
 - [ ] A'에서 V2 transactions가 EXISTS인 경우만 `(user_id, id)` 기준 mapped→existing 값 충돌 0건을 확인했다. ABSENT라면 relation을 조회하지 않고 `not applicable — ABSENT`로 기록했다.
 - [ ] A'의 기존 객체에 schema drift나 existing-conflict가 있으면 삭제·truncate·수선하지 않고 V2 SQL 실패 상태를 보존했다.
 - [ ] 위 frozen snapshot 자료 뒤 다른 writer를 열지 않고 [V2 SQL](docs/supabase-preview-v2-setup.sql)만 정확히 한 단위로 적용했고 V1·운영 SQL은 실행하지 않았다.
-- [ ] 적용 뒤 V2 세 relation 모두의 count·모든 컬럼 full dump·full hash와 새 marker 행을 기록했다.
+- [ ] 적용 뒤 V2 세 relation 모두의 count·모든 컬럼 canonical hash와 새 marker 행을 기록했다.
 - [ ] 새 marker의 source settings/transactions count가 같은 frozen snapshot의 authoritative 현재 운영 전체 count와 각각 일치한다.
 - [ ] `production→V2 seed semantic content comparison`에서 settings의 `user_id`, `monthly_budget`, `category_budgets` 양방향 차이가 0건이다. V2 trigger 소유 `updated_at`은 이 비교에서만 제외했다.
 - [ ] 같은 A/A' semantic comparison에서 transactions의 mapped ID와 모든 의미 필드(`user_id`, 날짜, 유형, 카테고리, 금액, 메모, source, `created_at`) 양방향 차이가 0건이다.
@@ -43,10 +44,10 @@
 
 ### B — marker EXISTS 안전 재실행
 
-- [ ] V2 세 relation과 `production_snapshot_v2` marker가 모두 EXISTS이며, 세 relation의 적용 전 count·모든 컬럼 full dump·full hash와 marker 정확한 행을 기록했다.
+- [ ] V2 세 relation과 `production_snapshot_v2` marker가 모두 EXISTS이며, 세 relation의 적용 전 count·모든 컬럼 canonical hash와 marker 정확한 행을 기록했다.
 - [ ] 다른 writer를 열지 않고 [V2 SQL](docs/supabase-preview-v2-setup.sql)만 정확히 한 단위로 적용해 schema guard 통과를 확인했다.
-- [ ] 적용 뒤 같은 세 relation의 count·모든 컬럼 full dump·full hash와 marker 행을 다시 기록했다.
-- [ ] 적용 전후 세 relation의 count·full dump·full hash와 marker 행이 문자열 그대로 byte-for-byte 일치한다.
+- [ ] 적용 뒤 같은 세 relation의 count·모든 컬럼 canonical hash와 marker 행을 다시 기록했다.
+- [ ] 적용 전후 세 relation의 count·canonical hash와 marker 행이 문자열 그대로 일치한다.
 - [ ] marker source count를 현재 운영 count와 비교하지 않았고, production→V2 semantic equality를 B의 합격 조건으로 요구하지 않았다.
 - [ ] marker source count는 최초 snapshot의 역사적 값이며 이후 운영·V2가 정상적으로 달라질 수 있음을 실패나 reseed 근거로 사용하지 않았다.
 - [ ] 적용 후 운영·V1 count와 `updated_at` 포함 invariant hash가 이 실행의 동결 직후 값과 문자열 그대로 같다.
@@ -64,31 +65,45 @@
 - [ ] marker memo를 가진 V2-only 거래를 만들고 각 user-scoped exact ID record를 생성 즉시 `transactionIds` 배열에 append했다.
 - [ ] marker fixture에서 edit와 delete를 각각 수행하고 시각·행동·ID를 `events`에 append했다.
 - [ ] fixture 중 삭제한 ID도 ledger 배열에서 제거하지 않았다.
-- [ ] SQL 재실행 직전 V2 세 relation의 count·모든 컬럼 full dump·full hash와 seed marker 행을 기록했다.
-- [ ] 동일 V2 SQL을 재실행해 schema guard 통과를 확인한 뒤 같은 자료를 기록해 문자열 그대로 byte-for-byte 일치했다.
+- [ ] SQL 재실행 직전 V2 세 relation의 count·모든 컬럼 canonical hash와 seed marker 행을 기록했다.
+- [ ] 동일 V2 SQL을 재실행해 schema guard 통과를 확인한 뒤 같은 count·canonical hash·marker를 기록해 문자열 그대로 일치했다.
 - [ ] marker 재실행에서 add·edit·delete 결과가 보존되고 운영·V1 count와 `updated_at` 포함 invariant hash도 변하지 않았다.
 - [ ] fixture 재실행에도 B 계약을 적용해 marker source count와 현재 운영 count의 일치나 production→V2 semantic equality를 요구하지 않았다.
 - [ ] marker를 삭제하거나 임의 reseed하지 않았다.
 - [ ] marker fixture 데이터는 최종 정리 ledger에 남겨 두었고 일반 writer를 재개하지 않았다.
 
-## 스키마·PostgreSQL 런타임 — PENDING
+## 스키마·PostgreSQL 런타임 — Task 13 하네스 PASS, drift 수동 fixture PENDING
 
 - [ ] 잘못된 settings/transactions PK fixture가 적용 전 `55000`으로 실패하고 객체·데이터를 바꾸지 않는다.
 - [ ] 잘못된 FK 또는 CHECK fixture가 적용 전 `55000`으로 실패한다.
 - [ ] rogue RLS policy fixture가 적용 전 `55000`으로 실패한다.
 - [ ] 거래 전역 unique·표현식 unique·부분 unique fixture가 적용 전 `55000`으로 실패한다.
-- [ ] PostgreSQL 17에서 사용자 A/B RLS 격리와 anon/public RPC 거부를 확인했다.
-- [ ] 단조 settings version, CAS 성공, stale `40001`을 확인했다.
-- [ ] 같은 결정적 ID는 다른 사용자에게 공존하고 같은 사용자 중복은 `23505`다.
-- [ ] marker 재실행, 운영·V1 불변을 런타임에서 확인했다.
+- [x] PostgreSQL 17.6에서 사용자 A/B RLS 격리와 anon/public RPC 거부를 확인했다.
+- [x] 단조 settings version, CAS 성공, stale `40001`을 확인했다.
+- [x] 같은 결정적 ID는 다른 사용자에게 공존하고 같은 사용자 중복은 `23505`임을 확인했다.
+- [x] marker 재실행, 운영·V1 불변, seed↔RPC 실제 lock wait를 런타임에서 확인했다.
+- [x] 두 session exit code 0, 잔여 컨테이너 0, 최종 출력 `preview-v2 PostgreSQL runtime tests passed`를 기록했다.
 
 ## 실제 Supabase 두 사용자 — PENDING
 
-- [ ] 기존 인증 사용자 A/B가 각각 한 명 존재한다. B가 없으면 중단하고 사용자에게 준비를 요청했다.
+- [ ] 위 setup 전 psql `auth_gate`의 exit code 0과 repo 밖 evidence를 이 실행의 hard-gate 근거로 사용했고 setup 뒤 `preflight`와 혼용하지 않았다.
+- [ ] 위 hard gate가 실패하면 writer 중단 창·setup·DML을 시작하지 않았고, 임의 UUID나 계정을 만들지 않았다.
+- [ ] live verification은 SQL Editor 여러 탭이 아니라 psql `ON_ERROR_STOP`·native exit code로 실행했고, password·token·service-role key를 파일·명령 인자·stdout에 넣지 않았다.
+- [ ] rollback-only phase `preflight`, A/A' 전용 `seed_canonical`, `permissions`, `rls_a`, `rls_b`, `cas_a`, `cas_b`, `duplicate_scope` 각각의 exit code 0과 repo 밖 evidence가 있다.
+- [ ] A/A'이면 운영→V2 settings·transactions semantic 양방향 차이 0건을 확인했다.
+- [ ] B이면 setup 전후 V2 count·모든 컬럼 canonical hash·marker의 문자열 불변만 요구했고, 현재 운영↔V2 차이를 실패나 reseed 근거로 사용하지 않았다.
+- [ ] RLS·권한·단일 세션 CAS는 transaction-local claim과 authenticated role 자체 assertion 뒤 outer transaction에서 모두 rollback했다.
 - [ ] A/B가 서로의 V2 settings·transactions를 읽거나 쓰지 못한다.
 - [ ] A/B가 같은 결정적 거래 ID를 각각 저장할 수 있다.
 - [ ] 같은 사용자 중복은 정확히 `23505`이고 upsert가 일어나지 않는다.
 - [ ] 템플릿 settings stale CAS가 `40001`이고 로컬 입력을 덮어쓰지 않는다.
+- [ ] reviewed committed-concurrency runner가 없으면 교차 세션과 Task 14 live 완료를 `PENDING`으로 유지했고 수동 SQL Editor 탭이나 rollback-only 결과로 대체하지 않았다.
+- [ ] 교차 세션 `cas-stale`, `same-user-duplicate`, `cross-user-same-id`를 독립 phase로 실행했다. 기대 결과를 `40001 또는 23505`처럼 합쳐 판정하지 않았다.
+- [ ] 교차 세션 stale/duplicate는 marker disposable fixture만 commit했고 성공 즉시 user-scoped exact ID를 append-only ledger에 기록했다.
+- [ ] 새 영속 barrier table 없이 run-scoped advisory lock, `application_name`, backend PID, `pg_locks`·`pg_stat_activity`로 두 worker의 실제 대기를 bounded deadline 안에 확인했다.
+- [ ] 모든 session에서 bounded statement/lock timeout을 사용했고 `40P01`·statement timeout·lock timeout이 0건이다.
+- [ ] committed fixture는 exact 거래 ID → exact 템플릿 ID 순으로 정리했다. 기존 settings 행은 실행 전 canonical 값으로 CAS 복원했고, 사전 ABSENT와 marker 소유가 증명된 disposable settings 행만 마지막에 삭제했다.
+- [ ] live seed↔RPC 경합은 `NOT EXECUTED LIVE — destructive reset required`로 기록하고 Task 13 격리 PostgreSQL 증거만 참조했다. 이 항목을 live 성공으로 체크하지 않았고, marker fixture 교차 세션 대기 검증과 혼용하지 않았다.
 - [ ] A/B 검증으로 새로 만든 모든 템플릿·거래의 memo를 같은 `$qaMarker`로 시작하고, 저장 성공 직후 user-scoped exact ID record를 같은 복수 ledger에 append했다.
 - [ ] 실제 검증 전후 운영·V1 count와 `updated_at` 포함 `production/V1 invariant hash`가 문자열 그대로 같다.
 
@@ -129,7 +144,7 @@
 - [ ] V1 또는 version 누락 백업을 가져오면 템플릿은 빈 배열로 승격된다.
 - [ ] future version, 손상된 transactions/templates 배열, 유효 데이터 0건 백업은 현재 상태를 지우지 않고 거부된다.
 - [ ] marker fixture import·export·클라우드 재다운로드가 템플릿·거래 전체 상태 계약을 지키고 import로 생긴 모든 user-scoped ID도 즉시 ledger에 append했다.
-- [ ] 샘플·전체 초기화의 87개 자동 테스트 커버리지와 별개로, marker 주입 또는 롤백 보장 격리 PostgreSQL/live 하네스 결과는 **PENDING**이다. 고정 memo 샘플·전체 상태 삭제를 공유 DB frozen run에서 실행하지 않았고, 자동 테스트만으로 수동 항목을 통과 처리하지 않았다.
+- [ ] 샘플·전체 초기화는 87개 자동 테스트와 Task 13 격리 PostgreSQL 근거만 참조했다. 고정 memo 샘플·전체 상태 삭제를 공유 DB frozen run에서 실행하지 않았고, 자동·격리 테스트만으로 live 수동 항목을 통과 처리하지 않았다.
 - [ ] 로그아웃하면 금융 데이터, 반복지출 dialog/edit 상태, 필터가 화면과 메모리에서 사라지고 쓰기가 잠긴다.
 
 ## 데스크톱·360×800·접근성
@@ -148,6 +163,7 @@
 
 - [ ] `transactionIds` 배열을 `userId`별로 나누고 모든 exact 거래 ID를 먼저 순회해 삭제하거나 이미 0건임을 기록했다.
 - [ ] `templateIds` 배열을 `userId`별로 나누고 모든 exact 템플릿 ID를 다음으로 순회해 삭제하거나 이미 0건임을 기록했다.
+- [ ] committed concurrency fixture가 쓴 기존 settings 행은 실행 전 canonical 값으로 CAS 복원했다. 새 settings 행은 사전 ABSENT와 marker 소유를 모두 증명한 경우에만 exact user ID로 마지막에 삭제했다.
 - [ ] exact-ID pass 뒤 marker prefix로 잔여 항목을 찾아 발견한 ID를 ledger에 append하고 삭제해 marker 0건을 만들었다.
 - [ ] 변경한 총예산과 카테고리 예산을 시작 값으로 복원했다.
 - [ ] 클라우드를 다시 받고 브라우저의 모든 예산 월에서 ledger의 **어느 ID도 없고** marker prefix도 0건이다.
@@ -155,7 +171,7 @@
 - [ ] `preview_v2_transactions`에서 user-scoped ledger record를 사용한 `id = any(<해당 user transactionIds 배열>) OR memo like '<marker>%'`가 모든 ledger user에게 0건이다.
 - [ ] `preview_v2_budget_settings.__recurring_expense_templates`에서 user-scoped ledger record를 사용한 `id = any(<해당 user templateIds 배열>) OR memo like '<marker>%'`가 모든 ledger user에게 0건이다.
 - [ ] marker fixture에서 이미 삭제한 ID까지 ledger 전체의 브라우저·export·DB 0건 증거가 있다.
-- [ ] 사용자별 V2 두 테이블의 최종 count·모든 컬럼 full dump·full hash와 seed marker를 기록했다.
+- [ ] 사용자별 V2 두 테이블의 최종 count·모든 컬럼 canonical hash와 seed marker를 기록했고 금융 행 원문을 출력하지 않았다.
 - [ ] 운영·V1 count와 `updated_at` 포함 invariant hash가 동결 직후 authoritative 값과 문자열 그대로 같다.
 - [ ] marker fixture와 기능 QA의 모든 ledger ID·marker 제거, 예산 원복, 운영·V1 불변 뒤에만 일반 writer를 재개하고 시각을 기록했다.
 - [ ] marker fixture가 하나라도 남아 있는 동안 writer를 재개하지 않았다.

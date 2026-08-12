@@ -1300,6 +1300,7 @@ git commit -m "V2 미리보기 실행 검증과 산출물 도구 추가"
 
 - Execute: `docs/supabase-preview-v2-setup.sql`
 - Create: `tests/supabase-preview-v2-live-verification.sql`
+- Required before committed concurrency phases: reviewed `tests/run-preview-v2-live-concurrency.ps1` — **PENDING, not created in this Task 14 preparation change**
 - Create evidence outside repository: `$env:TEMP\beginner-budget-preview-v2-live\<UTC-run-id>\`
 - Update evidence: `docs/TEST_PLAN.md`
 - Update evidence: `manual-test-checklist.md`
@@ -1308,7 +1309,9 @@ git commit -m "V2 미리보기 실행 검증과 산출물 도구 추가"
 
 - [ ] **Step 1: 사용자에게 Supabase 대시보드 로그인을 요청하고 로그인 완료를 확인한다**
 
-OAuth 버튼이나 자격증명 입력을 에이전트가 대신하지 않는다. 사용자가 로그인했다는 확인과 프로젝트 식별이 보일 때까지 live SQL 적용을 시작하지 않는다. read-only query로 QA user A/B UUID가 실제 `auth.users`에 각각 한 행 존재하는지 확인한다. B가 없으면 임의 UUID나 새 계정을 자동 생성하지 않고 사용자에게 두 번째 테스트 계정 준비 승인을 요청한 채 live 검증을 pause한다.
+OAuth 버튼이나 자격증명 입력을 에이전트가 대신하지 않는다. 사용자가 로그인했다는 확인과 정확한 project ref가 보일 때까지 live SQL 적용을 시작하지 않는다. 그 뒤에도 먼저 setup 전 read-only `auth_gate` phase만 실행해 서로 다른 QA user A/B UUID가 유효하고 `auth.users`에 각각 정확히 한 행 존재하는지 확인한다.
+
+이 검사는 **Task 14 전체의 hard gate**다. A/B가 같거나 어느 한쪽이라도 0행 또는 2행 이상이면 쓰기 중단 창, setup SQL, live DML을 시작하지 않는다. B가 없으면 임의 UUID나 계정을 자동 생성하지 않고, 사용자가 정상 Supabase Auth 흐름으로 두 번째 테스트 계정을 준비하도록 요청한 채 live 검증을 `PENDING`으로 둔다. 둘째 계정 준비와 A/B 재확인은 writer를 중단하기 전에 끝낸다.
 
 - [ ] **Step 2: 짧은 최초 seed 쓰기 중단 창을 연다**
 
@@ -1328,17 +1331,45 @@ SQL editor에서 `docs/supabase-preview-v2-setup.sql` 전체만 실행한다. �
 
 - [ ] **Step 4: seed·RLS·권한·CAS를 실제 두 세션에서 검증한다**
 
-`tests/supabase-preview-v2-live-verification.sql`은 실제 QA user A/B UUID를 SQL 변수로 받는다. 각 session은 `begin; select set_config('request.jwt.claim.sub', ..., true); set local role authenticated; ... assertions/barrier ...; rollback;`로 감싸 claim과 role이 모든 assertion 동안 유지되게 한다. psql 두 프로세스 또는 Supabase SQL editor 두 탭에서 barrier row를 사용해 stale snapshot을 동시에 준비하고, 기대 SQLSTATE `40001`·`23505`를 assertion한다. 실행 결과는 임시 evidence 폴더의 `rls-session-a.txt`, `rls-session-b.txt`, `cas-session-a.txt`, `cas-session-b.txt`, `canonical-before.csv`, `canonical-after.csv`로 저장한다. 다음을 확인한다.
+`tests/supabase-preview-v2-live-verification.sql`은 `run_id`, 동일한 `qa_marker`, 서로 다른 실제 QA user A/B UUID, 명시적 실행 phase를 외부 변수로 받는다. 기본값은 없으며 setup 전 첫 phase는 DML 없는 read-only `auth_gate`다. 변수 누락, UUID 오류, A/B 동일, `auth.users` 정확히 한 행 조건 실패 시 즉시 실패하며 setup이나 DML로 진행하지 않는다. 모든 phase는 UTC, `ON_ERROR_STOP`, bounded `statement_timeout`·`lock_timeout`을 사용하고 자격증명·이메일·원문 금융 데이터는 출력하지 않는다.
+
+실행 수단도 hard gate다. setup 전체 적용은 Step 3의 SQL Editor를 쓸 수 있지만, live verification은 `ON_ERROR_STOP`, 고정 세션, exit code와 파일 증거가 필요한 **psql 전용**이다. SQL Editor 여러 탭을 동시성 증거로 쓰지 않는다. 접속 정보는 Supabase dashboard의 정확한 project ref에서 가져오되 password·access token·service-role key를 파일, 명령 인자, stdout에 넣지 않고 psql 대화형 prompt로만 입력한다. rollback-only phase는 스크립트 상단에 열거된 정확한 phase를 각각 별도 psql 프로세스로 실행하고 모든 exit code 0을 기록한다.
+
+현재 `tests/supabase-preview-v2-live-verification.sql`은 read-only/rollback-only 검증과 setup 재실행 snapshot만 담당한다. 아래 commit이 필요한 교차 세션 세 시나리오는 이 파일의 rollback 결과로 통과 처리하지 않는다. controller/worker 실행, lock 관찰, append-only ledger, exact cleanup을 자동화하는 별도 PowerShell runner가 구현·독립 검토·격리 검증되기 전에는 committed concurrency phase와 이후 live 완료 판정을 `PENDING`으로 두고 pause한다.
+
+설치 분기 증거는 섞지 않는다.
+
+- A/A'는 최초 seed 뒤 production→V2 settings·transactions semantic 양방향 차이가 각각 0건인지 확인한다. settings의 trigger 소유 `updated_at`만 이 비교에서 제외한다.
+- B는 현재 운영과 V2가 달라도 정상이다. setup 전후 V2 세 relation의 count·모든 컬럼을 포함한 canonical hash와 marker가 문자열 그대로 같은지만 확인한다. 금융 행 원문은 stdout/evidence에 출력하지 않는다. 운영↔V2 차이를 실패나 reseed 근거로 사용하지 않는다.
+- 어느 분기든 production/V1 count와 모든 컬럼 invariant hash는 preflight, 각 검증 phase, cleanup 뒤까지 같아야 한다.
+
+RLS·권한과 단일 세션 CAS 검증은 각 세션을 `begin; select set_config('request.jwt.claim.sub', ..., true); set local role authenticated; ...; rollback;`로 감싼다. assertion 전에 `current_user = 'authenticated'`와 `auth.uid() = <대상 사용자>`를 자체 확인하고, 자신의 행만 보이는지, 교차 사용자 SELECT/DML이 차단되는지, metadata 접근과 anon/public RPC가 거부되는지 확인한다. 성공 CAS의 단조 token과 같은 세션의 stale settings/transaction snapshot `40001`도 outer transaction에서 전부 rollback한다. 기대 오류는 정확한 SQLSTATE만 잡고 다른 오류는 다시 발생시킨다.
+
+교차 세션 stale CAS와 동일 ID `23505`는 rollback-only 절차로 증명할 수 없으므로 검토된 runner의 별도 committed disposable fixture phase로 실행한다. 이 phase는 preflight에서 production/V1/V2 사용자 상태가 비어 있음을 확인한 전용 QA 사용자 또는 실행 전 상태를 훼손하지 않는 marker 전용 행만 사용한다. 두 worker는 같은 base token/snapshot을 읽고, `run_id`가 포함된 `application_name`과 backend PID를 기록한 뒤 controller가 먼저 보유한 run-scoped advisory lock에 `pg_advisory_xact_lock`으로 대기한다. controller는 worker의 `lock_timeout`보다 짧은 관찰 deadline 안에 `pg_locks`와 `pg_stat_activity`에서 두 PID의 실제 대기를 확인한 경우에만 lock을 해제한다. 단순 sleep을 barrier로 인정하지 않고 새 영속 table도 만들지 않는다.
+
+runner는 결과가 다른 세 시나리오를 합치지 않고 각각 별도 phase와 fixture로 실행한다.
+
+1. `cas-stale`: 같은 base token/snapshot의 첫 worker가 marker settings/full-state를 commit하고, 둘째 worker는 정확한 `40001`; loser와 다른 사용자의 전체 상태 불변
+2. `same-user-duplicate`: 같은 user와 결정적 ID의 첫 insert가 commit되고 둘째 insert는 정확한 `23505`; 최종 한 행
+3. `cross-user-same-id`: A와 B가 같은 결정적 ID를 각각 commit하며 `(user_id, id)`별 정확히 한 행; 오류 없음
+
+commit된 marker 템플릿·거래는 성공 직후 `{ userId, id, memo, purpose, recordedAtUtc }`를 append-only ledger에 기록한다. transaction exact ID를 먼저, template exact ID를 다음으로 정리한다. 기존 settings 행은 실행 전 canonical 값을 CAS로 복원하고 삭제하지 않는다. 사전 ABSENT였고 marker 소유가 증명된 settings 행만 마지막에 정확히 삭제한다. 같은 결정적 ID를 A/B가 각각 commit하는 검증도 두 user-scoped ID를 별도 ledger 항목으로 남긴다. cleanup 0건, 사용자별 V2 사전 canonical 값 복원과 production/V1 불변을 확인하지 못하면 writer를 재개하지 않는다.
+
+rollback-only와 committed concurrency 검증 뒤에는 `production_snapshot_v2` marker를 지우지 않은 채 기존 marker 안전 재실행 fixture를 반드시 수행한다. 같은 `$qaMarker`의 V2-only 템플릿·거래를 만들고 edit/delete를 ledger에 기록한 다음, V2 세 relation의 count·모든 컬럼 canonical hash와 marker 행을 저장한다. 정확한 setup SQL 전체를 한 번 재실행하고 같은 count·hash·marker를 다시 저장해 문자열 그대로 불변인지 확인한다. 금융 행 원문은 저장하지 않는다. 이 재실행 근거 없이는 Task 14를 완료 처리하지 않는다.
+
+live seed↔full-state RPC 경합은 실행하지 않는다. RPC는 최초 setup의 seed가 끝난 뒤 생기고, marker가 있는 재실행은 seed를 건너뛰므로 live에서 경합을 만들려면 marker/data를 파괴해야 한다. 이 항목은 `NOT EXECUTED LIVE — destructive reset required`로 남기고, Task 13의 격리 PostgreSQL 17 경합 증거를 참조한다. live 미실행을 Task 14 성공으로 바꾸지 않는다. 이는 live seed↔RPC 항목에만 해당하며, 위 교차 세션 marker fixture의 advisory-lock 대기 검증은 별도로 수행한다.
+
+실행 결과는 임시 evidence 폴더의 `rls-session-a.txt`, `rls-session-b.txt`, `cas-session-a.txt`, `cas-session-b.txt`, `invariants-before.csv`, `invariants-after.csv`와 append-only ledger에 저장한다. evidence에는 count·hash·SQLSTATE·PID·lock 상태만 남기고 금융 행 원문은 저장하지 않는다. 다음을 확인한다.
 
 - V2 marker와 두 테이블이 생성됨
-- 운영↔V2 양방향 canonical 비교 0건
-- SQL 재실행 전후 V2 hash/count/marker 불변
-- user A/B 교차 SELECT/DML 차단
-- anon/public RPC 실행 거부
-- 두 세션 stale settings/full-state가 `40001`
-- 같은 user의 동일 결정적 ID insert는 한 건만 성공하고, user A/B가 같은 ID를 각각 insert하면 둘 다 성공
-- seed와 full-state RPC를 겹친 실행이 timeout·`40P01` 없이 완료
-- production/V1 hash/count가 preflight와 동일
+- A/A'는 운영→V2 semantic 양방향 차이 건수 0, B는 setup 전후 V2 count·모든 컬럼 canonical hash·marker 문자열 불변
+- user A/B 교차 SELECT/DML 차단과 anon/public RPC 실행 거부
+- rollback-only 단일 세션 CAS와 committed marker fixture 교차 세션 CAS가 정확한 `40001`
+- 같은 user의 동일 결정적 ID insert는 한 건만 성공하고 두 번째는 정확한 `23505`; user A/B의 같은 ID는 각각 한 건 공존
+- advisory lock 대기의 PID·lock 관찰, bounded deadline 준수, `40P01`·statement timeout·lock timeout 0건
+- marker fixture exact cleanup 0건과 production/V1 hash/count 불변
+- marker fixture edit/delete 뒤 setup 전체 재실행 전후 V2 세 relation count·canonical hash·marker 문자열 불변
+- live seed↔RPC는 미실행이며 Task 13 격리 증거만 참조
 
 - [ ] **Step 5: 로컬 앱에서 인증 저장 스모크를 수행한다**
 
@@ -1373,7 +1404,7 @@ $previewUrl
 
 - [ ] **Step 6: QA 데이터를 정리하고 쓰기를 재개한다**
 
-실행 시작 때 `$qaMarker = 'QA-V2-RECURRING-' + (Get-Date -Format 'yyyyMMdd-HHmmss')`를 만들고 생성 즉시 템플릿 ID·거래 ID와 함께 같은 evidence 폴더에 기록한다. 정리 시 exact ID를 우선 사용하고 `$qaMarker%`는 보조 조건으로 사용해 브라우저 전체 월과 DB 양쪽 0건을 확인한다. production/V1 hash/count를 다시 확인한 뒤에만 모든 환경 writer를 재개한다.
+실행 시작 때 `$qaMarker = 'QA-V2-RECURRING-' + (Get-Date -Format 'yyyyMMdd-HHmmss')`를 만들고 생성 즉시 템플릿 ID·거래 ID와 함께 같은 evidence 폴더에 기록한다. 정리 시 user-scoped exact 거래 ID를 먼저, exact 템플릿 ID를 다음으로 사용하고 `$qaMarker%`는 누락 탐지 보조 조건으로만 사용한다. 사전 ABSENT와 marker 소유를 모두 증명한 disposable settings 행이 있으면 마지막에 그 행만 정리한다. `auth.users`, production, V1, seed marker는 UPDATE·DELETE·TRUNCATE·DROP하지 않는다. 브라우저 전체 월과 DB 양쪽 0건, production/V1 hash/count 불변을 다시 확인한 뒤에만 모든 환경 writer를 재개한다.
 
 - [ ] **Step 7: 실제 증거를 문서화하고 커밋한다**
 
