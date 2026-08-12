@@ -438,6 +438,8 @@ function createAppHarness(options = {}) {
   const writeControls = [];
   const dynamicControls = [];
   const availabilitySnapshots = [];
+  const fileReadPromises = [];
+  const lifecycleEvents = [];
 
   function createElement(tagName = 'div') {
     const listeners = new Map();
@@ -552,21 +554,51 @@ function createAppHarness(options = {}) {
   };
   document.body = createElement('body');
 
-  const confirmCalls = [];
+  const confirmCalls = Array.isArray(options.confirmCalls) ? options.confirmCalls : [];
+  const confirmResults = Array.isArray(options.confirmResults) ? [...options.confirmResults] : [];
   const window = {
     document,
     console: { ...console, error() {}, warn() {} },
     crypto: { randomUUID: () => `harness-${Math.random().toString(16).slice(2)}` },
     location: { pathname: '/' },
     confirm(message) {
-      confirmCalls.push(message);
-      return typeof options.confirm === 'function' ? options.confirm(message) : true;
+      const normalizedMessage = String(message);
+      confirmCalls.push(normalizedMessage);
+      if (confirmResults.length) return Boolean(confirmResults.shift());
+      if (typeof options.confirm === 'function') return options.confirm(normalizedMessage);
+      if (typeof options.confirm === 'boolean') return options.confirm;
+      return true;
     },
     setTimeout(callback) { callback(); return 1; },
     clearTimeout() {}
   };
   window.window = window;
-  const context = { window, document, console: window.console, FileReader: function FileReader() {} };
+  class FakeFileReader {
+    constructor() {
+      this.result = '';
+      this.onload = null;
+      this.onerror = null;
+    }
+
+    readAsText(file) {
+      const configuredError = typeof options.importError === 'function'
+        ? options.importError(file)
+        : options.importError;
+      if (configuredError) {
+        const error = configuredError instanceof Error ? configuredError : new Error(String(configuredError));
+        const outcome = this.onerror ? this.onerror(error) : undefined;
+        fileReadPromises.push(Promise.resolve(outcome));
+        return outcome;
+      }
+      this.result = typeof options.importText === 'function'
+        ? String(options.importText(file))
+        : String(options.importText || '');
+      const outcome = this.onload ? this.onload() : undefined;
+      fileReadPromises.push(Promise.resolve(outcome));
+      return outcome;
+    }
+  }
+  const context = { window, document, console: window.console, FileReader: FakeFileReader };
   vm.createContext(context);
   for (const file of ['js/storage.js', 'js/transactions.js']) {
     vm.runInContext(fs.readFileSync(path.join(__dirname, '..', file), 'utf8'), context, { filename: file });
@@ -637,6 +669,11 @@ function createAppHarness(options = {}) {
   elements.recurringConfirmMemo.name = 'memo';
   elements.recurringTemplateSave.textContent = '반복지출 등록';
   elements.recurringTemplateCancel.hidden = true;
+  elements.importFile.files = Array.isArray(options.importFiles)
+    ? options.importFiles
+    : options.importFile
+      ? [options.importFile]
+      : [];
   elements.recurringTemplateForm.append(
     elements.recurringTemplateMemo,
     elements.recurringTemplateCategory,
@@ -670,10 +707,12 @@ function createAppHarness(options = {}) {
     recurringTemplateClears: [],
     recurringConfirmOpens: [],
     recurringConfirmCloses: [],
+    recurringUiResets: [],
     recurringCategoryFillCount: 0,
     recurringDomainCalls: { add: [], update: [], delete: [], derive: [], confirm: [] },
     validationErrors: [],
     availabilitySnapshots,
+    lifecycleEvents,
     confirmCalls,
     activeTabs: [],
     downloads: [],
@@ -772,7 +811,11 @@ function createAppHarness(options = {}) {
     syncCategoryBudgetInputs() {},
     readCategoryBudgetInputs() { return {}; },
     renderSummary(target, summary) { records.renderedSummaries.push(summary); },
-    renderList(target, transactions) { records.renderedLists.push(JSON.parse(JSON.stringify(transactions))); },
+    renderList(target, transactions) {
+      const rendered = copyRecord(transactions);
+      records.renderedLists.push(rendered);
+      lifecycleEvents.push({ type: 'render-list', transactionIds: rendered.map((transaction) => transaction.id) });
+    },
     renderCalendar() {},
     renderCalendarDetails() {},
     renderUpcomingRecurringExpenses(target, occurrences) {
@@ -787,7 +830,9 @@ function createAppHarness(options = {}) {
         }));
     },
     renderRecurringExpenseTemplates(target, templates) {
-      records.recurringTemplateRenders.push(copyRecord(templates));
+      const rendered = copyRecord(templates);
+      records.recurringTemplateRenders.push(rendered);
+      lifecycleEvents.push({ type: 'render-templates', templateIds: rendered.map((template) => template.id) });
       const controls = [];
       (templates || []).forEach((template) => {
         for (const action of ['edit-recurring-template', 'delete-recurring-template']) {
@@ -863,6 +908,33 @@ function createAppHarness(options = {}) {
       else target.recurringUpcomingHeading.focus();
       recurringConfirmReturnFocus = null;
     },
+    resetRecurringExpenseUi(target) {
+      lifecycleEvents.push({ type: 'reset-recurring-ui' });
+      records.recurringUiResets.push({
+        renderedTransactions: copyRecord(records.renderedLists.at(-1) || []),
+        renderedTemplates: copyRecord(records.recurringTemplateRenders.at(-1) || []),
+        templateId: target.recurringTemplateForm.dataset.templateId || '',
+        transactionId: target.recurringConfirmDialog.dataset.transactionId || '',
+        dialogOpen: target.recurringConfirmDialog.open
+      });
+      recurringConfirmReturnFocus = null;
+      target.recurringTemplateMemo.value = '';
+      target.recurringTemplateCategory.value = '';
+      target.recurringTemplateAmount.value = '';
+      target.recurringTemplateDay.value = '';
+      delete target.recurringTemplateForm.dataset.templateId;
+      target.recurringTemplateSave.textContent = '반복지출 등록';
+      target.recurringTemplateCancel.hidden = true;
+      this.setMessage(target.recurringTemplateMessage, '', null);
+      target.recurringConfirmScheduledDate.textContent = '';
+      target.recurringConfirmDate.value = '';
+      target.recurringConfirmAmount.value = '';
+      target.recurringConfirmCategory.value = '';
+      target.recurringConfirmMemo.value = '';
+      delete target.recurringConfirmDialog.dataset.transactionId;
+      this.setMessage(target.recurringConfirmMessage, '', null);
+      if (target.recurringConfirmDialog.open) target.recurringConfirmDialog.close();
+    },
     setActiveTab(target, tab) { records.activeTabs.push(tab); },
     clearFieldErrors() {},
     showValidationErrors(scope, messageElement, errors) {
@@ -911,11 +983,22 @@ function createAppHarness(options = {}) {
   const cloudBehaviors = options.cloud || {};
   async function runCloudBehavior(name, args, fallback) {
     cloudCalls[name].push(args);
+    if (name === 'signOut') lifecycleEvents.push({ type: 'sign-out-start' });
     const behavior = cloudBehaviors[name];
-    if (typeof behavior === 'function') return behavior(...args);
-    if (behavior instanceof Error) throw behavior;
-    if (behavior !== undefined) return behavior;
-    return fallback;
+    try {
+      const result = typeof behavior === 'function'
+        ? await behavior(...args)
+        : behavior instanceof Error
+          ? (() => { throw behavior; })()
+          : behavior !== undefined
+            ? behavior
+            : fallback;
+      if (name === 'signOut') lifecycleEvents.push({ type: 'sign-out-success' });
+      return result;
+    } catch (error) {
+      if (name === 'signOut') lifecycleEvents.push({ type: 'sign-out-failure' });
+      throw error;
+    }
   }
   const defaultUser = Object.prototype.hasOwnProperty.call(options, 'user') ? options.user : { id: 'user-1' };
   window.BudgetCloud = {
@@ -947,7 +1030,11 @@ function createAppHarness(options = {}) {
     cloudCalls,
     writeControls,
     dynamicControls,
+    confirmResults,
     createElement,
+    flushFileReaders: async () => {
+      while (fileReadPromises.length) await Promise.all(fileReadPromises.splice(0));
+    },
     init: () => document.dispatch('DOMContentLoaded')
   };
 }
@@ -5900,6 +5987,570 @@ async function testAppRecurringDuplicateReloadsWithoutUpsert() {
   assert.strictEqual(textOnlyHarness.document.querySelectorAll('[data-cloud-write]').every((control) => !control.disabled), true);
 }
 
+async function testAppRecurringLifecycleCoversImportResetSampleDownloadAndLogout() {
+  const storage = createContext().BudgetStorage;
+  const today = storage.localDateString();
+  const currentMonth = storage.monthKeyForDate(today, 1);
+  const oldTemplate = {
+    id: 'rt-private-old', memo: '비공개 월세', category: '생활비', amount: 550000,
+    dayOfMonth: 1, startsOn: '2020-01-01'
+  };
+  const oldTransaction = {
+    id: 'tx-private-old', date: `${currentMonth}-02`, type: 'expense', category: '생활비',
+    amount: 12345, memo: 'private-old-memo', source: 'user'
+  };
+  const oldState = storage.normalizeState({
+    ...storage.defaultState(),
+    transactions: [oldTransaction],
+    recurringExpenseTemplates: [oldTemplate]
+  });
+  const importedTemplates = [
+    {
+      id: 'rt-import-rent', memo: '가져온 월세', category: '생활비', amount: 600000,
+      dayOfMonth: 15, startsOn: '2020-01-01'
+    },
+    {
+      id: 'rt-import-stream', memo: '가져온 구독', category: '배달비', amount: 12900,
+      dayOfMonth: 20, startsOn: '2020-01-01'
+    }
+  ];
+  const importedTransactions = [
+    { id: 'tx-import-1', date: `${currentMonth}-03`, type: 'expense', category: '생활비', amount: 1000, memo: '가져온 1', source: 'user' },
+    { id: 'tx-import-2', date: `${currentMonth}-04`, type: 'expense', category: '배달비', amount: 2000, memo: '가져온 2', source: 'user' },
+    { id: 'tx-import-3', date: `${currentMonth}-05`, type: 'income', category: '월급', amount: 3000, memo: '가져온 3', source: 'user' }
+  ];
+  const importSource = {
+    ...storage.defaultState(),
+    version: 2,
+    transactions: [
+      ...importedTransactions,
+      { id: 'bad id', date: `${currentMonth}-06`, type: 'expense', category: '생활비', amount: 0, memo: '제외', source: 'user' }
+    ],
+    recurringExpenseTemplates: importedTemplates
+  };
+  const expectedImportedState = storage.normalizeState(importSource);
+  const importText = JSON.stringify(importSource);
+  const importFile = { name: 'backup-v2.json', size: Buffer.byteLength(importText) };
+
+  async function exportedState(harness) {
+    await harness.elements.exportButton.dispatch('click');
+    return JSON.parse(harness.records.downloads.at(-1).content);
+  }
+
+  function recurringUiSnapshot(harness) {
+    const { elements } = harness;
+    return {
+      template: {
+        memo: elements.recurringTemplateMemo.value,
+        category: elements.recurringTemplateCategory.value,
+        amount: elements.recurringTemplateAmount.value,
+        dayOfMonth: elements.recurringTemplateDay.value,
+        templateId: elements.recurringTemplateForm.dataset.templateId,
+        saveLabel: elements.recurringTemplateSave.textContent,
+        cancelHidden: elements.recurringTemplateCancel.hidden,
+        message: elements.recurringTemplateMessage.textContent
+      },
+      confirmation: {
+        scheduledDate: elements.recurringConfirmScheduledDate.textContent,
+        date: elements.recurringConfirmDate.value,
+        amount: elements.recurringConfirmAmount.value,
+        category: elements.recurringConfirmCategory.value,
+        memo: elements.recurringConfirmMemo.value,
+        transactionId: elements.recurringConfirmDialog.dataset.transactionId,
+        message: elements.recurringConfirmMessage.textContent,
+        open: elements.recurringConfirmDialog.open
+      },
+      activeElement: harness.document.activeElement
+    };
+  }
+
+  function assertRecurringUiPreserved(harness, snapshot, assertActive = true) {
+    const current = recurringUiSnapshot(harness);
+    assert.deepStrictEqual(current.template, snapshot.template);
+    assert.deepStrictEqual(current.confirmation, snapshot.confirmation);
+    if (assertActive) assert.strictEqual(current.activeElement, snapshot.activeElement);
+  }
+
+  function assertRecurringUiCleared(harness) {
+    const { elements } = harness;
+    assert.deepStrictEqual({
+      memo: elements.recurringTemplateMemo.value,
+      category: elements.recurringTemplateCategory.value,
+      amount: elements.recurringTemplateAmount.value,
+      dayOfMonth: elements.recurringTemplateDay.value
+    }, { memo: '', category: '', amount: '', dayOfMonth: '' });
+    assert.strictEqual(elements.recurringTemplateForm.dataset.templateId, undefined);
+    assert.strictEqual(elements.recurringTemplateSave.textContent, '반복지출 등록');
+    assert.strictEqual(elements.recurringTemplateCancel.hidden, true);
+    assert.strictEqual(elements.recurringTemplateMessage.textContent, '');
+    assert.deepStrictEqual({
+      scheduledDate: elements.recurringConfirmScheduledDate.textContent,
+      date: elements.recurringConfirmDate.value,
+      amount: elements.recurringConfirmAmount.value,
+      category: elements.recurringConfirmCategory.value,
+      memo: elements.recurringConfirmMemo.value
+    }, { scheduledDate: '', date: '', amount: '', category: '', memo: '' });
+    assert.strictEqual(elements.recurringConfirmDialog.dataset.transactionId, undefined);
+    assert.strictEqual(elements.recurringConfirmMessage.textContent, '');
+    assert.strictEqual(elements.recurringConfirmDialog.open, false);
+  }
+
+  async function prepareStaleRecurringUi(harness, suffix) {
+    const editButton = harness.dynamicControls.find((control) => (
+      control.dataset.action === 'edit-recurring-template'
+      && control.dataset.templateId === oldTemplate.id
+    ));
+    const recordButton = harness.dynamicControls.find((control) => (
+      control.dataset.action === 'record-recurring-expense'
+      && control.dataset.recurringTransactionId.includes(oldTemplate.id)
+    ));
+    assert.ok(editButton, `edit action exists for ${suffix}`);
+    assert.ok(recordButton, `record action exists for ${suffix}`);
+    await harness.elements.recurringTemplateList.dispatch('click', { target: editButton });
+    harness.elements.recurringTemplateMemo.value = `편집 중 ${suffix}`;
+    harness.elements.recurringTemplateAmount.value = '777000';
+    harness.elements.recurringTemplateMessage.textContent = `템플릿 메시지 ${suffix}`;
+    await harness.elements.recurringUpcomingList.dispatch('click', { target: recordButton });
+    harness.elements.recurringConfirmDate.value = `${currentMonth}-10`;
+    harness.elements.recurringConfirmAmount.value = '888000';
+    harness.elements.recurringConfirmCategory.value = '배달비';
+    harness.elements.recurringConfirmMemo.value = `확정 중 ${suffix}`;
+    harness.elements.recurringConfirmMessage.textContent = `확정 메시지 ${suffix}`;
+    harness.elements.recurringConfirmMemo.focus();
+    return recurringUiSnapshot(harness);
+  }
+
+  function assertOnlyWholeStateWrite(harness, expectedCount) {
+    assert.strictEqual(harness.cloudCalls.uploadState.length, expectedCount);
+    assert.strictEqual(harness.cloudCalls.saveSettings.length, 0);
+    assert.strictEqual(harness.cloudCalls.insertTransaction.length, 0);
+    assert.strictEqual(harness.cloudCalls.updateTransaction.length, 0);
+    assert.strictEqual(harness.cloudCalls.upsertTransaction.length, 0);
+    assert.strictEqual(harness.cloudCalls.deleteTransaction.length, 0);
+  }
+
+  // IMPORT: confirmation details, remote-first success, cleanup, cancellation, malformed input, and failures.
+  const importGate = createDeferred();
+  const importHarness = createAppHarness({
+    cloudState: oldState,
+    importText,
+    importFile,
+    confirmResults: [true],
+    cloud: { uploadState: () => importGate.promise }
+  });
+  await importHarness.init();
+  const importResetBaseline = importHarness.records.recurringUiResets.length;
+  const importUiBefore = await prepareStaleRecurringUi(importHarness, '가져오기');
+  const importStateBefore = await exportedState(importHarness);
+  importHarness.elements.importFile.value = 'selected-v2.json';
+  await importHarness.elements.importFile.dispatch('change');
+  await Promise.resolve();
+  assert.strictEqual(
+    importHarness.records.confirmCalls.at(-1),
+    '거래 3건과 반복지출 2건을 가져옵니다.\n제외된 거래 1건, 반복지출 0건이 있어요.\n현재 클라우드 데이터를 교체할까요?'
+  );
+  assert.doesNotMatch(importHarness.records.confirmCalls.at(-1), /0건으로 교체/);
+  assertOnlyWholeStateWrite(importHarness, 1);
+  assert.strictEqual(JSON.stringify(importHarness.cloudCalls.uploadState[0][0]), JSON.stringify(expectedImportedState));
+  assert.strictEqual(JSON.stringify(importHarness.cloudCalls.uploadState[0][1]), JSON.stringify(importStateBefore));
+  assert.deepStrictEqual(await exportedState(importHarness), importStateBefore, 'deferred import keeps old state');
+  assertRecurringUiPreserved(importHarness, importUiBefore);
+  assert.strictEqual(importHarness.records.recurringUiResets.length, importResetBaseline);
+  importGate.resolve({ ok: true });
+  await importHarness.flushFileReaders();
+  assert.strictEqual(importHarness.elements.importFile.value, '');
+  assert.deepStrictEqual(await exportedState(importHarness), plain(expectedImportedState));
+  assert.strictEqual(importHarness.records.recurringUiResets.length, importResetBaseline + 1);
+  assertRecurringUiCleared(importHarness);
+  assert.deepStrictEqual(importHarness.records.recurringTemplateRenders.at(-1), plain(importedTemplates));
+  assert.strictEqual(
+    importHarness.records.recurringUpcomingRenders.at(-1).every((occurrence) => (
+      importedTemplates.some((template) => template.id === occurrence.templateId)
+    )),
+    true
+  );
+  const importedRecordButton = importHarness.dynamicControls.find((control) => (
+    control.dataset.action === 'record-recurring-expense'
+    && control.dataset.recurringTransactionId.includes('rt-import-rent')
+  ));
+  assert.ok(importedRecordButton, 'import success rederives actionable occurrences');
+  await importHarness.elements.recurringUpcomingList.dispatch('click', { target: importedRecordButton });
+  assert.match(importHarness.elements.recurringConfirmDialog.dataset.transactionId, /rt-import-rent/);
+  await importHarness.elements.recurringConfirmCancel.dispatch('click');
+  assert.strictEqual(importHarness.elements.recurringConfirmDialog.open, false);
+  const importOtherWritesBeforeFreshAdd = importHarness.cloudCalls.saveSettings.length;
+  importHarness.elements.recurringTemplateMemo.value = '새 반복지출';
+  importHarness.elements.recurringTemplateCategory.value = '생활비';
+  importHarness.elements.recurringTemplateAmount.value = '10000';
+  importHarness.elements.recurringTemplateDay.value = '25';
+  await importHarness.elements.recurringTemplateForm.dispatch('submit', {
+    submitter: importHarness.elements.recurringTemplateSave
+  });
+  assert.strictEqual(importHarness.records.recurringDomainCalls.add.length, 1, 'stale edit id is cleared');
+  assert.strictEqual(importHarness.records.recurringDomainCalls.update.length, 0);
+  assert.strictEqual(importHarness.cloudCalls.saveSettings.length, importOtherWritesBeforeFreshAdd + 1);
+
+  const templateOnlySource = {
+    ...storage.defaultState(), version: 2, transactions: [], recurringExpenseTemplates: [importedTemplates[0]]
+  };
+  const templateOnlyText = JSON.stringify(templateOnlySource);
+  const templateOnlyHarness = createAppHarness({
+    cloudState: oldState,
+    importText: templateOnlyText,
+    importFile: { name: 'templates.json', size: Buffer.byteLength(templateOnlyText) },
+    confirmResults: [true]
+  });
+  await templateOnlyHarness.init();
+  templateOnlyHarness.elements.importFile.value = 'templates.json';
+  await templateOnlyHarness.elements.importFile.dispatch('change');
+  await templateOnlyHarness.flushFileReaders();
+  assert.strictEqual(
+    templateOnlyHarness.records.confirmCalls.at(-1),
+    '거래 0건과 반복지출 1건을 가져옵니다.\n제외된 거래 0건, 반복지출 0건이 있어요.\n현재 클라우드 데이터를 교체할까요?'
+  );
+  assertOnlyWholeStateWrite(templateOnlyHarness, 1);
+  assert.strictEqual(templateOnlyHarness.cloudCalls.uploadState[0][0].transactions.length, 0);
+  assert.strictEqual(
+    JSON.stringify(templateOnlyHarness.cloudCalls.uploadState[0][0].recurringExpenseTemplates),
+    JSON.stringify([importedTemplates[0]])
+  );
+  assert.strictEqual((await exportedState(templateOnlyHarness)).recurringExpenseTemplates.length, 1);
+  assert.strictEqual(templateOnlyHarness.elements.importFile.value, '');
+
+  const cancelledImport = createAppHarness({
+    cloudState: oldState,
+    importText,
+    importFile,
+    confirmResults: [false]
+  });
+  await cancelledImport.init();
+  const cancelledUi = await prepareStaleRecurringUi(cancelledImport, '가져오기 취소');
+  const cancelledState = await exportedState(cancelledImport);
+  const cancelledResetCount = cancelledImport.records.recurringUiResets.length;
+  cancelledImport.elements.importFile.value = 'cancelled.json';
+  await cancelledImport.elements.importFile.dispatch('change');
+  await cancelledImport.flushFileReaders();
+  assertOnlyWholeStateWrite(cancelledImport, 0);
+  assert.deepStrictEqual(await exportedState(cancelledImport), cancelledState);
+  assertRecurringUiPreserved(cancelledImport, cancelledUi);
+  assert.strictEqual(cancelledImport.records.recurringUiResets.length, cancelledResetCount);
+  assert.strictEqual(cancelledImport.elements.importFile.value, '');
+
+  const corruptText = JSON.stringify({ version: 2, transactions: {}, recurringExpenseTemplates: importedTemplates });
+  const corruptImport = createAppHarness({
+    cloudState: oldState,
+    importText: corruptText,
+    importFile: { name: 'corrupt.json', size: Buffer.byteLength(corruptText) }
+  });
+  await corruptImport.init();
+  const corruptUi = await prepareStaleRecurringUi(corruptImport, '손상 백업');
+  const corruptState = await exportedState(corruptImport);
+  const corruptResetCount = corruptImport.records.recurringUiResets.length;
+  corruptImport.elements.importFile.value = 'corrupt.json';
+  await corruptImport.elements.importFile.dispatch('change');
+  await corruptImport.flushFileReaders();
+  const corruptMessage = corruptImport.elements.toolMessage.textContent;
+  assertOnlyWholeStateWrite(corruptImport, 0);
+  assert.deepStrictEqual(await exportedState(corruptImport), corruptState);
+  assertRecurringUiPreserved(corruptImport, corruptUi, false);
+  assert.strictEqual(corruptImport.records.recurringUiResets.length, corruptResetCount);
+  assert.match(corruptMessage, /형식이 올바르지/);
+  assert.strictEqual(corruptImport.elements.importFile.value, '');
+
+  const readerFailure = createAppHarness({
+    cloudState: oldState,
+    importError: new Error('reader failed'),
+    importFile: { name: 'unreadable.json', size: 10 }
+  });
+  await readerFailure.init();
+  const readerFailureUi = await prepareStaleRecurringUi(readerFailure, '파일 읽기 실패');
+  readerFailure.elements.importFile.value = 'unreadable.json';
+  await readerFailure.elements.importFile.dispatch('change');
+  await readerFailure.flushFileReaders();
+  assertOnlyWholeStateWrite(readerFailure, 0);
+  assertRecurringUiPreserved(readerFailure, readerFailureUi, false);
+  assert.strictEqual(readerFailure.elements.importFile.value, '');
+  assert.match(readerFailure.elements.toolMessage.textContent, /파일을 읽지 못했어요/);
+
+  const failedImport = createAppHarness({
+    cloudState: oldState,
+    importText,
+    importFile,
+    confirmResults: [true],
+    cloud: { uploadState: async () => { throw new Error('import upload failed'); } }
+  });
+  await failedImport.init();
+  const failedImportUi = await prepareStaleRecurringUi(failedImport, '업로드 실패');
+  const failedImportState = await exportedState(failedImport);
+  const failedImportResetCount = failedImport.records.recurringUiResets.length;
+  failedImport.elements.importFile.value = 'failed.json';
+  await failedImport.elements.importFile.dispatch('change');
+  await failedImport.flushFileReaders();
+  const failedImportMessage = failedImport.elements.toolMessage.textContent;
+  assertOnlyWholeStateWrite(failedImport, 1);
+  assert.deepStrictEqual(await exportedState(failedImport), failedImportState);
+  assertRecurringUiPreserved(failedImport, failedImportUi);
+  assert.strictEqual(failedImport.records.recurringUiResets.length, failedImportResetCount);
+  assert.match(failedImportMessage, /import upload failed/);
+  assert.strictEqual(failedImport.elements.importFile.value, '');
+  await failedImport.elements.recurringConfirmCancel.dispatch('click');
+  assert.match(
+    failedImport.document.activeElement.dataset.recurringTransactionId,
+    new RegExp(oldTemplate.id),
+    'failed import keeps the recurring confirmation return-focus state'
+  );
+  const failedImportUpdates = failedImport.records.recurringDomainCalls.update.length;
+  failedImport.elements.recurringTemplateMemo.value = '실패 후에도 편집 계속';
+  await failedImport.elements.recurringTemplateForm.dispatch('submit', {
+    submitter: failedImport.elements.recurringTemplateSave
+  });
+  assert.strictEqual(failedImport.records.recurringDomainCalls.update.length, failedImportUpdates + 1);
+  assert.strictEqual(failedImport.records.recurringDomainCalls.update.at(-1).id, oldTemplate.id);
+  assert.strictEqual(failedImport.records.recurringDomainCalls.add.length, 0, 'failed import keeps the app edit id');
+
+  // RESET: whole-state CAS commits once, clears all private recurring interaction state, and rolls back on failure.
+  const resetHarness = createAppHarness({ cloudState: oldState, confirmResults: [true] });
+  await resetHarness.init();
+  await prepareStaleRecurringUi(resetHarness, '초기화');
+  const resetExpected = await exportedState(resetHarness);
+  const resetUiBaseline = resetHarness.records.recurringUiResets.length;
+  await resetHarness.elements.resetButton.dispatch('click');
+  assertOnlyWholeStateWrite(resetHarness, 1);
+  assert.strictEqual(JSON.stringify(resetHarness.cloudCalls.uploadState[0][1]), JSON.stringify(resetExpected));
+  const resetPrepared = plain(resetHarness.cloudCalls.uploadState[0][0]);
+  assert.strictEqual(resetPrepared.version, 2);
+  assert.deepStrictEqual(resetPrepared.transactions, []);
+  assert.deepStrictEqual(resetPrepared.recurringExpenseTemplates, []);
+  const resetExport = await exportedState(resetHarness);
+  assert.strictEqual(resetExport.version, 2);
+  assert.deepStrictEqual(resetExport.transactions, []);
+  assert.deepStrictEqual(resetExport.recurringExpenseTemplates, []);
+  assert.strictEqual(JSON.stringify(resetExport).includes(oldTemplate.id), false);
+  assert.strictEqual(JSON.stringify(resetExport).includes(oldTransaction.memo), false);
+  assert.strictEqual(resetHarness.records.recurringUiResets.length, resetUiBaseline + 1);
+  assertRecurringUiCleared(resetHarness);
+  assert.deepStrictEqual(resetHarness.records.recurringUpcomingRenders.at(-1), []);
+  assert.deepStrictEqual(resetHarness.records.recurringTemplateRenders.at(-1), []);
+
+  const resetFailure = createAppHarness({
+    cloudState: oldState,
+    confirmResults: [true],
+    cloud: { uploadState: async () => { throw new Error('reset failed'); } }
+  });
+  await resetFailure.init();
+  const resetFailureUi = await prepareStaleRecurringUi(resetFailure, '초기화 실패');
+  const resetFailureState = await exportedState(resetFailure);
+  const resetFailureCount = resetFailure.records.recurringUiResets.length;
+  await resetFailure.elements.resetButton.dispatch('click');
+  assertOnlyWholeStateWrite(resetFailure, 1);
+  assert.deepStrictEqual(await exportedState(resetFailure), resetFailureState);
+  assertRecurringUiPreserved(resetFailure, resetFailureUi);
+  assert.strictEqual(resetFailure.records.recurringUiResets.length, resetFailureCount);
+
+  // SAMPLE: both add and replace preserve templates byte-for-byte and never clean recurring UI.
+  async function assertSamplePreservesTemplates(sampleState, label, fails = false) {
+    const sampleHarness = createAppHarness({
+      cloudState: sampleState,
+      confirmResults: [true],
+      cloud: fails ? { uploadState: async () => { throw new Error('sample failed'); } } : {}
+    });
+    await sampleHarness.init();
+    const sampleUi = await prepareStaleRecurringUi(sampleHarness, label);
+    const sampleBefore = await exportedState(sampleHarness);
+    const sampleResetCount = sampleHarness.records.recurringUiResets.length;
+    await sampleHarness.elements.sampleButton.dispatch('click');
+    assertOnlyWholeStateWrite(sampleHarness, 1);
+    assert.strictEqual(
+      JSON.stringify(sampleHarness.cloudCalls.uploadState[0][0].recurringExpenseTemplates),
+      JSON.stringify(sampleBefore.recurringExpenseTemplates)
+    );
+    assert.strictEqual(
+      JSON.stringify(sampleHarness.cloudCalls.uploadState[0][1].recurringExpenseTemplates),
+      JSON.stringify(sampleBefore.recurringExpenseTemplates)
+    );
+    assert.strictEqual(sampleHarness.records.recurringUiResets.length, sampleResetCount);
+    assertRecurringUiPreserved(sampleHarness, sampleUi);
+    const sampleAfter = await exportedState(sampleHarness);
+    assert.strictEqual(
+      JSON.stringify(sampleAfter.recurringExpenseTemplates),
+      JSON.stringify(sampleBefore.recurringExpenseTemplates)
+    );
+    if (fails) assert.deepStrictEqual(sampleAfter, sampleBefore);
+    else assert.notDeepStrictEqual(sampleAfter.transactions, sampleBefore.transactions);
+    return sampleHarness;
+  }
+
+  await assertSamplePreservesTemplates(oldState, '샘플 추가');
+  const currentSample = {
+    id: 'tx-current-sample', date: today, type: 'expense', category: '생활비',
+    amount: 9000, memo: '기존 샘플', source: 'sample'
+  };
+  const replaceSampleState = storage.normalizeState({ ...oldState, transactions: [currentSample, oldTransaction] });
+  const replacedSampleHarness = await assertSamplePreservesTemplates(replaceSampleState, '샘플 교체');
+  assert.strictEqual(replacedSampleHarness.records.confirmCalls.length, 1);
+  assert.match(replacedSampleHarness.records.confirmCalls[0], /기존 샘플만 교체/);
+  await assertSamplePreservesTemplates(oldState, '샘플 실패', true);
+
+  // DOWNLOAD: initial, login, and manual success share cleanup; manual failure preserves interaction state.
+  const initialDownload = createAppHarness({ cloudState: oldState });
+  await initialDownload.init();
+  assert.strictEqual(initialDownload.records.recurringUiResets.length, 1);
+  assert.deepStrictEqual((await exportedState(initialDownload)).recurringExpenseTemplates, plain([oldTemplate]));
+
+  let loginUserLookup = 0;
+  const loginDownload = createAppHarness({
+    user: null,
+    cloud: {
+      currentUser: async () => {
+        loginUserLookup += 1;
+        return loginUserLookup === 1 ? null : { id: 'logged-in-user' };
+      },
+      downloadState: async () => expectedImportedState
+    }
+  });
+  await loginDownload.init();
+  loginDownload.elements.recurringTemplateMemo.value = '로그인 전 입력';
+  loginDownload.elements.recurringTemplateForm.dataset.templateId = oldTemplate.id;
+  loginDownload.elements.recurringConfirmDialog.open = true;
+  loginDownload.elements.recurringConfirmDialog.dataset.transactionId = 'tx-stale-login';
+  loginDownload.elements.recurringConfirmMemo.value = '로그인 전 확인';
+  loginDownload.elements.cloudPassword.value = 'secret';
+  await loginDownload.elements.cloudLoginForm.dispatch('submit');
+  assert.strictEqual(loginDownload.records.recurringUiResets.length, 1);
+  assertRecurringUiCleared(loginDownload);
+  assert.deepStrictEqual((await exportedState(loginDownload)).recurringExpenseTemplates, plain(importedTemplates));
+
+  let manualDownloads = 0;
+  const manualDownload = createAppHarness({
+    confirmResults: [true],
+    cloud: {
+      downloadState: async () => {
+        manualDownloads += 1;
+        return manualDownloads === 1 ? oldState : expectedImportedState;
+      }
+    }
+  });
+  await manualDownload.init();
+  const manualUi = await prepareStaleRecurringUi(manualDownload, '수동 다운로드');
+  const manualResetBaseline = manualDownload.records.recurringUiResets.length;
+  await manualDownload.elements.cloudDownloadButton.dispatch('click');
+  assert.strictEqual(manualDownload.cloudCalls.downloadState.length, 2);
+  assert.strictEqual(manualDownload.records.recurringUiResets.length, manualResetBaseline + 1);
+  assert.notDeepStrictEqual(recurringUiSnapshot(manualDownload).confirmation, manualUi.confirmation);
+  assertRecurringUiCleared(manualDownload);
+  assert.deepStrictEqual((await exportedState(manualDownload)).recurringExpenseTemplates, plain(importedTemplates));
+  assert.strictEqual(
+    manualDownload.records.recurringUpcomingRenders.at(-1).every((occurrence) => occurrence.templateId !== oldTemplate.id),
+    true
+  );
+
+  let failedDownloads = 0;
+  const failedDownload = createAppHarness({
+    confirmResults: [true],
+    cloud: {
+      downloadState: async () => {
+        failedDownloads += 1;
+        if (failedDownloads === 1) return oldState;
+        throw new Error('download failed');
+      }
+    }
+  });
+  await failedDownload.init();
+  const failedDownloadUi = await prepareStaleRecurringUi(failedDownload, '다운로드 실패');
+  const failedDownloadState = await exportedState(failedDownload);
+  const failedDownloadResetCount = failedDownload.records.recurringUiResets.length;
+  await failedDownload.elements.cloudDownloadButton.dispatch('click');
+  assert.deepStrictEqual(await exportedState(failedDownload), failedDownloadState);
+  assertRecurringUiPreserved(failedDownload, failedDownloadUi);
+  assert.strictEqual(failedDownload.records.recurringUiResets.length, failedDownloadResetCount);
+  assert.strictEqual(failedDownload.records.cloudStatuses.at(-1).readiness, 'load-error');
+  assert.match(failedDownload.elements.cloudMessage.textContent, /download failed/);
+
+  // LOGOUT: failure is non-destructive; success clears before the signed-out render and leaks no private data.
+  const logoutFailure = createAppHarness({
+    cloudState: oldState,
+    cloud: { signOut: async () => { throw new Error('signout failed'); } }
+  });
+  await logoutFailure.init();
+  const logoutFailureUi = await prepareStaleRecurringUi(logoutFailure, '로그아웃 실패');
+  const logoutFailureState = await exportedState(logoutFailure);
+  const logoutFailureResetCount = logoutFailure.records.recurringUiResets.length;
+  await logoutFailure.elements.cloudLogoutButton.dispatch('click');
+  assert.deepStrictEqual(await exportedState(logoutFailure), logoutFailureState);
+  assertRecurringUiPreserved(logoutFailure, logoutFailureUi);
+  assert.strictEqual(logoutFailure.records.recurringUiResets.length, logoutFailureResetCount);
+  assert.strictEqual(logoutFailure.records.cloudStatuses.at(-1).readiness, 'ready');
+  assert.match(logoutFailure.elements.cloudMessage.textContent, /signout failed/);
+
+  const logoutSuccess = createAppHarness({ cloudState: oldState });
+  await logoutSuccess.init();
+  await prepareStaleRecurringUi(logoutSuccess, '로그아웃 성공');
+  const lifecycleStart = logoutSuccess.records.lifecycleEvents.length;
+  await logoutSuccess.elements.cloudLogoutButton.dispatch('click');
+  const logoutEvents = logoutSuccess.records.lifecycleEvents.slice(lifecycleStart);
+  const signOutSuccessIndex = logoutEvents.findIndex((event) => event.type === 'sign-out-success');
+  const resetIndex = logoutEvents.findIndex((event, index) => (
+    index > signOutSuccessIndex && event.type === 'reset-recurring-ui'
+  ));
+  const emptyRenderIndex = logoutEvents.findIndex((event, index) => (
+    index > resetIndex && event.type === 'render-list' && event.transactionIds.length === 0
+  ));
+  assert.ok(signOutSuccessIndex >= 0);
+  assert.ok(resetIndex > signOutSuccessIndex, 'private recurring UI resets only after signOut succeeds');
+  assert.ok(emptyRenderIndex > resetIndex, 'private recurring UI resets before the signed-out default render');
+  assertRecurringUiCleared(logoutSuccess);
+  const logoutExport = await exportedState(logoutSuccess);
+  assert.strictEqual(logoutExport.version, 2);
+  assert.deepStrictEqual(logoutExport.transactions, []);
+  assert.deepStrictEqual(logoutExport.recurringExpenseTemplates, []);
+  const logoutJson = JSON.stringify(logoutExport);
+  assert.strictEqual(logoutJson.includes(oldTemplate.id), false);
+  assert.strictEqual(logoutJson.includes(oldTemplate.memo), false);
+  assert.strictEqual(logoutJson.includes(oldTransaction.id), false);
+  assert.strictEqual(logoutJson.includes(oldTransaction.memo), false);
+  assert.deepStrictEqual(logoutSuccess.records.recurringUpcomingRenders.at(-1), []);
+  assert.deepStrictEqual(logoutSuccess.records.recurringTemplateRenders.at(-1), []);
+  assert.strictEqual(logoutSuccess.cloudCalls.signOut.length, 1);
+  assert.strictEqual(logoutSuccess.cloudCalls.uploadState.length, 0);
+  assert.strictEqual(logoutSuccess.cloudCalls.saveSettings.length, 0);
+  assert.strictEqual(logoutSuccess.cloudCalls.insertTransaction.length, 0);
+  assert.strictEqual(logoutSuccess.cloudCalls.updateTransaction.length, 0);
+  assert.strictEqual(logoutSuccess.cloudCalls.deleteTransaction.length, 0);
+  assert.strictEqual(logoutSuccess.records.cloudStatuses.at(-1).readiness, 'signed-out');
+  assert.ok(logoutSuccess.elements.cloudPassword.focusCount > 0);
+
+  // The real UI helper clears both module-local return-focus records without restoring stale private triggers.
+  const uiContext = createUiContext();
+  const recurringDom = createRecurringUiDom(uiContext.window, uiContext.document);
+  const uiOccurrences = recurringOccurrencesFixture();
+  uiContext.window.BudgetUI.renderUpcomingRecurringExpenses(recurringDom.elements, uiOccurrences);
+  uiContext.window.BudgetUI.renderRecurringExpenseTemplates(recurringDom.elements, [oldTemplate]);
+  const staleRecordTrigger = recurringDom.elements.recurringUpcomingList
+    .querySelector('[data-action="record-recurring-expense"]');
+  const staleEditTrigger = recurringDom.elements.recurringTemplateList
+    .querySelector('[data-action="edit-recurring-template"]');
+  uiContext.window.BudgetUI.beginRecurringTemplateEdit(recurringDom.elements, oldTemplate, staleEditTrigger);
+  uiContext.window.BudgetUI.openRecurringConfirmDialog(recurringDom.elements, uiOccurrences[0], staleRecordTrigger);
+  recurringDom.elements.recurringTemplateMessage.textContent = '지울 메시지';
+  recurringDom.elements.recurringConfirmMessage.textContent = '지울 확인 메시지';
+  const unrelatedFocus = uiContext.document.createElement('button');
+  uiContext.document.body.append(unrelatedFocus);
+  unrelatedFocus.focus();
+  uiContext.window.BudgetUI.resetRecurringExpenseUi(recurringDom.elements);
+  uiContext.window.BudgetUI.resetRecurringExpenseUi(recurringDom.elements);
+  assert.strictEqual(uiContext.document.activeElement, unrelatedFocus, 'forced cleanup never restores stale focus');
+  assert.strictEqual(recurringDom.elements.recurringConfirmDialog.open, false);
+  assert.strictEqual(recurringDom.elements.recurringTemplateForm.dataset.templateId, undefined);
+  assert.strictEqual(recurringDom.elements.recurringConfirmDialog.dataset.transactionId, undefined);
+  recurringDom.elements.recurringConfirmDialog.open = true;
+  uiContext.window.BudgetUI.closeRecurringConfirmDialog(recurringDom.elements);
+  assert.strictEqual(uiContext.document.activeElement, recurringDom.elements.recurringUpcomingHeading);
+  uiContext.window.BudgetUI.clearRecurringTemplateEdit(recurringDom.elements);
+  assert.strictEqual(uiContext.document.activeElement, recurringDom.elements.recurringTemplateHeading);
+  assert.notStrictEqual(uiContext.document.activeElement, staleRecordTrigger);
+  assert.notStrictEqual(uiContext.document.activeElement, staleEditTrigger);
+}
+
 async function testAppLogoutClearsPrivateStateAndFocusesLogin() {
   const base = createContext().BudgetStorage.defaultState();
   const harness = createAppHarness({
@@ -6021,6 +6672,7 @@ const tests = [
   testAppRecurringTemplateCrudIsRemoteFirst,
   testAppRecurringConfirmationSerializesAndPreservesFailureInput,
   testAppRecurringDuplicateReloadsWithoutUpsert,
+  testAppRecurringLifecycleCoversImportResetSampleDownloadAndLogout,
   testAppLogoutClearsPrivateStateAndFocusesLogin
 ];
 

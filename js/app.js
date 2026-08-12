@@ -206,6 +206,12 @@
     syncMutationAvailability();
   }
 
+  function resetRecurringInteractionState() {
+    recurringTemplateEditId = '';
+    recurringOccurrences = [];
+    window.BudgetUI.resetRecurringExpenseUi(elements);
+  }
+
   async function handleBudgetSubmit(event) {
     event.preventDefault();
     window.BudgetUI.clearFieldErrors(elements.budgetForm);
@@ -666,20 +672,40 @@
         elements.importFile.value = '';
         return;
       }
-      const skipped = result.summary && result.summary.skippedCount
-        ? ` 유효하지 않은 ${result.summary.skippedCount}건은 제외됩니다.`
-        : '';
-      if (!window.confirm(`현재 데이터를 가져온 JSON 내용 ${result.summary.importedCount}건으로 교체할까요?${skipped}`)) {
+      const summary = result.summary || {};
+      const importedTransactionCount = Number.isInteger(summary.importedTransactionCount)
+        ? summary.importedTransactionCount
+        : Number(summary.importedCount) || 0;
+      const skippedTransactionCount = Number.isInteger(summary.skippedTransactionCount)
+        ? summary.skippedTransactionCount
+        : Number(summary.skippedCount) || 0;
+      const importedTemplateCount = Number.isInteger(summary.importedTemplateCount)
+        ? summary.importedTemplateCount
+        : 0;
+      const skippedTemplateCount = Number.isInteger(summary.skippedTemplateCount)
+        ? summary.skippedTemplateCount
+        : 0;
+      const confirmation = [
+        `거래 ${importedTransactionCount}건과 반복지출 ${importedTemplateCount}건을 가져옵니다.`,
+        `제외된 거래 ${skippedTransactionCount}건, 반복지출 ${skippedTemplateCount}건이 있어요.`,
+        '현재 클라우드 데이터를 교체할까요?'
+      ].join('\n');
+      if (!window.confirm(confirmation)) {
         elements.importFile.value = '';
         return;
       }
       const saved = await replaceAllRemoteFirst(result.state, elements.toolMessage, elements.importButton);
       if (saved) {
+        resetRecurringInteractionState();
+        render();
         window.BudgetUI.setMessage(elements.toolMessage, 'JSON 데이터를 가져왔어요.', 'ok');
       }
       elements.importFile.value = '';
     };
-    reader.onerror = () => showImportError('파일을 읽지 못했어요.');
+    reader.onerror = () => {
+      showImportError('파일을 읽지 못했어요.');
+      elements.importFile.value = '';
+    };
     reader.readAsText(file);
   }
 
@@ -697,6 +723,7 @@
     window.BudgetUI.initDefaults(elements, state);
     viewState.month = currentBudgetMonth();
     viewState.selectedDate = '';
+    resetRecurringInteractionState();
     render();
     window.BudgetUI.setMessage(elements.toolMessage, '전체 데이터를 초기화하고 Supabase에 저장했어요.', 'ok');
   }
@@ -705,6 +732,7 @@
     state = window.BudgetStorage.saveState(cloudState).state;
     viewState.month = currentBudgetMonth();
     viewState.selectedDate = '';
+    resetRecurringInteractionState();
     render();
   }
 
@@ -835,6 +863,7 @@
       return;
     }
 
+    resetRecurringInteractionState();
     state = window.BudgetStorage.defaultState();
     viewState.tab = 'home';
     viewState.selectedDate = '';
@@ -851,6 +880,7 @@
     if (elements.editDialog.open) window.BudgetUI.closeEditDialog(elements);
     elements.categoryBudgetFields.innerHTML = '';
     window.BudgetUI.initDefaults(elements, state);
+    window.BudgetUI.resetRecurringExpenseUi(elements);
     viewState.month = currentBudgetMonth();
     clearMutationMessages();
     setCloudReadiness('signed-out', null);

@@ -587,6 +587,31 @@
     ]);
   }
 
+  function resetRecurringExpenseUi(elements) {
+    recurringTemplateFocusState = null;
+    recurringConfirmFocusState = null;
+
+    elements.recurringTemplateMemo.value = '';
+    elements.recurringTemplateCategory.value = '';
+    elements.recurringTemplateAmount.value = '';
+    elements.recurringTemplateDay.value = '';
+    delete elements.recurringTemplateForm.dataset.templateId;
+    elements.recurringTemplateSave.textContent = '반복지출 등록';
+    elements.recurringTemplateCancel.hidden = true;
+    setMessage(elements.recurringTemplateMessage, '', null);
+    clearFieldErrors(elements.recurringTemplateForm);
+
+    elements.recurringConfirmScheduledDate.textContent = '';
+    elements.recurringConfirmDate.value = '';
+    elements.recurringConfirmAmount.value = '';
+    elements.recurringConfirmCategory.value = '';
+    elements.recurringConfirmMemo.value = '';
+    delete elements.recurringConfirmDialog.dataset.transactionId;
+    setMessage(elements.recurringConfirmMessage, '', null);
+    clearFieldErrors(elements.recurringConfirmForm);
+    if (elements.recurringConfirmDialog.open) elements.recurringConfirmDialog.close();
+  }
+
   function openEditDialog(elements, transaction, trigger) {
     elements.editId.value = transaction.id;
     elements.editDate.value = transaction.date;
@@ -872,6 +897,7 @@
     clearRecurringTemplateEdit,
     openRecurringConfirmDialog,
     closeRecurringConfirmDialog,
+    resetRecurringExpenseUi,
     initDefaults,
     renderCategoryBudgetFields,
     syncCategoryBudgetInputs,
