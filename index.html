@@ -264,19 +264,19 @@
         <div class="recurring-template-fields">
           <div class="field">
             <label for="recurring-template-memo">이름</label>
-            <input id="recurring-template-memo" name="memo" type="text" maxlength="80" required aria-describedby="recurring-template-help recurring-template-message">
+            <input id="recurring-template-memo" name="memo" type="text" maxlength="80" autocomplete="off" required aria-describedby="recurring-template-help recurring-template-message">
           </div>
           <div class="field">
             <label for="recurring-template-category">카테고리</label>
-            <select id="recurring-template-category" name="category" required aria-describedby="recurring-template-help recurring-template-message"></select>
+            <select id="recurring-template-category" name="category" autocomplete="off" required aria-describedby="recurring-template-help recurring-template-message"></select>
           </div>
           <div class="field">
             <label for="recurring-template-amount">예상 금액</label>
-            <input id="recurring-template-amount" name="amount" type="text" inputmode="numeric" pattern="[0-9,]*" required aria-describedby="recurring-template-help recurring-template-message">
+            <input id="recurring-template-amount" name="amount" type="text" inputmode="numeric" pattern="[0-9,]*" autocomplete="off" required aria-describedby="recurring-template-help recurring-template-message">
           </div>
           <div class="field">
             <label for="recurring-template-day">매월 결제일</label>
-            <input id="recurring-template-day" name="dayOfMonth" type="number" inputmode="numeric" min="1" max="31" step="1" required aria-describedby="recurring-template-help recurring-template-message">
+            <input id="recurring-template-day" name="dayOfMonth" type="number" inputmode="numeric" min="1" max="31" step="1" autocomplete="off" required aria-describedby="recurring-template-help recurring-template-message">
           </div>
         </div>
         <div class="recurring-template-actions">
@@ -332,19 +332,19 @@
       <div class="recurring-confirm-fields">
         <div class="field">
           <label for="recurring-confirm-date">사용일</label>
-          <input id="recurring-confirm-date" name="date" type="date" required aria-describedby="recurring-confirm-scheduled-date-help recurring-confirm-message">
+          <input id="recurring-confirm-date" name="date" type="date" autocomplete="off" required aria-describedby="recurring-confirm-scheduled-date-help recurring-confirm-message">
         </div>
         <div class="field">
           <label for="recurring-confirm-amount">실제 금액</label>
-          <input id="recurring-confirm-amount" name="amount" type="text" inputmode="numeric" pattern="[0-9,]*" required aria-describedby="recurring-confirm-scheduled-date-help recurring-confirm-message">
+          <input id="recurring-confirm-amount" name="amount" type="text" inputmode="numeric" pattern="[0-9,]*" autocomplete="off" required aria-describedby="recurring-confirm-scheduled-date-help recurring-confirm-message">
         </div>
         <div class="field">
           <label for="recurring-confirm-category">카테고리</label>
-          <select id="recurring-confirm-category" name="category" required aria-describedby="recurring-confirm-scheduled-date-help recurring-confirm-message"></select>
+          <select id="recurring-confirm-category" name="category" autocomplete="off" required aria-describedby="recurring-confirm-scheduled-date-help recurring-confirm-message"></select>
         </div>
         <div class="field">
           <label for="recurring-confirm-memo">메모</label>
-          <input id="recurring-confirm-memo" name="memo" type="text" maxlength="80" aria-describedby="recurring-confirm-scheduled-date-help recurring-confirm-message">
+          <input id="recurring-confirm-memo" name="memo" type="text" maxlength="80" autocomplete="off" aria-describedby="recurring-confirm-scheduled-date-help recurring-confirm-message">
         </div>
       </div>
       <p id="recurring-confirm-message" class="message" role="status" aria-live="polite" tabindex="-1"></p>

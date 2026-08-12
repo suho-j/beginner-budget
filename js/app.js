@@ -89,8 +89,12 @@
     syncMutationAvailability();
   }
 
-  async function runExclusiveMutation(action, messageElement, failurePrefix) {
+  async function runExclusiveMutation(action, messageElement, failurePrefix, pendingUi = null) {
     if (!beginMutation()) return { ok: false, blocked: true, value: null };
+    if (pendingUi) {
+      pendingUi.button.setAttribute('aria-busy', 'true');
+      window.BudgetUI.setMessage(pendingUi.messageElement, '저장 중이에요…', null);
+    }
     try {
       return { ok: true, blocked: false, value: await action() };
     } catch (error) {
@@ -107,6 +111,7 @@
       }
       return { ok: false, blocked: false, value: null };
     } finally {
+      if (pendingUi) pendingUi.button.removeAttribute('aria-busy');
       endMutation();
     }
   }
@@ -116,14 +121,15 @@
     remoteAction,
     messageElement,
     busyButton = null,
-    failurePrefix = 'Supabase 저장 실패'
+    failurePrefix = 'Supabase 저장 실패',
+    pendingUi = null
   ) {
     const result = await runExclusiveMutation(async () => {
       await remoteAction();
       state = window.BudgetStorage.saveState(nextState).state;
       render();
       return true;
-    }, messageElement, failurePrefix);
+    }, messageElement, failurePrefix, pendingUi);
     return result.ok;
   }
 
@@ -344,7 +350,12 @@
       result.state,
       () => window.BudgetCloud.saveSettings(result.state),
       elements.recurringTemplateMessage,
-      event.submitter
+      event.submitter,
+      undefined,
+      {
+        button: event.submitter || elements.recurringTemplateSave,
+        messageElement: elements.recurringTemplateMessage
+      }
     );
     if (!saved) return;
 
@@ -469,7 +480,10 @@
         conflict.code = '40001';
         throw conflict;
       }
-    }, elements.recurringConfirmMessage, '반복지출 저장 실패');
+    }, elements.recurringConfirmMessage, '반복지출 저장 실패', {
+      button: event.submitter || elements.recurringConfirmSave,
+      messageElement: elements.recurringConfirmMessage
+    });
 
     if (!mutation.ok) {
       if (!mutation.blocked) elements.recurringConfirmMessage.focus();
@@ -502,27 +516,6 @@
     window.BudgetUI.closeRecurringConfirmDialog(elements, { reason: 'cancel' });
   }
 
-  function isCurrentRecurringTransaction(transaction) {
-    const transactionId = String(transaction && transaction.id || '');
-    const monthMatch = transactionId.match(/-(\d{4}-\d{2})$/);
-    if (!monthMatch || !window.BudgetStorage.isValidMonthString(monthMatch[1])) return false;
-    const scheduledMonth = monthMatch[1];
-    const templates = window.BudgetStorage.normalizeRecurringExpenseTemplates(
-      state.recurringExpenseTemplates
-    );
-    return templates.some((template) => {
-      const scheduledDate = window.BudgetStorage.scheduledDateForMonth(
-        scheduledMonth,
-        template.dayOfMonth
-      );
-      return Boolean(
-        scheduledDate
-        && scheduledDate >= template.startsOn
-        && window.BudgetTransactions.recurringTransactionId(template.id, scheduledMonth) === transactionId
-      );
-    });
-  }
-
   async function handleTransactionAction(event) {
     const button = event.target.closest('[data-action][data-id]');
     if (!button) return;
@@ -530,13 +523,15 @@
     if (!transaction) return;
 
     if (button.dataset.action === 'edit') {
-      window.BudgetUI.openEditDialog(elements, transaction, button);
+      window.BudgetUI.openEditDialog(elements, transaction, button, {
+        lockType: window.BudgetTransactions.isRecurringExpenseTransaction(state, transaction)
+      });
       return;
     }
     if (button.dataset.action !== 'delete') return;
 
     const label = `${transaction.date} ${transaction.category} ${window.BudgetUI.formatWon(transaction.amount)}`;
-    const recurringWarning = isCurrentRecurringTransaction(transaction)
+    const recurringWarning = window.BudgetTransactions.isRecurringExpenseTransaction(state, transaction)
       ? '\n삭제하면 해당 예정 항목이 다시 나타나요.'
       : '';
     if (!window.confirm(`${label} 내역을 삭제할까요?${recurringWarning}`)) return;

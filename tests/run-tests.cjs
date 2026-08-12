@@ -1371,6 +1371,36 @@ function testRecurringOccurrencesUseDeterministicIdsAndStatuses() {
   });
   const afterStartsOn = win.BudgetTransactions.deriveRecurringExpenseOccurrences(startsOnState, '2026-05', today);
   assert.deepStrictEqual(plain(afterStartsOn.map((item) => item.templateId)), ['rt-after-start']);
+
+  const registeredMonthTransaction = {
+    id: 'tx-recurring-rt-registered-2026-05',
+    date: '2026-05-25',
+    type: 'expense',
+    category: win.BudgetTransactions.EXPENSE_CATEGORIES[0],
+    amount: 1000,
+    memo: 'registered transaction',
+    source: 'user'
+  };
+  const registeredMonthState = win.BudgetStorage.normalizeState({
+    monthStartDay: 1,
+    recurringExpenseTemplates: [{
+      id: 'rt-registered',
+      memo: 'registered template',
+      category: win.BudgetTransactions.EXPENSE_CATEGORIES[0],
+      amount: 1000,
+      dayOfMonth: 5,
+      startsOn: '2026-05-20'
+    }],
+    transactions: [registeredMonthTransaction]
+  });
+  const registeredOccurrence = win.BudgetTransactions.deriveRecurringExpenseOccurrences(
+    registeredMonthState,
+    '2026-05',
+    today
+  ).find((item) => item.templateId === 'rt-registered');
+  assert.strictEqual(registeredOccurrence.status, 'recorded');
+  assert.strictEqual(registeredOccurrence.scheduledDate, '2026-05-05');
+  assert.deepStrictEqual(plain(registeredOccurrence.transaction), registeredMonthTransaction);
 }
 
 function testRecurringTransactionCandidateValidatesWithoutChangingSummaries() {
@@ -1847,6 +1877,19 @@ function testRecurringImportExportAllowsTemplateOnlyAndRejectsFutureVersion() {
     importedCount: 1,
     skippedCount: 0
   });
+
+  const duplicateDecisionId = transactions.importState(JSON.stringify({
+    version: 2,
+    recurringExpenseTemplates: [template],
+    transactions: [
+      confirmed.transaction,
+      { ...confirmed.transaction, memo: 'duplicate decision id' }
+    ]
+  }));
+  assert.strictEqual(duplicateDecisionId.ok, false);
+  assert.strictEqual(duplicateDecisionId.state, null);
+  assert.strictEqual(duplicateDecisionId.errors[0].field, 'importData');
+  assert.match(duplicateDecisionId.errors[0].message, /중복.*ID/);
 
   const legacyTransaction = {
     id: 'legacy-v1',
@@ -2478,6 +2521,7 @@ function testAppStylesCoverTabsCalendarDialogAndMobile() {
     assert.match(block, /(?:^|;)\s*position\s*:\s*static\s*;/, `${selector} must rely on the shared sticky wrapper`);
     assert.doesNotMatch(block, /(?:^|;)\s*position\s*:\s*sticky\s*;/);
   }
+  assert.match(declarations('.back-to-top'), /(?:^|;)\s*min-height\s*:\s*44px\s*;/);
   assert.doesNotMatch(source, /\.has-preview-warning\s+\.app-tabs\s*\{[^}]*\btop\s*:\s*44px\s*;/, 'tab offset must not depend on a hard-coded warning height');
 
   assert.match(declarations('.global-message:empty'), /(?:^|;)\s*display\s*:\s*none\s*;/);
@@ -2687,6 +2731,7 @@ function testAppMarkupProvidesRecurringSectionsAndDialogContracts() {
     assert.ok(descriptions.includes('recurring-template-help'), `${id} must reference recurring template help`);
     assert.ok(descriptions.includes('recurring-template-message'), `${id} must reference recurring template feedback`);
     assertBooleanAttribute(field, 'required');
+    assertAttribute(field, 'autocomplete', 'off');
   }
   assert.doesNotMatch(templateForm.source, /<(?:input|select|textarea)\b[^>]*\btype="hidden"/i, 'template identity and start date must stay internal');
   assert.doesNotMatch(templateForm.source, /\bname="(?:id|startsOn)"/i, 'template identity and start date must not be user-editable');
@@ -2746,6 +2791,7 @@ function testAppMarkupProvidesRecurringSectionsAndDialogContracts() {
     assert.doesNotMatch(field.source, /(?:\s)(?:disabled|readonly)(?:\s|>)/, `${id} must stay editable`);
     const descriptions = (attributeValue(field.source, 'aria-describedby') || '').split(/\s+/).filter(Boolean);
     assert.deepStrictEqual(descriptions, ['recurring-confirm-scheduled-date-help', 'recurring-confirm-message'], `${id} must reference the full scheduled-date context and confirm feedback`);
+    assertAttribute(field, 'autocomplete', 'off');
   }
   const confirmMessage = startTagById('recurring-confirm-message');
   assertAttribute(confirmMessage, 'role', 'status');
@@ -2767,6 +2813,9 @@ function testAppMarkupProvidesRecurringSectionsAndDialogContracts() {
       assert.ok(idSet.has(id), `${reference[1]} references missing ID: ${id}`);
     }
   }
+  const checklist = fs.readFileSync(path.join(__dirname, '..', 'manual-test-checklist.md'), 'utf8');
+  assert.match(checklist, /Escape·취소 후 포커스가 호출 지점으로 돌아가고, 저장 후에는 반복지출 예정 제목으로 이동한다\./);
+  assert.doesNotMatch(checklist, /Escape·취소·저장 후 포커스가 호출 지점으로 돌아간다\./);
 }
 
 function testAppStylesCoverRecurringCardsDialogAndMobile() {
@@ -2958,6 +3007,7 @@ function testUiValidationAndEditDialogFocusFlow() {
   assert.strictEqual(dialog.open, true);
   assert.strictEqual(document.activeElement, editDate);
   assert.strictEqual(dialog.returnTab, 'calendar');
+  assert.strictEqual(editType.disabled, false);
   window.BudgetUI.closeEditDialog(elements);
   assert.strictEqual(document.activeElement, trigger);
 
@@ -2970,7 +3020,13 @@ function testUiValidationAndEditDialogFocusFlow() {
   window.BudgetUI.closeEditDialog(elements);
   assert.strictEqual(document.activeElement, replacement);
 
+  window.BudgetUI.openEditDialog(elements, transaction, replacement, { lockType: true });
+  assert.strictEqual(editType.value, 'expense');
+  assert.strictEqual(editType.disabled, true);
+  window.BudgetUI.closeEditDialog(elements);
+
   window.BudgetUI.openEditDialog(elements, transaction, replacement);
+  assert.strictEqual(editType.disabled, false);
   replacement.remove();
   window.BudgetUI.closeEditDialog(elements);
   assert.strictEqual(document.activeElement, calendarTab);
@@ -3267,6 +3323,15 @@ function testUiRendersRecurringOccurrencesAndTemplatesSafely() {
   assert.strictEqual(elements.recurringUpcomingEmpty.hidden, false);
   assert.strictEqual(elements.recurringUpcomingList.hidden, true);
   assert.strictEqual(elements.recurringUpcomingList.children.length, 0);
+  let summaryAssignments = 0;
+  let summaryText = elements.recurringUpcomingSummary.textContent;
+  Object.defineProperty(elements.recurringUpcomingSummary, 'textContent', {
+    configurable: true,
+    get() { return summaryText; },
+    set(value) { summaryAssignments += 1; summaryText = value; }
+  });
+  window.BudgetUI.renderUpcomingRecurringExpenses(elements, []);
+  assert.strictEqual(summaryAssignments, 0, 'an unchanged status summary must not be reassigned');
   window.BudgetUI.renderRecurringExpenseTemplates(elements, []);
   assert.strictEqual(elements.recurringTemplateEmpty.hidden, false);
   assert.strictEqual(elements.recurringTemplateList.hidden, true);
@@ -3559,6 +3624,55 @@ function testUpdateTransactionValidatesAndPreservesIdentity() {
   assert.strictEqual(updated.state.transactions[0].memo, '저녁 배달');
   assert.strictEqual(updated.state.transactions[0].source, 'user');
   assert.strictEqual(original.transactions[0].amount, 12000);
+
+  const ordinaryTypeChange = win.BudgetTransactions.updateTransaction(original, 'tx-a', {
+    date: '2026-04-30',
+    type: 'income',
+    category: win.BudgetTransactions.INCOME_CATEGORIES[0],
+    amount: '25,000',
+    memo: 'refund'
+  });
+  assert.strictEqual(ordinaryTypeChange.ok, true);
+  assert.strictEqual(ordinaryTypeChange.transaction.type, 'income');
+
+  const recurringState = win.BudgetStorage.normalizeState({
+    recurringExpenseTemplates: [{
+      id: 'rt-locked',
+      memo: 'locked template',
+      category: win.BudgetTransactions.EXPENSE_CATEGORIES[0],
+      amount: 12000,
+      dayOfMonth: 5,
+      startsOn: '2026-05-20'
+    }],
+    transactions: [{
+      id: 'tx-recurring-rt-locked-2026-05',
+      date: '2026-05-25',
+      type: 'expense',
+      category: win.BudgetTransactions.EXPENSE_CATEGORIES[0],
+      amount: 12000,
+      memo: 'locked transaction',
+      source: 'user'
+    }]
+  });
+  assert.strictEqual(
+    win.BudgetTransactions.isRecurringExpenseTransaction(recurringState, recurringState.transactions[0]),
+    true
+  );
+  const recurringTypeChange = win.BudgetTransactions.updateTransaction(
+    recurringState,
+    recurringState.transactions[0].id,
+    {
+      date: '2026-05-25',
+      type: 'income',
+      category: win.BudgetTransactions.INCOME_CATEGORIES[0],
+      amount: '12,000',
+      memo: 'forged type change'
+    }
+  );
+  assert.strictEqual(recurringTypeChange.ok, false);
+  assert.strictEqual(recurringTypeChange.state, recurringState);
+  assert.strictEqual(recurringTypeChange.transaction, null);
+  assert.strictEqual(recurringTypeChange.errors[0].field, 'type');
 
   const invalid = win.BudgetTransactions.updateTransaction(original, 'tx-a', {
     date: '2026-04-30', type: 'expense', category: '배달비', amount: '0', memo: ''
@@ -5205,6 +5319,9 @@ async function testAppRecurringTemplateCrudIsRemoteFirst() {
     submitter: harness.elements.recurringTemplateSave
   });
   await Promise.resolve();
+  assert.strictEqual(harness.elements.recurringTemplateMessage.textContent, '저장 중이에요…');
+  assert.strictEqual(harness.elements.recurringTemplateSave.getAttribute('aria-busy'), 'true');
+  assert.strictEqual(harness.elements.recurringTemplateCancel.disabled, true);
 
   assert.strictEqual(
     harness.cloudCalls.saveSettings.length,
@@ -5221,6 +5338,8 @@ async function testAppRecurringTemplateCrudIsRemoteFirst() {
 
   addGate.resolve({ ok: true });
   await adding;
+  assert.strictEqual(harness.elements.recurringTemplateSave.getAttribute('aria-busy'), null);
+  assert.strictEqual(harness.elements.recurringTemplateCancel.disabled, false);
   const afterAddState = await exportState();
   const addedTemplate = afterAddState.recurringExpenseTemplates.find((template) => template.memo === addInput.memo);
   assert.ok(addedTemplate);
@@ -5292,10 +5411,17 @@ async function testAppRecurringTemplateCrudIsRemoteFirst() {
   harness.elements.recurringTemplateMemo.value = '월세 수정';
   const editValues = formValues();
   const renderCountBeforeFailure = harness.records.recurringTemplateRenders.length;
-  saveOutcomes.push(new Error('network offline'));
-  await harness.elements.recurringTemplateForm.dispatch('submit', {
+  const templateFailureGate = createDeferred();
+  saveOutcomes.push(templateFailureGate);
+  const failingTemplateSave = harness.elements.recurringTemplateForm.dispatch('submit', {
     submitter: harness.elements.recurringTemplateSave
   });
+  await Promise.resolve();
+  assert.strictEqual(harness.elements.recurringTemplateMessage.textContent, '저장 중이에요…');
+  assert.strictEqual(harness.elements.recurringTemplateSave.getAttribute('aria-busy'), 'true');
+  assert.strictEqual(harness.elements.recurringTemplateCancel.disabled, true);
+  templateFailureGate.reject(new Error('network offline'));
+  await failingTemplateSave;
   assert.strictEqual(harness.cloudCalls.saveSettings.length, 2);
   assert.strictEqual(harness.records.recurringTemplateRenders.length, renderCountBeforeFailure);
   assert.strictEqual(JSON.stringify((await exportState()).recurringExpenseTemplates), JSON.stringify(afterAddState.recurringExpenseTemplates));
@@ -5305,6 +5431,7 @@ async function testAppRecurringTemplateCrudIsRemoteFirst() {
   assert.strictEqual(harness.records.cloudStatuses.at(-1).readiness, 'ready');
   assert.strictEqual(allWrites().every((control) => !control.disabled), true);
   assert.strictEqual(harness.elements.recurringTemplateCancel.disabled, false);
+  assert.strictEqual(harness.elements.recurringTemplateSave.getAttribute('aria-busy'), null);
 
   const editGate = createDeferred();
   saveOutcomes.push(editGate);
@@ -5550,6 +5677,9 @@ async function testAppRecurringConfirmationSerializesAndPreservesFailureInput() 
     submitter: harness.elements.recurringConfirmSave
   });
   await Promise.resolve();
+  assert.strictEqual(harness.elements.recurringConfirmMessage.textContent, '저장 중이에요…');
+  assert.strictEqual(harness.elements.recurringConfirmSave.getAttribute('aria-busy'), 'true');
+  assert.strictEqual(harness.elements.recurringConfirmCancel.disabled, true);
 
   assert.strictEqual(
     harness.cloudCalls.insertTransaction.length,
@@ -5635,6 +5765,7 @@ async function testAppRecurringConfirmationSerializesAndPreservesFailureInput() 
   assert.strictEqual(harness.document.activeElement, harness.elements.recurringUpcomingHeading);
   assert.strictEqual(harness.elements.globalMessage.textContent, '기록했어요.');
   assert.strictEqual(harness.elements.recurringConfirmCancel.disabled, false);
+  assert.strictEqual(harness.elements.recurringConfirmSave.getAttribute('aria-busy'), null);
   assert.strictEqual(harness.document.querySelectorAll('[data-cloud-write]').every((control) => !control.disabled), true);
   assert.deepStrictEqual(writeCounts(harness), { insert: 1, update: 0, upsert: 0, upload: 0, delete: 0 });
 
@@ -5689,9 +5820,10 @@ async function testAppRecurringConfirmationSerializesAndPreservesFailureInput() 
   );
 
   const remoteError = new Error('network offline');
+  const recurringFailureGate = createDeferred();
   const failureHarness = createAppHarness({
     cloudState: initialState,
-    cloud: { insertTransaction: async () => { throw remoteError; } }
+    cloud: { insertTransaction: () => recurringFailureGate.promise }
   });
   await failureHarness.init();
   const failureButton = currentRecordButton(failureHarness);
@@ -5703,9 +5835,15 @@ async function testAppRecurringConfirmationSerializesAndPreservesFailureInput() 
   const failedValues = confirmValues(failureHarness);
   const failedState = await exportState(failureHarness);
   const failedRenderCount = failureHarness.records.renderedSummaries.length;
-  await failureHarness.elements.recurringConfirmForm.dispatch('submit', {
+  const failingConfirmation = failureHarness.elements.recurringConfirmForm.dispatch('submit', {
     submitter: failureHarness.elements.recurringConfirmSave
   });
+  await Promise.resolve();
+  assert.strictEqual(failureHarness.elements.recurringConfirmMessage.textContent, '저장 중이에요…');
+  assert.strictEqual(failureHarness.elements.recurringConfirmSave.getAttribute('aria-busy'), 'true');
+  assert.strictEqual(failureHarness.elements.recurringConfirmCancel.disabled, true);
+  recurringFailureGate.reject(remoteError);
+  await failingConfirmation;
   assert.strictEqual(failureHarness.cloudCalls.insertTransaction.length, 1);
   assert.deepStrictEqual(writeCounts(failureHarness), { insert: 1, update: 0, upsert: 0, upload: 0, delete: 0 });
   assert.deepStrictEqual(await exportState(failureHarness), failedState);
@@ -5717,6 +5855,7 @@ async function testAppRecurringConfirmationSerializesAndPreservesFailureInput() 
   assert.strictEqual(failureHarness.records.cloudStatuses.at(-1).readiness, 'ready');
   assert.strictEqual(failureHarness.document.querySelectorAll('[data-cloud-write]').every((control) => !control.disabled), true);
   assert.strictEqual(failureHarness.elements.recurringConfirmCancel.disabled, false);
+  assert.strictEqual(failureHarness.elements.recurringConfirmSave.getAttribute('aria-busy'), null);
 
   const nativeCancel = await failureHarness.elements.recurringConfirmDialog.dispatch('cancel');
   assert.strictEqual(nativeCancel.defaultPrevented, true);
@@ -6264,6 +6403,42 @@ async function testAppRecurringLifecycleCoversImportResetSampleDownloadAndLogout
   assert.strictEqual(corruptImport.records.recurringUiResets.length, corruptResetCount);
   assert.match(corruptMessage, /형식이 올바르지/);
   assert.strictEqual(corruptImport.elements.importFile.value, '');
+
+  const duplicateTransaction = {
+    id: `tx-recurring-rt-import-rent-${currentMonth}`,
+    date: `${currentMonth}-15`,
+    type: 'expense',
+    category: importedTemplates[0].category,
+    amount: importedTemplates[0].amount,
+    memo: 'duplicate decision',
+    source: 'user'
+  };
+  const duplicateText = JSON.stringify({
+    ...storage.defaultState(),
+    version: 2,
+    recurringExpenseTemplates: [importedTemplates[0]],
+    transactions: [duplicateTransaction, { ...duplicateTransaction }]
+  });
+  const duplicateImport = createAppHarness({
+    cloudState: oldState,
+    importText: duplicateText,
+    importFile: { name: 'duplicate.json', size: Buffer.byteLength(duplicateText) },
+    confirmResults: [true]
+  });
+  await duplicateImport.init();
+  const duplicateUi = await prepareStaleRecurringUi(duplicateImport, '중복 ID 백업');
+  const duplicateState = await exportedState(duplicateImport);
+  const duplicateResetCount = duplicateImport.records.recurringUiResets.length;
+  duplicateImport.elements.importFile.value = 'duplicate.json';
+  await duplicateImport.elements.importFile.dispatch('change');
+  await duplicateImport.flushFileReaders();
+  const duplicateMessage = duplicateImport.elements.toolMessage.textContent;
+  assertOnlyWholeStateWrite(duplicateImport, 0);
+  assert.deepStrictEqual(await exportedState(duplicateImport), duplicateState);
+  assertRecurringUiPreserved(duplicateImport, duplicateUi, false);
+  assert.strictEqual(duplicateImport.records.recurringUiResets.length, duplicateResetCount);
+  assert.match(duplicateMessage, /중복.*ID/);
+  assert.strictEqual(duplicateImport.elements.importFile.value, '');
 
   const readerFailure = createAppHarness({
     cloudState: oldState,

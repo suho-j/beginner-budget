@@ -336,9 +336,12 @@
     const unrecorded = rows.filter((occurrence) => occurrence.status !== 'recorded');
     const expectedTotal = unrecorded.reduce((total, occurrence) => total + (Number(occurrence.amount) || 0), 0);
 
-    elements.recurringUpcomingSummary.textContent = unrecorded.length
+    const nextSummary = unrecorded.length
       ? `미기록 ${unrecorded.length}건 · 예상 합계 ${formatRecurringWon(expectedTotal)}`
       : '미기록 예정 없음';
+    if (elements.recurringUpcomingSummary.textContent !== nextSummary) {
+      elements.recurringUpcomingSummary.textContent = nextSummary;
+    }
     elements.recurringUpcomingEmpty.hidden = rows.length > 0;
     elements.recurringUpcomingList.hidden = rows.length === 0;
     elements.recurringUpcomingList.replaceChildren();
@@ -614,11 +617,13 @@
     if (elements.recurringConfirmDialog.open) elements.recurringConfirmDialog.close();
   }
 
-  function openEditDialog(elements, transaction, trigger) {
+  function openEditDialog(elements, transaction, trigger, options = {}) {
+    const lockType = Boolean(options.lockType);
     elements.editId.value = transaction.id;
     elements.editDate.value = transaction.date;
-    elements.editType.value = transaction.type;
-    fillCategoryOptions(elements.editCategory, transaction.type);
+    elements.editType.disabled = lockType;
+    elements.editType.value = lockType ? 'expense' : transaction.type;
+    fillCategoryOptions(elements.editCategory, elements.editType.value);
     elements.editCategory.value = transaction.category;
     elements.editAmount.value = String(transaction.amount);
     elements.editMemo.value = transaction.memo || '';

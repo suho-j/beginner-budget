@@ -175,6 +175,21 @@
     return `tx-recurring-${templateId}-${scheduledMonth}`;
   }
 
+  function isRecurringExpenseTransaction(state, transaction) {
+    const transactionId = String(transaction && transaction.id || '');
+    const monthMatch = transactionId.match(/-(\d{4}-\d{2})$/);
+    if (!monthMatch || !window.BudgetStorage.isValidMonthString(monthMatch[1])) return false;
+
+    const scheduledMonth = monthMatch[1];
+    const templates = window.BudgetStorage.normalizeRecurringExpenseTemplates(
+      state && state.recurringExpenseTemplates
+    );
+    return templates.some((template) => (
+      scheduledMonth >= template.startsOn.slice(0, 7)
+      && recurringTransactionId(template.id, scheduledMonth) === transactionId
+    ));
+  }
+
   function deriveRecurringExpenseOccurrences(state, budgetMonth, today = new Date()) {
     if (!window.BudgetStorage.isValidMonthString(budgetMonth)) return [];
 
@@ -193,12 +208,15 @@
     ) {
       normalized.recurringExpenseTemplates.forEach((template) => {
         const scheduledDate = window.BudgetStorage.scheduledDateForMonth(scheduledMonth, template.dayOfMonth);
-        if (!scheduledDate || scheduledDate < range.start || scheduledDate > range.end || scheduledDate < template.startsOn) {
+        if (!scheduledDate || scheduledDate < range.start || scheduledDate > range.end) {
           return;
         }
 
         const transactionId = recurringTransactionId(template.id, scheduledMonth);
         const transaction = transactionsById.get(transactionId) || null;
+        if (scheduledMonth < template.startsOn.slice(0, 7) || (!transaction && scheduledDate < template.startsOn)) {
+          return;
+        }
         const status = transaction
           ? 'recorded'
           : scheduledDate < todayString
@@ -332,6 +350,14 @@
     }
 
     const previous = state.transactions[index];
+    if (isRecurringExpenseTransaction(state, previous) && validation.value.type !== 'expense') {
+      return {
+        state,
+        ok: false,
+        transaction: null,
+        errors: [error('type', '반복 지출로 기록한 거래는 지출 유형을 유지해 주세요.')]
+      };
+    }
     const transaction = {
       ...previous,
       ...validation.value,
@@ -603,6 +629,28 @@
       const rawTemplates = Array.isArray(parsed.recurringExpenseTemplates)
         ? parsed.recurringExpenseTemplates
         : [];
+      const explicitTransactionIds = new Set();
+      const hasDuplicateTransactionId = rawTransactions.some((transaction) => {
+        if (
+          !transaction
+          || typeof transaction !== 'object'
+          || Array.isArray(transaction)
+          || typeof transaction.id !== 'string'
+          || transaction.id.length === 0
+        ) {
+          return false;
+        }
+        if (explicitTransactionIds.has(transaction.id)) return true;
+        explicitTransactionIds.add(transaction.id);
+        return false;
+      });
+      if (hasDuplicateTransactionId) {
+        return {
+          ok: false,
+          state: null,
+          errors: [error('importData', '백업에 중복된 거래 ID가 있어 가져오기를 중단했어요.')]
+        };
+      }
       const eligibleTemplates = sourceVersion >= 2 ? rawTemplates : [];
       if (rawTransactions.length === 0 && eligibleTemplates.length === 0) {
         return { ok: false, state: null, errors: [error('importData', '가져올 거래나 반복 지출이 없어요. 현재 데이터는 그대로 둡니다.')] };
@@ -655,6 +703,7 @@
     updateRecurringExpenseTemplate,
     deleteRecurringExpenseTemplate,
     recurringTransactionId,
+    isRecurringExpenseTransaction,
     deriveRecurringExpenseOccurrences,
     addRecurringExpenseTransaction,
     addTransaction,
