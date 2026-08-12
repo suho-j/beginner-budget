@@ -123,6 +123,19 @@
       </div>
     </section>
 
+    <section id="recurring-upcoming-section" class="panel recurring-upcoming-section" aria-labelledby="recurring-upcoming-heading">
+      <div class="section-heading section-heading-spread">
+        <h2 id="recurring-upcoming-heading">다가오는 반복 지출</h2>
+        <p id="recurring-upcoming-summary" class="muted" role="status" aria-live="polite" aria-atomic="true">예정 0건 · 0원</p>
+      </div>
+      <p class="hint">예정 금액은 실제 사용액에 포함되지 않아요.</p>
+      <div id="recurring-upcoming-empty" class="empty-state">
+        <strong>이 기간에 예정된 반복 지출이 없어요.</strong>
+        <p>설정에서 월세나 구독료처럼 반복되는 지출을 추가해 보세요.</p>
+      </div>
+      <ul id="recurring-upcoming-list" class="recurring-list"></ul>
+    </section>
+
     <section class="panel" aria-labelledby="form-title">
       <div class="section-heading section-heading-spread">
         <h2 id="form-title">수입/지출 입력</h2>
@@ -241,6 +254,44 @@
       <p id="category-budget-message" class="message" role="status" aria-live="polite"></p>
     </section>
 
+    <section id="recurring-template-section" class="panel recurring-template-section" aria-labelledby="recurring-template-heading">
+      <div class="section-heading section-heading-spread">
+        <h2 id="recurring-template-heading">반복 지출 설정</h2>
+        <a class="back-to-top" href="#top">위로 ↑</a>
+      </div>
+      <p id="recurring-template-help" class="hint">이름, 카테고리, 예상 금액, 매월 결제일을 입력하세요. 반복 설정을 지워도 이미 기록된 거래는 남아요. 확정한 거래를 삭제하면 예정 항목이 다시 나타나요.</p>
+      <form id="recurring-template-form" class="recurring-template-form" novalidate>
+        <div class="recurring-template-fields">
+          <div class="field">
+            <label for="recurring-template-memo">이름</label>
+            <input id="recurring-template-memo" name="memo" type="text" maxlength="80" required aria-describedby="recurring-template-help recurring-template-message">
+          </div>
+          <div class="field">
+            <label for="recurring-template-category">카테고리</label>
+            <select id="recurring-template-category" name="category" required aria-describedby="recurring-template-help recurring-template-message"></select>
+          </div>
+          <div class="field">
+            <label for="recurring-template-amount">예상 금액</label>
+            <input id="recurring-template-amount" name="amount" type="text" inputmode="numeric" pattern="[0-9,]*" required aria-describedby="recurring-template-help recurring-template-message">
+          </div>
+          <div class="field">
+            <label for="recurring-template-day">매월 결제일</label>
+            <input id="recurring-template-day" name="day" type="number" inputmode="numeric" min="1" max="31" step="1" required aria-describedby="recurring-template-help recurring-template-message">
+          </div>
+        </div>
+        <div class="recurring-template-actions">
+          <button id="recurring-template-save" type="submit" data-cloud-write>반복 지출 저장</button>
+          <button id="recurring-template-cancel" type="button" class="secondary" hidden>수정 취소</button>
+        </div>
+      </form>
+      <p id="recurring-template-message" class="message" role="status" aria-live="polite" tabindex="-1"></p>
+      <div id="recurring-template-empty" class="empty-state">
+        <strong>저장된 반복 지출이 없어요.</strong>
+        <p>매달 빠져나가는 비용을 먼저 하나 등록해 보세요.</p>
+      </div>
+      <ul id="recurring-template-list" class="recurring-list"></ul>
+    </section>
+
     <section class="panel" aria-labelledby="tools-title">
       <div class="section-heading section-heading-spread">
         <h2 id="tools-title">보기와 데이터 도구</h2>
@@ -269,6 +320,38 @@
       <div class="field full"><label for="edit-memo">메모 <span class="optional">선택</span></label><input id="edit-memo" name="memo" type="text" maxlength="80" aria-describedby="edit-message"></div>
       <p id="edit-message" class="message full" role="status" aria-live="polite"></p>
       <div class="form-actions full"><button id="edit-save" type="submit" class="primary" data-cloud-write>수정 저장</button><button id="edit-cancel" type="button" class="secondary">취소</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="recurring-confirm-dialog" aria-labelledby="recurring-confirm-heading">
+    <form id="recurring-confirm-form" class="recurring-confirm-form" method="dialog" novalidate>
+      <div class="recurring-confirm-heading">
+        <h2 id="recurring-confirm-heading">반복 지출 확정</h2>
+      </div>
+      <p id="recurring-confirm-scheduled-date" class="hint">원래 예정일: 아직 선택되지 않았어요.</p>
+      <div class="recurring-confirm-fields">
+        <div class="field">
+          <label for="recurring-confirm-date">날짜</label>
+          <input id="recurring-confirm-date" name="date" type="date" required aria-describedby="recurring-confirm-scheduled-date recurring-confirm-message">
+        </div>
+        <div class="field">
+          <label for="recurring-confirm-amount">금액</label>
+          <input id="recurring-confirm-amount" name="amount" type="text" inputmode="numeric" pattern="[0-9,]*" required aria-describedby="recurring-confirm-scheduled-date recurring-confirm-message">
+        </div>
+        <div class="field">
+          <label for="recurring-confirm-category">카테고리</label>
+          <select id="recurring-confirm-category" name="category" required aria-describedby="recurring-confirm-scheduled-date recurring-confirm-message"></select>
+        </div>
+        <div class="field">
+          <label for="recurring-confirm-memo">메모</label>
+          <input id="recurring-confirm-memo" name="memo" type="text" maxlength="80" aria-describedby="recurring-confirm-scheduled-date recurring-confirm-message">
+        </div>
+      </div>
+      <p id="recurring-confirm-message" class="message" role="status" aria-live="polite" tabindex="-1"></p>
+      <div class="recurring-confirm-actions">
+        <button id="recurring-confirm-save" type="submit" data-cloud-write>거래로 확정</button>
+        <button id="recurring-confirm-cancel" type="button" class="secondary">취소</button>
+      </div>
     </form>
   </dialog>
 

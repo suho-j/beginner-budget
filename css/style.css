@@ -337,6 +337,73 @@ h2[id], h3[id] { scroll-margin-top: 6.5rem; }
 .transaction-actions { display: flex; justify-content: flex-end; }
 .delete-button { min-height: 44px; padding: 0.55rem 0.8rem; }
 
+.recurring-list {
+  display: grid;
+  gap: 0.75rem;
+  min-width: 0;
+  max-width: 100%;
+  margin: 0.75rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+.recurring-card {
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 0.85rem;
+  background: #fff;
+  display: grid;
+  gap: 0.65rem;
+  overflow-wrap: anywhere;
+}
+.recurring-card-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 0.75rem; flex-wrap: wrap; }
+.recurring-card-title { min-width: 0; font-weight: 800; }
+.recurring-card-meta { margin: 0; color: var(--muted); }
+.recurring-status {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  border-radius: 999px;
+  padding: 0.2rem 0.55rem;
+  font-size: 0.85rem;
+  font-weight: 800;
+}
+.recurring-status.is-overdue { color: #8f1d16; background: #fff1f0; border: 1px solid #efb2ad; }
+.recurring-status.is-today { color: #7a3e00; background: #fff7e6; border: 1px solid #e8bb76; }
+.recurring-status.is-upcoming { color: #173c99; background: #eef2ff; border: 1px solid #b8c6ed; }
+.recurring-status.is-recorded { color: #0b5e57; background: #ecfdf3; border: 1px solid #9ed4c3; }
+.recurring-card-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.recurring-card-actions button { min-height: 44px; }
+.recurring-template-form { min-width: 0; display: grid; gap: 0.8rem; margin-top: 0.8rem; }
+.recurring-template-fields { min-width: 0; display: grid; gap: 0.8rem; }
+.recurring-template-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.recurring-template-actions button { min-height: 44px; }
+.recurring-upcoming-section :focus-visible {
+  outline: 3px solid #0b3aa4;
+  outline-offset: 2px;
+}
+.recurring-template-section :focus-visible {
+  outline: 3px solid #0b3aa4;
+  outline-offset: 2px;
+}
+#recurring-confirm-dialog {
+  width: min(760px, calc(100% - 2rem));
+  max-height: 100vh;
+  max-height: 100dvh;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+#recurring-confirm-dialog .recurring-confirm-form { min-width: 0; padding: 1.25rem; display: grid; gap: 0.8rem; }
+#recurring-confirm-dialog .recurring-confirm-heading { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+#recurring-confirm-dialog .recurring-confirm-heading h2 { margin-bottom: 0; }
+#recurring-confirm-dialog .recurring-confirm-fields { min-width: 0; display: grid; gap: 0.8rem; }
+#recurring-confirm-dialog .recurring-confirm-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+#recurring-confirm-dialog .recurring-confirm-actions button { min-height: 44px; }
+#recurring-confirm-dialog :focus-visible {
+  outline: 3px solid #0b3aa4;
+  outline-offset: 2px;
+}
+
 .site-footer { padding: 1rem 0 2rem; color: var(--muted); text-align: center; }
 .visually-hidden {
   position: absolute;
@@ -358,6 +425,8 @@ h2[id], h3[id] { scroll-margin-top: 6.5rem; }
   .filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .category-budget-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .category-budget-actions { margin-top: 0.8rem; }
+  .recurring-template-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  #recurring-confirm-dialog .recurring-confirm-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .form-actions { grid-template-columns: repeat(2, minmax(0, max-content)); }
   .data-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .cloud-actions { grid-template-columns: repeat(3, minmax(0, 1fr)); }
@@ -419,4 +488,18 @@ dialog::backdrop { background: rgb(15 23 42 / 0.58); }
   .calendar-expense, .calendar-income { font-size: 0.75rem; overflow-wrap: anywhere; }
   .calendar-count { font-size: 0.75rem; }
   dialog { width: calc(100% - 1rem); max-height: calc(100vh - 1rem); max-height: calc(100dvh - 1rem); }
+  #recurring-confirm-dialog { width: calc(100% - 1rem); }
+  .recurring-card-actions { display: grid; grid-template-columns: 1fr; }
+  .recurring-upcoming-section {
+    min-width: 0;
+    max-width: 100%;
+    overflow-x: hidden;
+    overflow-x: clip;
+  }
+  .recurring-template-section {
+    min-width: 0;
+    max-width: 100%;
+    overflow-x: hidden;
+    overflow-x: clip;
+  }
 }

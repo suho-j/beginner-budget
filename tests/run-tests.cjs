@@ -2161,6 +2161,274 @@ function testAppStylesCoverTabsCalendarDialogAndMobile() {
   assert.ok(calendarMinimumWidth <= calendarContentWidth, 'seven 44px targets must fit the 360px calendar panel');
 }
 
+function testAppMarkupProvidesRecurringSectionsAndDialogContracts() {
+  const source = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+  const attributeValue = (tag, name) => {
+    const match = [...tag.matchAll(/\s([a-z_:][\w:.-]*)="([^"]*)"/gi)]
+      .find((attribute) => attribute[1].toLowerCase() === name.toLowerCase());
+    return match ? match[2] : null;
+  };
+  const startTagById = (id) => {
+    const match = source.match(new RegExp(`<([a-z][\\w-]*)\\b[^>]*\\bid="${id}"[^>]*>`, 'i'));
+    assert.ok(match, `missing element: ${id}`);
+    return { name: match[1].toLowerCase(), source: match[0], index: match.index };
+  };
+  const assertAttribute = (tag, name, value) => {
+    assert.strictEqual(attributeValue(tag.source, name), value, `${tag.source} missing ${name}="${value}"`);
+  };
+  const assertBooleanAttribute = (tag, name) => {
+    assert.match(tag.source, new RegExp(`(?:\\s)${name}(?:\\s|>)`, 'i'), `${tag.source} missing ${name}`);
+  };
+  const elementFromStart = (match) => {
+    assert.ok(match, 'missing element start');
+    const name = match[1].toLowerCase();
+    const tokenPattern = new RegExp(`</?${name}\\b[^>]*>`, 'gi');
+    tokenPattern.lastIndex = match.index;
+    let depth = 0;
+    let token;
+    while ((token = tokenPattern.exec(source))) {
+      if (token[0].startsWith('</')) depth -= 1;
+      else depth += 1;
+      if (depth === 0) {
+        return {
+          name,
+          start: match.index,
+          end: tokenPattern.lastIndex,
+          source: source.slice(match.index, tokenPattern.lastIndex)
+        };
+      }
+    }
+    assert.fail(`missing closing tag for ${name}`);
+  };
+  const elementById = (id) => {
+    const match = source.match(new RegExp(`<([a-z][\\w-]*)\\b[^>]*\\bid="${id}"[^>]*>`, 'i'));
+    assert.ok(match, `missing element: ${id}`);
+    return elementFromStart(match);
+  };
+  const sectionByLabel = (id) => elementFromStart(source.match(new RegExp(`<(section)\\b[^>]*\\baria-labelledby="${id}"[^>]*>`, 'i')));
+
+  const upcomingSection = elementById('recurring-upcoming-section');
+  const expectedTabs = ['tab-home', 'tab-history', 'tab-calendar', 'tab-settings'];
+  const actualTabs = [...source.matchAll(/<button\b[^>]*>/gi)]
+    .filter((match) => attributeValue(match[0], 'role') === 'tab')
+    .map((match) => attributeValue(match[0], 'id'));
+  assert.deepStrictEqual(actualTabs, expectedTabs, 'recurring expenses must not add a fifth top-level tab');
+
+  const futureElementKeys = {
+    recurringUpcomingSection: 'recurring-upcoming-section',
+    recurringUpcomingHeading: 'recurring-upcoming-heading',
+    recurringUpcomingSummary: 'recurring-upcoming-summary',
+    recurringUpcomingList: 'recurring-upcoming-list',
+    recurringUpcomingEmpty: 'recurring-upcoming-empty',
+    recurringTemplateSection: 'recurring-template-section',
+    recurringTemplateForm: 'recurring-template-form',
+    recurringTemplateMemo: 'recurring-template-memo',
+    recurringTemplateCategory: 'recurring-template-category',
+    recurringTemplateAmount: 'recurring-template-amount',
+    recurringTemplateDay: 'recurring-template-day',
+    recurringTemplateSave: 'recurring-template-save',
+    recurringTemplateCancel: 'recurring-template-cancel',
+    recurringTemplateMessage: 'recurring-template-message',
+    recurringTemplateList: 'recurring-template-list',
+    recurringTemplateEmpty: 'recurring-template-empty',
+    recurringTemplateHeading: 'recurring-template-heading',
+    recurringTemplateHelp: 'recurring-template-help',
+    recurringConfirmDialog: 'recurring-confirm-dialog',
+    recurringConfirmForm: 'recurring-confirm-form',
+    recurringConfirmHeading: 'recurring-confirm-heading',
+    recurringConfirmScheduledDate: 'recurring-confirm-scheduled-date',
+    recurringConfirmDate: 'recurring-confirm-date',
+    recurringConfirmAmount: 'recurring-confirm-amount',
+    recurringConfirmCategory: 'recurring-confirm-category',
+    recurringConfirmMemo: 'recurring-confirm-memo',
+    recurringConfirmMessage: 'recurring-confirm-message',
+    recurringConfirmSave: 'recurring-confirm-save',
+    recurringConfirmCancel: 'recurring-confirm-cancel'
+  };
+  for (const [key, id] of Object.entries(futureElementKeys)) {
+    startTagById(id);
+    assert.strictEqual(id.replace(/-([a-z])/g, (_, letter) => letter.toUpperCase()), key, `${id} must map to getElements().${key}`);
+  }
+
+  const homeSummary = sectionByLabel('summary-title');
+  const transactionInput = sectionByLabel('form-title');
+  assert.ok(homeSummary.end <= upcomingSection.start, 'upcoming recurring expenses must follow the actual monthly summary');
+  assert.ok(upcomingSection.end <= transactionInput.start, 'upcoming recurring expenses must precede normal transaction input');
+  const upcomingStart = startTagById('recurring-upcoming-section');
+  assertAttribute(upcomingStart, 'aria-labelledby', 'recurring-upcoming-heading');
+  assert.strictEqual(startTagById('recurring-upcoming-heading').name, 'h2');
+  const upcomingSummary = startTagById('recurring-upcoming-summary');
+  assertAttribute(upcomingSummary, 'role', 'status');
+  assertAttribute(upcomingSummary, 'aria-live', 'polite');
+  assertAttribute(upcomingSummary, 'aria-atomic', 'true');
+  assert.strictEqual(startTagById('recurring-upcoming-list').name, 'ul');
+  assert.ok(['div', 'p'].includes(startTagById('recurring-upcoming-empty').name));
+  assert.match(upcomingSection.source, /예정 금액은 실제 사용액에 포함되지 않아요\./);
+
+  const categoryBudgets = sectionByLabel('category-budget-title');
+  const templateSection = elementById('recurring-template-section');
+  const dataTools = sectionByLabel('tools-title');
+  assert.ok(categoryBudgets.end <= templateSection.start, 'recurring settings must follow category budgets');
+  assert.ok(templateSection.end <= dataTools.start, 'recurring settings must precede data tools');
+  assertAttribute(startTagById('recurring-template-section'), 'aria-labelledby', 'recurring-template-heading');
+  assert.strictEqual(startTagById('recurring-template-heading').name, 'h2');
+
+  const templateForm = elementById('recurring-template-form');
+  const templateFormStart = startTagById('recurring-template-form');
+  assert.strictEqual(templateFormStart.name, 'form');
+  assertBooleanAttribute(templateFormStart, 'novalidate');
+  for (const [id, labelText] of [
+    ['recurring-template-memo', '이름'],
+    ['recurring-template-category', '카테고리'],
+    ['recurring-template-amount', '예상 금액'],
+    ['recurring-template-day', '매월 결제일']
+  ]) {
+    const label = source.match(new RegExp(`<label\\b[^>]*\\bfor="${id}"[^>]*>([\\s\\S]*?)</label>`, 'i'));
+    assert.ok(label, `missing label for ${id}`);
+    assert.strictEqual(label[1].replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim(), labelText);
+    const field = startTagById(id);
+    const descriptions = (attributeValue(field.source, 'aria-describedby') || '').split(/\s+/).filter(Boolean);
+    assert.ok(descriptions.includes('recurring-template-help'), `${id} must reference recurring template help`);
+    assert.ok(descriptions.includes('recurring-template-message'), `${id} must reference recurring template feedback`);
+    assertBooleanAttribute(field, 'required');
+  }
+  assert.doesNotMatch(templateForm.source, /<(?:input|select|textarea)\b[^>]*\btype="hidden"/i, 'template identity and start date must stay internal');
+  assert.doesNotMatch(templateForm.source, /\bname="(?:id|startsOn)"/i, 'template identity and start date must not be user-editable');
+  assertAttribute(startTagById('recurring-template-amount'), 'inputmode', 'numeric');
+  assertAttribute(startTagById('recurring-template-day'), 'min', '1');
+  assertAttribute(startTagById('recurring-template-day'), 'max', '31');
+  const templateSave = startTagById('recurring-template-save');
+  assertAttribute(templateSave, 'type', 'submit');
+  assertBooleanAttribute(templateSave, 'data-cloud-write');
+  const templateCancel = startTagById('recurring-template-cancel');
+  assertAttribute(templateCancel, 'type', 'button');
+  assertBooleanAttribute(templateCancel, 'hidden');
+  assert.doesNotMatch(templateCancel.source, /\bdata-cloud-write\b/);
+  const templateMessage = startTagById('recurring-template-message');
+  assertAttribute(templateMessage, 'role', 'status');
+  assertAttribute(templateMessage, 'aria-live', 'polite');
+  assertAttribute(templateMessage, 'tabindex', '-1');
+  assert.strictEqual(startTagById('recurring-template-list').name, 'ul');
+  assert.ok(['div', 'p'].includes(startTagById('recurring-template-empty').name));
+  assert.match(templateSection.source, /반복 설정을 지워도 이미 기록된 거래는 남아요\./);
+  assert.match(templateSection.source, /확정한 거래를 삭제하면 예정 항목이 다시 나타나요\./);
+
+  const confirmDialog = elementById('recurring-confirm-dialog');
+  const confirmDialogStart = startTagById('recurring-confirm-dialog');
+  assert.strictEqual(confirmDialogStart.name, 'dialog');
+  assertAttribute(confirmDialogStart, 'aria-labelledby', 'recurring-confirm-heading');
+  assert.strictEqual(startTagById('recurring-confirm-heading').name, 'h2');
+  const confirmFormStart = startTagById('recurring-confirm-form');
+  assert.strictEqual(confirmFormStart.name, 'form');
+  assertAttribute(confirmFormStart, 'method', 'dialog');
+  assertBooleanAttribute(confirmFormStart, 'novalidate');
+  const scheduledDate = elementById('recurring-confirm-scheduled-date');
+  assert.match(scheduledDate.source, /원래 예정일/);
+  assert.doesNotMatch(startTagById('recurring-confirm-scheduled-date').source, /(?:\s)hidden(?:\s|>)/);
+  for (const [id, labelText] of [
+    ['recurring-confirm-date', '날짜'],
+    ['recurring-confirm-amount', '금액'],
+    ['recurring-confirm-category', '카테고리'],
+    ['recurring-confirm-memo', '메모']
+  ]) {
+    const label = confirmDialog.source.match(new RegExp(`<label\\b[^>]*\\bfor="${id}"[^>]*>([\\s\\S]*?)</label>`, 'i'));
+    assert.ok(label, `missing confirm label for ${id}`);
+    assert.strictEqual(label[1].replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim(), labelText);
+    const field = startTagById(id);
+    assert.doesNotMatch(field.source, /(?:\s)(?:disabled|readonly)(?:\s|>)/, `${id} must stay editable`);
+    const descriptions = (attributeValue(field.source, 'aria-describedby') || '').split(/\s+/).filter(Boolean);
+    assert.ok(descriptions.includes('recurring-confirm-scheduled-date'), `${id} must reference the original scheduled date`);
+    assert.ok(descriptions.includes('recurring-confirm-message'), `${id} must reference confirm feedback`);
+  }
+  const confirmMessage = startTagById('recurring-confirm-message');
+  assertAttribute(confirmMessage, 'role', 'status');
+  assertAttribute(confirmMessage, 'aria-live', 'polite');
+  assertAttribute(confirmMessage, 'tabindex', '-1');
+  const confirmSave = startTagById('recurring-confirm-save');
+  assertAttribute(confirmSave, 'type', 'submit');
+  assertBooleanAttribute(confirmSave, 'data-cloud-write');
+  const confirmCancel = startTagById('recurring-confirm-cancel');
+  assertAttribute(confirmCancel, 'type', 'button');
+  assert.doesNotMatch(confirmCancel.source, /\bdata-cloud-write\b/);
+
+  const ids = [...source.matchAll(/\bid="([^"]+)"/g)].map((match) => match[1]);
+  const idSet = new Set(ids);
+  assert.strictEqual(idSet.size, ids.length, 'all document IDs must stay unique');
+  for (const reference of source.matchAll(/\b(for|aria-labelledby|aria-controls|aria-describedby)="([^"]+)"/g)) {
+    for (const id of reference[2].split(/\s+/).filter(Boolean)) {
+      assert.ok(idSet.has(id), `${reference[1]} references missing ID: ${id}`);
+    }
+  }
+}
+
+function testAppStylesCoverRecurringCardsDialogAndMobile() {
+  const source = fs.readFileSync(path.join(__dirname, '..', 'css/style.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+  const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const declarations = (selector, scope = source) => {
+    const match = scope.match(new RegExp(`(?:^|})\\s*${escapeRegex(selector)}\\s*\\{([^}]*)\\}`, 'm'));
+    assert.ok(match, `missing style rule: ${selector}`);
+    return match[1];
+  };
+
+  const recurringList = declarations('.recurring-list');
+  assert.match(recurringList, /(?:^|;)\s*display\s*:\s*grid\s*;/);
+  assert.match(recurringList, /(?:^|;)\s*gap\s*:\s*0\.75rem\s*;/);
+  const recurringCard = declarations('.recurring-card');
+  assert.match(recurringCard, /(?:^|;)\s*min-width\s*:\s*0\s*;/);
+  assert.match(recurringCard, /(?:^|;)\s*overflow-wrap\s*:\s*anywhere\s*;/);
+
+  const actions = declarations('.recurring-card-actions');
+  assert.match(actions, /(?:^|;)\s*display\s*:\s*flex\s*;/);
+  assert.match(actions, /(?:^|;)\s*flex-wrap\s*:\s*wrap\s*;/);
+  assert.match(actions, /(?:^|;)\s*gap\s*:\s*0\.5rem\s*;/);
+  assert.match(declarations('.recurring-card-actions button'), /(?:^|;)\s*min-height\s*:\s*44px\s*;/);
+
+  const textBadge = declarations('.recurring-status');
+  assert.match(textBadge, /(?:^|;)\s*font-weight\s*:\s*(?:700|800|900)\s*;/, 'status badges must visibly carry text, not color alone');
+  for (const selector of [
+    '.recurring-status.is-overdue',
+    '.recurring-status.is-today',
+    '.recurring-status.is-upcoming',
+    '.recurring-status.is-recorded'
+  ]) {
+    const badge = declarations(selector);
+    assert.match(badge, /(?:^|;)\s*color\s*:\s*[^;]+;/, `${selector} needs readable text`);
+    assert.match(badge, /(?:^|;)\s*background\s*:\s*[^;]+;/, `${selector} needs a visible badge surface`);
+    assert.match(badge, /(?:^|;)\s*border\s*:\s*[^;]+;/, `${selector} needs a visible boundary`);
+  }
+
+  const dialog = declarations('#recurring-confirm-dialog');
+  assert.match(dialog, /(?:^|;)\s*width\s*:\s*min\(760px,\s*calc\(100% - 2rem\)\)\s*;/);
+  assert.match(dialog, /max-height\s*:\s*100vh\s*;[\s\S]*max-height\s*:\s*100dvh\s*;/);
+  assert.match(dialog, /(?:^|;)\s*overscroll-behavior\s*:\s*contain\s*;/);
+  assert.match(dialog, /(?:^|;)\s*overflow\s*:\s*auto\s*;/);
+
+  for (const selector of [
+    '.recurring-upcoming-section :focus-visible',
+    '.recurring-template-section :focus-visible',
+    '#recurring-confirm-dialog :focus-visible'
+  ]) {
+    const focus = declarations(selector);
+    assert.match(focus, /(?:^|;)\s*outline\s*:\s*3px\s+solid\s+#0b3aa4\s*;/i);
+    assert.match(focus, /(?:^|;)\s*outline-offset\s*:\s*2px\s*;/);
+  }
+
+  const mobileMarker = '@media (max-width: 559px)';
+  const mobileMarkerIndex = source.indexOf(mobileMarker);
+  assert.ok(mobileMarkerIndex >= 0, `missing style: ${mobileMarker}`);
+  const mobile = source.slice(source.indexOf('{', mobileMarkerIndex) + 1);
+  assert.match(declarations('#recurring-confirm-dialog', mobile), /(?:^|;)\s*width\s*:\s*calc\(100% - 1rem\)\s*;/);
+  const mobileActions = declarations('.recurring-card-actions', mobile);
+  assert.match(mobileActions, /(?:^|;)\s*display\s*:\s*grid\s*;/);
+  assert.match(mobileActions, /(?:^|;)\s*grid-template-columns\s*:\s*1fr\s*;/);
+  for (const selector of ['.recurring-upcoming-section', '.recurring-template-section']) {
+    const section = declarations(selector, mobile);
+    assert.match(section, /(?:^|;)\s*min-width\s*:\s*0\s*;/);
+    assert.match(section, /(?:^|;)\s*max-width\s*:\s*100%\s*;/);
+    assert.match(section, /overflow-x\s*:\s*hidden\s*;[\s\S]*overflow-x\s*:\s*clip\s*;/, `${selector} must not widen the 360px document`);
+  }
+}
+
 function testUiExportsTabEditAndCalendarRenderers() {
   const source = fs.readFileSync(path.join(__dirname, '..', 'js/ui.js'), 'utf8');
   for (const name of [
@@ -4058,6 +4326,8 @@ const tests = [
   testUiTransactionActionLabelsIncludeType,
   testAppMarkupProvidesTabsCalendarEditDialogAndPreviewWarning,
   testAppStylesCoverTabsCalendarDialogAndMobile,
+  testAppMarkupProvidesRecurringSectionsAndDialogContracts,
+  testAppStylesCoverRecurringCardsDialogAndMobile,
   testCategoryFilterCombinesWithMonthTypeAndQuery,
   testUpdateTransactionValidatesAndPreservesIdentity,
   testCalendarDaysCoverBudgetPeriodByWholeWeeks,
