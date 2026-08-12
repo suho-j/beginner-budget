@@ -6,6 +6,7 @@
 
 - 마지막 기능 구현 SHA: `20eddaf476edfc1cb9ceaaaf9ffa953e3a0f1e94`
 - 문서 동기화 작업 트리 자동 테스트: `87 tests passed` 확인
+- Task 14 동시성 러너 SHA `054d992b3efc9de55217085bb65d44de212ab381`: `89 tests passed`, PowerShell 파서와 원격 Docker context 차단 음성 테스트 확인
 - PostgreSQL 17 격리 런타임: **PASS — Task 13**, 검증 SHA `10cd05693449cf154f3559ca3bb27928d613eb7d`, 최종 출력 `preview-v2 PostgreSQL runtime tests passed`
 - 실제 Supabase V2 SQL과 사용자 A/B RLS·인증 저장: **PENDING — Task 14**
 - `/v2/` 산출물과 `/v2/version.json`: **PENDING — Tasks 15~16**
@@ -28,7 +29,7 @@ node tests/run-tests.cjs
 git diff --check
 ```
 
-성공 기준은 여섯 문법 검사 통과, 정확히 `87 tests passed`, diff 오류 0건입니다. 테스트 범위는 다음을 포함합니다.
+성공 기준은 여섯 문법 검사 통과, 정확히 `89 tests passed`, diff 오류 0건입니다. 테스트 범위는 다음을 포함합니다.
 
 - 상태 버전 2, V1 승격, 미래 버전·손상 배열 거부
 - 반복지출 템플릿 정규화·100개 제한·CRUD·월말 보정

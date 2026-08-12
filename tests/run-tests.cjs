@@ -5181,6 +5181,23 @@ function testPreviewV2LiveConcurrencyRunnerContract() {
   assert.ok(cleanupBody.indexOf('Reset-DockerClientForCleanup') < cleanupBody.indexOf('Stop-RunServerBackends'), 'fresh cleanup client must replace the workload container before backend drain');
   assert.ok(cleanupBody.indexOf('Stop-RunServerBackends') < cleanupBody.indexOf('Start-PsqlFile'), 'server backends must drain before cleanup DML');
   assert.doesNotMatch(source, /Get-Process[^\r\n]*\|[^\r\n]*Stop-Process/i, 'cleanup must only stop owned process IDs');
+
+  const artifactBuilder = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'build-preview-v2-artifact.ps1'), 'utf8');
+  assert.match(artifactBuilder, /version\.testCount\s+-ne\s+89/i, 'artifact validation must require the current 89-test suite');
+  assert.match(artifactBuilder, /testCount\s*=\s*89/i, 'artifact metadata must publish the current 89-test suite');
+  assert.match(artifactBuilder, /self-tests passed:\s*16 scenarios/i, 'artifact self-test evidence must report all sixteen fixtures');
+
+  const currentTestPlan = fs.readFileSync(path.join(__dirname, '..', 'docs', 'TEST_PLAN.md'), 'utf8');
+  const currentChecklist = fs.readFileSync(path.join(__dirname, '..', 'manual-test-checklist.md'), 'utf8');
+  const implementationPlan = fs.readFileSync(path.join(__dirname, '..', 'docs', 'superpowers', 'plans', '2026-08-12-budget-recurring-upcoming-v2.md'), 'utf8');
+  assert.match(currentTestPlan, /성공 기준은[^\r\n]*정확히 `89 tests passed`/i);
+  assert.match(currentChecklist, /node tests\/run-tests\.cjs`가 정확히 `89 tests passed`/i);
+  const finalDeliveryPlan = implementationPlan.slice(implementationPlan.indexOf('### Task 15:'), implementationPlan.indexOf('## 최종 완료 기준'));
+  const finalCompletionCriteria = implementationPlan.slice(implementationPlan.indexOf('## 최종 완료 기준'));
+  assert.match(finalDeliveryPlan, /`89 tests passed`/i);
+  assert.match(finalDeliveryPlan, /`testCount` \| integer `89`/i);
+  assert.doesNotMatch(finalDeliveryPlan, /\b87\b/, 'Task 15-16 current delivery contract must not retain the historical test count');
+  assert.match(finalCompletionCriteria, /89개 Node 테스트/i);
 }
 
 function testPreviewV2SeedAndFiveArgumentCasNeverMutateV1OrProduction() {

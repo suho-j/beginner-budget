@@ -5,7 +5,7 @@
 ## 자동·로컬 게이트
 
 - [ ] storage, transactions, cloud, ui, app, 테스트 실행기의 `node --check`가 모두 통과했다.
-- [ ] `node tests/run-tests.cjs`가 정확히 `87 tests passed`로 끝났다.
+- [ ] `node tests/run-tests.cjs`가 정확히 `89 tests passed`로 끝났다.
 - [ ] `git diff --check`가 통과했다.
 - [ ] 현재 검증 대상의 clean SHA를 기록했다.
 

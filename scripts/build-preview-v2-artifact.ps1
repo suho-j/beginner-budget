@@ -254,7 +254,7 @@ function Assert-V2Artifact {
     -or $version.sourceBranch -ne $expectedSourceBranch `
     -or $version.sourceCommit -ne $ExpectedCommit `
     -or $version.builtAt -ne $ExpectedBuiltAt `
-    -or $version.testCount -ne 87 `
+    -or $version.testCount -ne 89 `
     -or $version.environment -ne 'preview-v2' `
     -or @($version.dataTables).Count -ne 2 `
     -or @($version.dataTables)[0] -ne 'preview_v2_budget_settings' `
@@ -967,7 +967,7 @@ function Invoke-ArtifactSelfTest {
     if ($Filter -eq 'Concurrency') {
       Write-Output 'V2 artifact concurrency self-tests passed: mutex, file-lock, deterministic publish and rollback CAS'
     } else {
-      Write-Output 'V2 artifact self-tests passed: 15 scenarios including deterministic publish and rollback CAS'
+      Write-Output 'V2 artifact self-tests passed: 16 scenarios including deterministic publish and rollback CAS'
     }
   } finally {
     if (Test-Path -LiteralPath $selfTestRoot) {
@@ -1067,7 +1067,7 @@ try {
     sourceBranch = $expectedSourceBranch
     sourceCommit = $sourceCommitNormalized
     builtAt = $BuiltAtUtc
-    testCount = 87
+    testCount = 89
     environment = 'preview-v2'
     dataTables = @('preview_v2_budget_settings', 'preview_v2_transactions')
   }

@@ -1461,7 +1461,7 @@ git status --porcelain
 git rev-parse HEAD
 ```
 
-Expected: `87 tests passed`, clean status. 마지막 40자리 SHA와 다음 명령의 UTC 시각을 실행 로그에 기록한다.
+Expected: `89 tests passed`, clean status. 마지막 40자리 SHA와 다음 명령의 UTC 시각을 실행 로그에 기록한다.
 
 ```powershell
 (Get-Date).ToUniversalTime().ToString('o')
@@ -1504,7 +1504,7 @@ artifact script는 PowerShell ordered hashtable를 `ConvertTo-Json`한 UTF-8 파
 | `sourceBranch` | `guardian/budget-preview-v2` |
 | `sourceCommit` | Task 15 Step 1 `git rev-parse HEAD` 출력 |
 | `builtAt` | Task 15 Step 1 UTC 명령 출력 |
-| `testCount` | integer `87` |
+| `testCount` | integer `89` |
 | `environment` | `preview-v2` |
 | `dataTables` | `preview_v2_budget_settings`, `preview_v2_transactions` |
 
@@ -1516,7 +1516,7 @@ artifact script가 쓰는 root landing HTML과 README markdown은 script 안의 
 
 - [ ] **Step 6: artifact 동등성과 V1 불변을 검증한다**
 
-artifact script 끝에서 source↔deploy V2 각 파일 SHA256이 동일한지, 시작 때 저장한 V1 hash와 현재 hash가 byte-for-byte 같은지 확인한다. `v2/index.html`의 로컬 자산 경로가 상대 경로인지, `version.json`이 인자 SHA/87/V2 tables인지 검사한다. 검증 실패 시 nonzero로 끝내고 commit하지 않는다.
+artifact script 끝에서 source↔deploy V2 각 파일 SHA256이 동일한지, 시작 때 저장한 V1 hash와 현재 hash가 byte-for-byte 같은지 확인한다. `v2/index.html`의 로컬 자산 경로가 상대 경로인지, `version.json`이 인자 SHA/89/V2 tables인지 검사한다. 검증 실패 시 nonzero로 끝내고 commit하지 않는다.
 
 ```powershell
 $artifactFiles | ForEach-Object {
@@ -1614,7 +1614,7 @@ desktop과 360×800에서 다음을 확인한다.
 
 - [ ] **Step 6: 실제 검증 근거만 source 문서에 기록한다**
 
-공개 URL, source SHA, deploy SHA, 87개 테스트, PostgreSQL runtime 결과, auth browser 결과, QA cleanup, production/V1 불변을 기록한다. 실제로 완료하지 못한 Supabase/auth 단계는 `PENDING`을 유지한다.
+공개 URL, source SHA, deploy SHA, 89개 테스트, PostgreSQL runtime 결과, auth browser 결과, QA cleanup, production/V1 불변을 기록한다. 실제로 완료하지 못한 Supabase/auth 단계는 `PENDING`을 유지한다.
 
 ```powershell
 git add docs/TEST_PLAN.md manual-test-checklist.md docs/IMPROVEMENT_LOG.md
@@ -1648,7 +1648,7 @@ git push origin guardian/budget-preview-v2
 - [ ] 예정 금액은 실제 합계에 포함되지 않고 네 상태가 텍스트로 구분된다.
 - [ ] import/export/reset/sample/download/logout 전체 경로가 템플릿을 올바르게 보존·삭제한다.
 - [ ] V2 SQL·앱·배포가 V1 preview와 production 객체/데이터/파일을 변경하지 않는다.
-- [ ] 6개 문법 검사, 87개 Node 테스트, PostgreSQL 17 runtime, desktop/360×800, keyboard/a11y, signed-in 브라우저 QA가 통과한다.
+- [ ] 6개 문법 검사, 89개 Node 테스트, PostgreSQL 17 runtime, desktop/360×800, keyboard/a11y, signed-in 브라우저 QA가 통과한다.
 - [ ] `/v2/version.json`이 정확한 clean source SHA와 V2 table을 가리킨다.
 - [ ] `/v1/`은 그대로 열리고 `/v2/`는 별도 URL에서 열린다.
 - [ ] QA 데이터가 브라우저와 DB에서 모두 0건으로 정리된다.
