@@ -2340,9 +2340,11 @@ function testAppMarkupProvidesRecurringSectionsAndDialogContracts() {
   const scheduledDate = elementById('recurring-confirm-scheduled-date');
   assert.strictEqual(scheduledDate.name, 'strong');
   assert.strictEqual(normalizedText(scheduledDate), '', 'Task 8 owns the scheduled date value');
-  const scheduledDateParent = confirmDialog.source.match(/<p\b([^>]*)>\s*원래 예정일:\s*(<strong\b[^>]*\bid="recurring-confirm-scheduled-date"[^>]*>\s*<\/strong>)\s*<\/p>/i);
+  const scheduledDateParent = confirmDialog.source.match(/<p\b([^>]*\bid="recurring-confirm-scheduled-date-help"[^>]*)>\s*원래 예정일:\s*(<strong\b[^>]*\bid="recurring-confirm-scheduled-date"[^>]*>\s*<\/strong>)\s*<\/p>/i);
   assert.ok(scheduledDateParent, 'scheduled date needs a stable prefix with a nested update target');
-  const scheduledDateParentClass = attributeValue(`<p${scheduledDateParent[1]}>`, 'class');
+  const scheduledDateParentTag = `<p${scheduledDateParent[1]}>`;
+  assert.strictEqual(attributeValue(scheduledDateParentTag, 'id'), 'recurring-confirm-scheduled-date-help');
+  const scheduledDateParentClass = attributeValue(scheduledDateParentTag, 'class');
   assert.deepStrictEqual((scheduledDateParentClass || '').split(/\s+/).sort(), ['full', 'hint']);
   assert.doesNotMatch(startTagById('recurring-confirm-scheduled-date').source, /(?:\s)hidden(?:\s|>)/);
   for (const [id, labelText] of [
@@ -2357,8 +2359,7 @@ function testAppMarkupProvidesRecurringSectionsAndDialogContracts() {
     const field = startTagById(id);
     assert.doesNotMatch(field.source, /(?:\s)(?:disabled|readonly)(?:\s|>)/, `${id} must stay editable`);
     const descriptions = (attributeValue(field.source, 'aria-describedby') || '').split(/\s+/).filter(Boolean);
-    assert.ok(descriptions.includes('recurring-confirm-scheduled-date'), `${id} must reference the original scheduled date`);
-    assert.ok(descriptions.includes('recurring-confirm-message'), `${id} must reference confirm feedback`);
+    assert.deepStrictEqual(descriptions, ['recurring-confirm-scheduled-date-help', 'recurring-confirm-message'], `${id} must reference the full scheduled-date context and confirm feedback`);
   }
   const confirmMessage = startTagById('recurring-confirm-message');
   assertAttribute(confirmMessage, 'role', 'status');

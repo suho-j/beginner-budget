@@ -328,23 +328,23 @@
       <div class="recurring-confirm-heading">
         <h2 id="recurring-confirm-heading">반복지출 기록 확인</h2>
       </div>
-      <p class="hint full">원래 예정일: <strong id="recurring-confirm-scheduled-date"></strong></p>
+      <p id="recurring-confirm-scheduled-date-help" class="hint full">원래 예정일: <strong id="recurring-confirm-scheduled-date"></strong></p>
       <div class="recurring-confirm-fields">
         <div class="field">
           <label for="recurring-confirm-date">사용일</label>
-          <input id="recurring-confirm-date" name="date" type="date" required aria-describedby="recurring-confirm-scheduled-date recurring-confirm-message">
+          <input id="recurring-confirm-date" name="date" type="date" required aria-describedby="recurring-confirm-scheduled-date-help recurring-confirm-message">
         </div>
         <div class="field">
           <label for="recurring-confirm-amount">실제 금액</label>
-          <input id="recurring-confirm-amount" name="amount" type="text" inputmode="numeric" pattern="[0-9,]*" required aria-describedby="recurring-confirm-scheduled-date recurring-confirm-message">
+          <input id="recurring-confirm-amount" name="amount" type="text" inputmode="numeric" pattern="[0-9,]*" required aria-describedby="recurring-confirm-scheduled-date-help recurring-confirm-message">
         </div>
         <div class="field">
           <label for="recurring-confirm-category">카테고리</label>
-          <select id="recurring-confirm-category" name="category" required aria-describedby="recurring-confirm-scheduled-date recurring-confirm-message"></select>
+          <select id="recurring-confirm-category" name="category" required aria-describedby="recurring-confirm-scheduled-date-help recurring-confirm-message"></select>
         </div>
         <div class="field">
           <label for="recurring-confirm-memo">메모</label>
-          <input id="recurring-confirm-memo" name="memo" type="text" maxlength="80" aria-describedby="recurring-confirm-scheduled-date recurring-confirm-message">
+          <input id="recurring-confirm-memo" name="memo" type="text" maxlength="80" aria-describedby="recurring-confirm-scheduled-date-help recurring-confirm-message">
         </div>
       </div>
       <p id="recurring-confirm-message" class="message" role="status" aria-live="polite" tabindex="-1"></p>
