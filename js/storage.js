@@ -3,11 +3,14 @@
   'use strict';
 
   const STORAGE_KEY = 'beginner-budget-app:v1';
+  const CURRENT_STATE_VERSION = 2;
   const DEFAULT_BUDGET = 500000;
   const DEFAULT_MONTH_START_DAY = 1;
   const MAX_MEMO_LENGTH = 80;
   const MAX_DB_INTEGER = 2147483647;
+  const MAX_RECURRING_EXPENSE_TEMPLATES = 100;
   const TRANSACTION_ID_PATTERN = /^[A-Za-z0-9._:-]+$/;
+  const RECURRING_TEMPLATE_ID_PATTERN = /^rt-[A-Za-z0-9._:-]+$/;
   const EXPENSE_CATEGORIES = ['생활비', '배달비', '의류비', '비상금'];
   const LEGACY_EXPENSE_CATEGORY_MAP = {
     '식비': '생활비',
@@ -25,11 +28,12 @@
 
   function defaultState() {
     return {
-      version: 1,
+      version: CURRENT_STATE_VERSION,
       monthlyBudget: DEFAULT_BUDGET,
       categoryBudgets: {},
       monthStartDay: DEFAULT_MONTH_START_DAY,
       monthlyBudgets: {},
+      recurringExpenseTemplates: [],
       transactions: []
     };
   }
@@ -157,6 +161,47 @@
     };
   }
 
+  function normalizeRecurringExpenseTemplate(raw) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+    const id = typeof raw.id === 'string' ? raw.id : '';
+    const memo = typeof raw.memo === 'string' ? raw.memo.trim() : '';
+    const rawCategory = typeof raw.category === 'string' ? raw.category.trim() : '';
+    const category = normalizeExpenseCategory(rawCategory);
+    const amount = Number(raw.amount);
+    const dayOfMonth = raw.dayOfMonth;
+    const startsOn = typeof raw.startsOn === 'string' ? raw.startsOn : '';
+
+    if (
+      !RECURRING_TEMPLATE_ID_PATTERN.test(id)
+      || memo.length < 1
+      || memo.length > MAX_MEMO_LENGTH
+      || !EXPENSE_CATEGORIES.includes(category)
+      || !isPositiveInteger(amount)
+      || !Number.isInteger(dayOfMonth)
+      || dayOfMonth < 1
+      || dayOfMonth > 31
+      || !isValidDateString(startsOn)
+    ) {
+      return null;
+    }
+
+    return { id, memo, category, amount, dayOfMonth, startsOn };
+  }
+
+  function normalizeRecurringExpenseTemplates(raw) {
+    if (!Array.isArray(raw)) return [];
+    const templates = [];
+    const seenIds = new Set();
+    for (const item of raw) {
+      const template = normalizeRecurringExpenseTemplate(item);
+      if (!template || seenIds.has(template.id)) continue;
+      templates.push(template);
+      seenIds.add(template.id);
+      if (templates.length === MAX_RECURRING_EXPENSE_TEMPLATES) break;
+    }
+    return templates;
+  }
+
   function normalizeCategoryBudgets(rawBudgets) {
     const budgets = {};
     const overflowedCategories = new Set();
@@ -215,6 +260,7 @@
     state.categoryBudgets = normalizeCategoryBudgets(raw.categoryBudgets);
     state.monthStartDay = normalizeMonthStartDay(raw.monthStartDay);
     state.monthlyBudgets = normalizeMonthlyBudgets(raw.monthlyBudgets);
+    state.recurringExpenseTemplates = normalizeRecurringExpenseTemplates(raw.recurringExpenseTemplates);
 
     if (Array.isArray(raw.transactions)) {
       const seenIds = new Set();
@@ -242,23 +288,37 @@
     return { ok: true, state: defaultState(), error: null };
   }
 
-  function createId() {
+  function createId(prefix = 'tx') {
     if (window.crypto && typeof window.crypto.randomUUID === 'function') {
-      return 'tx-' + window.crypto.randomUUID();
+      return prefix + '-' + window.crypto.randomUUID();
     }
-    return 'tx-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
+    return prefix + '-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
+  }
+
+  function scheduledDateForMonth(month, dayOfMonth) {
+    if (!isValidMonthString(month) || !Number.isInteger(dayOfMonth) || dayOfMonth < 1 || dayOfMonth > 31) {
+      return '';
+    }
+    const [year, monthNumber] = month.split('-').map(Number);
+    const lastDay = new Date(year, monthNumber, 0).getDate();
+    return `${month}-${pad2(Math.min(dayOfMonth, lastDay))}`;
   }
 
   window.BudgetStorage = {
     STORAGE_KEY,
+    CURRENT_STATE_VERSION,
     DEFAULT_BUDGET,
     DEFAULT_MONTH_START_DAY,
     MAX_MEMO_LENGTH,
     MAX_DB_INTEGER,
+    MAX_RECURRING_EXPENSE_TEMPLATES,
+    RECURRING_TEMPLATE_ID_PATTERN,
     EXPENSE_CATEGORIES,
     INCOME_CATEGORIES,
     defaultState,
     normalizeState,
+    normalizeRecurringExpenseTemplate,
+    normalizeRecurringExpenseTemplates,
     normalizeCategoryBudgets,
     normalizeMonthlyBudgets,
     normalizeExpenseCategory,
@@ -273,6 +333,7 @@
     saveState,
     resetState,
     createId,
+    scheduledDateForMonth,
     isPositiveInteger,
     isValidDateString,
     isValidMonthString,

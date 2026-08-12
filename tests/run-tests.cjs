@@ -4,6 +4,8 @@ const path = require('path');
 const assert = require('assert');
 const crypto = require('crypto');
 
+function plain(value) { return JSON.parse(JSON.stringify(value)); }
+
 function createContext(options = {}) {
   const store = new Map();
   const localStorage = {
@@ -675,6 +677,106 @@ function testLocalDateFormatting() {
   const date = new Date(2026, 4, 1, 0, 30, 0);
   assert.strictEqual(win.BudgetStorage.localDateString(date), '2026-05-01');
   assert.strictEqual(win.BudgetStorage.localMonthString(date), '2026-05');
+}
+
+function testV2StatePromotesV1AndNormalizesRecurringTemplates() {
+  const storage = createContext().BudgetStorage;
+  const promoted = storage.normalizeState({ version: 1, transactions: [] });
+  const template = {
+    id: 'rt-rent',
+    memo: '월세',
+    category: '생활비',
+    amount: 550000,
+    dayOfMonth: 31,
+    startsOn: '2026-08-12'
+  };
+  const normalized = storage.normalizeState({
+    version: 2,
+    recurringExpenseTemplates: [template],
+    transactions: []
+  });
+
+  assert.strictEqual(promoted.version, 2);
+  assert.deepStrictEqual(plain(promoted.recurringExpenseTemplates), []);
+  assert.strictEqual(normalized.version, 2);
+  assert.deepStrictEqual(plain(normalized.recurringExpenseTemplates), [template]);
+}
+
+function testRecurringTemplateNormalizationDropsInvalidDuplicatesAndCapsAt100() {
+  const storage = createContext().BudgetStorage;
+  const first = {
+    id: 'rt-first',
+    memo: '  첫 지출  ',
+    category: '식비',
+    amount: 1,
+    dayOfMonth: 31,
+    startsOn: '2024-02-29'
+  };
+  const invalidTemplates = [
+    { ...first, id: 'bad id', memo: '잘못된 ID' },
+    { ...first, memo: '나중 중복' },
+    { ...first, id: 'rt-blank', memo: '   ' },
+    { ...first, id: 'rt-long', memo: '가'.repeat(81) },
+    { ...first, id: 'rt-income', memo: '수입 분류', category: '월급' },
+    { ...first, id: 'rt-zero', memo: '0원', amount: 0 },
+    { ...first, id: 'rt-overflow', memo: '초과 금액', amount: 2147483648 },
+    { ...first, id: 'rt-day-zero', memo: '0일', dayOfMonth: 0 },
+    { ...first, id: 'rt-day-32', memo: '32일', dayOfMonth: 32 },
+    { ...first, id: 'rt-invalid-date', memo: '잘못된 시작일', startsOn: '2025-02-29' }
+  ];
+  const trailingValid = Array.from({ length: 101 }, (_, index) => ({
+    id: `rt-valid-${String(index).padStart(3, '0')}`,
+    memo: `반복 ${index}`,
+    category: '생활비',
+    amount: index + 2,
+    dayOfMonth: 5,
+    startsOn: '2026-08-12'
+  }));
+  const normalized = storage.normalizeRecurringExpenseTemplates([
+    first,
+    ...invalidTemplates,
+    ...trailingValid
+  ]);
+  const expectedIds = ['rt-first', ...trailingValid.slice(0, 99).map((template) => template.id)];
+
+  assert.strictEqual(normalized.length, 100);
+  assert.deepStrictEqual(plain(normalized.map((template) => template.id)), expectedIds);
+  assert.deepStrictEqual(plain(normalized[0]), {
+    id: 'rt-first',
+    memo: '첫 지출',
+    category: '생활비',
+    amount: 1,
+    dayOfMonth: 31,
+    startsOn: '2024-02-29'
+  });
+  assert.strictEqual(normalized.some((template) => template.memo === '잘못된 ID'), false);
+  assert.strictEqual(normalized.some((template) => template.memo === '나중 중복'), false);
+  assert.strictEqual(
+    normalized.some((template) => [
+      'rt-blank',
+      'rt-long',
+      'rt-income',
+      'rt-zero',
+      'rt-overflow',
+      'rt-day-zero',
+      'rt-day-32',
+      'rt-invalid-date'
+    ].includes(template.id)),
+    false
+  );
+}
+
+function testRecurringDatesClampLeapYearsAndBudgetBoundaries() {
+  const storage = createContext().BudgetStorage;
+
+  assert.strictEqual(storage.scheduledDateForMonth('2024-02', 31), '2024-02-29');
+  assert.strictEqual(storage.scheduledDateForMonth('2025-02', 31), '2025-02-28');
+  assert.strictEqual(storage.scheduledDateForMonth('2025-03', 31), '2025-03-31');
+  assert.strictEqual(storage.scheduledDateForMonth('2026-06', 5), '2026-06-05');
+  assert.strictEqual(storage.scheduledDateForMonth('2026-13', 5), '');
+  assert.strictEqual(storage.scheduledDateForMonth('2026-06', 0), '');
+  assert.strictEqual(storage.scheduledDateForMonth('2026-06', 32), '');
+  assert.strictEqual(storage.scheduledDateForMonth('2026-06', 5.5), '');
 }
 
 function testNormalizationDropsInvalidRowsAndDeduplicatesIds() {
@@ -2811,6 +2913,9 @@ const tests = [
   testSaveDoesNotUseLocalStorage,
   testStrictDateValidation,
   testLocalDateFormatting,
+  testV2StatePromotesV1AndNormalizesRecurringTemplates,
+  testRecurringTemplateNormalizationDropsInvalidDuplicatesAndCapsAt100,
+  testRecurringDatesClampLeapYearsAndBudgetBoundaries,
   testNormalizationDropsInvalidRowsAndDeduplicatesIds,
   testTransactionIdsUseSafeOpaqueAsciiContract,
   testDatabaseIntegerBoundsAreEnforced,
