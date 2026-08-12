@@ -116,10 +116,12 @@ function createUiContext() {
 
     set textContent(value) {
       this._textContent = String(value);
+      this.children.forEach((child) => { child.parentNode = null; });
+      this.children = [];
     }
 
     get textContent() {
-      return this._textContent;
+      return this._textContent + this.children.map((child) => child.textContent).join('');
     }
 
     set innerHTML(value) {
@@ -140,6 +142,13 @@ function createUiContext() {
         child.ownerDocument = this.ownerDocument;
         this.children.push(child);
       });
+    }
+
+    replaceChildren(...children) {
+      this.children.forEach((child) => { child.parentNode = null; });
+      this.children = [];
+      this._textContent = '';
+      this.append(...children);
     }
 
     remove() {
@@ -175,11 +184,25 @@ function createUiContext() {
       return this.attributes.has(name) ? this.attributes.get(name) : null;
     }
 
+    removeAttribute(name) {
+      this.attributes.delete(name);
+      if (name === 'id') this.id = '';
+      if (name === 'name') this.name = '';
+      if (name === 'class') this.className = '';
+      if (name === 'hidden') this.hidden = false;
+      if (name.startsWith('data-')) {
+        const key = name.slice(5).replace(/-([a-z])/g, (_, letter) => letter.toUpperCase());
+        delete this.dataset[key];
+      }
+    }
+
     matches(selector) {
       const tag = selector.match(/^[a-z][\w-]*/i);
       if (tag && this.tagName !== tag[0].toUpperCase()) return false;
       const id = selector.match(/#([\w-]+)/);
       if (id && this.id !== id[1]) return false;
+      const classes = [...selector.matchAll(/\.([\w-]+)/g)].map((match) => match[1]);
+      if (!classes.every((name) => this.classList.contains(name))) return false;
       const attributes = [...selector.matchAll(/\[([\w-]+)(?:="([^"]*)")?\]/g)];
       return attributes.every((match) => {
         const actual = this.getAttribute(match[1]);
@@ -251,6 +274,14 @@ function createUiContext() {
   document.body = document.createElement('body');
 
   const window = {
+    BudgetStorage: {
+      EXPENSE_CATEGORIES: ['생활비', '배달비', '의류비', '비상금'],
+      INCOME_CATEGORIES: ['월급', '용돈', '부수입', '기타'],
+      localDateString: () => '2026-08-12',
+      localMonthString: () => '2026-08',
+      monthKeyForDate: () => '2026-08',
+      budgetForMonth: () => ({ monthlyBudget: 1000000, categoryBudgets: {} })
+    },
     BudgetTransactions: {
       EXPENSE_CATEGORIES: ['생활비', '배달비', '공통'],
       INCOME_CATEGORIES: ['급여', '공통'],
@@ -2662,6 +2693,344 @@ function testUiTransactionActionLabelsIncludeType() {
   assert.strictEqual(deleteButtons.every((button) => button.getAttribute('data-cloud-write') === ''), true);
 }
 
+function createRecurringUiDom(window, document) {
+  const ids = {
+    recurringUpcomingSection: 'recurring-upcoming-section',
+    recurringUpcomingHeading: 'recurring-upcoming-heading',
+    recurringUpcomingSummary: 'recurring-upcoming-summary',
+    recurringUpcomingList: 'recurring-upcoming-list',
+    recurringUpcomingEmpty: 'recurring-upcoming-empty',
+    recurringTemplateSection: 'recurring-template-section',
+    recurringTemplateForm: 'recurring-template-form',
+    recurringTemplateMemo: 'recurring-template-memo',
+    recurringTemplateCategory: 'recurring-template-category',
+    recurringTemplateAmount: 'recurring-template-amount',
+    recurringTemplateDay: 'recurring-template-day',
+    recurringTemplateSave: 'recurring-template-save',
+    recurringTemplateCancel: 'recurring-template-cancel',
+    recurringTemplateMessage: 'recurring-template-message',
+    recurringTemplateList: 'recurring-template-list',
+    recurringTemplateEmpty: 'recurring-template-empty',
+    recurringTemplateHeading: 'recurring-template-heading',
+    recurringTemplateHelp: 'recurring-template-help',
+    recurringConfirmDialog: 'recurring-confirm-dialog',
+    recurringConfirmForm: 'recurring-confirm-form',
+    recurringConfirmHeading: 'recurring-confirm-heading',
+    recurringConfirmScheduledDate: 'recurring-confirm-scheduled-date',
+    recurringConfirmDate: 'recurring-confirm-date',
+    recurringConfirmAmount: 'recurring-confirm-amount',
+    recurringConfirmCategory: 'recurring-confirm-category',
+    recurringConfirmMemo: 'recurring-confirm-memo',
+    recurringConfirmMessage: 'recurring-confirm-message',
+    recurringConfirmSave: 'recurring-confirm-save',
+    recurringConfirmCancel: 'recurring-confirm-cancel'
+  };
+  const tags = {
+    recurringUpcomingSection: 'section', recurringUpcomingHeading: 'h2', recurringUpcomingList: 'ul',
+    recurringTemplateSection: 'section', recurringTemplateForm: 'form', recurringTemplateMemo: 'input',
+    recurringTemplateCategory: 'select', recurringTemplateAmount: 'input', recurringTemplateDay: 'input',
+    recurringTemplateSave: 'button', recurringTemplateCancel: 'button', recurringTemplateList: 'ul',
+    recurringTemplateHeading: 'h2', recurringConfirmDialog: 'dialog', recurringConfirmForm: 'form',
+    recurringConfirmHeading: 'h2', recurringConfirmScheduledDate: 'strong', recurringConfirmDate: 'input',
+    recurringConfirmAmount: 'input', recurringConfirmCategory: 'select', recurringConfirmMemo: 'input',
+    recurringConfirmSave: 'button', recurringConfirmCancel: 'button'
+  };
+  const nodes = {};
+  Object.entries(ids).forEach(([key, id]) => {
+    nodes[key] = document.createElement(tags[key] || 'p');
+    nodes[key].id = id;
+  });
+  nodes.recurringTemplateSave.textContent = '반복지출 등록';
+  nodes.recurringTemplateCancel.textContent = '수정 취소';
+  nodes.recurringTemplateCancel.hidden = true;
+  nodes.recurringConfirmSave.textContent = '지출로 기록';
+  nodes.recurringConfirmCancel.textContent = '취소';
+
+  nodes.recurringUpcomingSection.append(
+    nodes.recurringUpcomingHeading,
+    nodes.recurringUpcomingSummary,
+    nodes.recurringUpcomingEmpty,
+    nodes.recurringUpcomingList
+  );
+  nodes.recurringTemplateForm.append(
+    nodes.recurringTemplateMemo,
+    nodes.recurringTemplateCategory,
+    nodes.recurringTemplateAmount,
+    nodes.recurringTemplateDay,
+    nodes.recurringTemplateSave,
+    nodes.recurringTemplateCancel
+  );
+  nodes.recurringTemplateSection.append(
+    nodes.recurringTemplateHeading,
+    nodes.recurringTemplateHelp,
+    nodes.recurringTemplateForm,
+    nodes.recurringTemplateMessage,
+    nodes.recurringTemplateEmpty,
+    nodes.recurringTemplateList
+  );
+  nodes.recurringConfirmForm.append(
+    nodes.recurringConfirmHeading,
+    nodes.recurringConfirmScheduledDate,
+    nodes.recurringConfirmDate,
+    nodes.recurringConfirmAmount,
+    nodes.recurringConfirmCategory,
+    nodes.recurringConfirmMemo,
+    nodes.recurringConfirmMessage,
+    nodes.recurringConfirmSave,
+    nodes.recurringConfirmCancel
+  );
+  nodes.recurringConfirmDialog.append(nodes.recurringConfirmForm);
+  document.body.append(nodes.recurringUpcomingSection, nodes.recurringTemplateSection, nodes.recurringConfirmDialog);
+
+  return { elements: nodes, nodes, ids, registered: window.BudgetUI.getElements() };
+}
+
+function recurringOccurrencesFixture() {
+  return [
+    {
+      templateId: 'rt-malicious', scheduledMonth: '2026-08', scheduledDate: '2026-08-01',
+      transactionId: 'tx-recurring-rt-malicious-2026-08', memo: '<img src=x onerror=globalThis.pwned=true>',
+      category: '생활비', amount: 10000, status: 'overdue', transaction: null
+    },
+    {
+      templateId: 'rt-today', scheduledMonth: '2026-08', scheduledDate: '2026-08-12',
+      transactionId: 'tx-recurring-rt-today-2026-08', memo: '오늘 통신비',
+      category: '생활비', amount: 20000, status: 'today', transaction: null
+    },
+    {
+      templateId: 'rt-upcoming', scheduledMonth: '2026-08', scheduledDate: '2026-08-20',
+      transactionId: 'tx-recurring-rt-upcoming-2026-08', memo: '다음 구독료',
+      category: '배달비', amount: 30000, status: 'upcoming', transaction: null
+    },
+    {
+      templateId: 'rt-recorded', scheduledMonth: '2026-08', scheduledDate: '2026-08-04',
+      transactionId: 'tx-recurring-rt-recorded-2026-08', memo: '기록된 월세',
+      category: '생활비', amount: 40000, status: 'recorded',
+      transaction: {
+        id: 'tx-recurring-rt-recorded-2026-08', date: '2026-08-06', type: 'expense',
+        category: '생활비', amount: 41000, memo: '실제 월세'
+      }
+    }
+  ];
+}
+
+function testUiRendersRecurringOccurrencesAndTemplatesSafely() {
+  const { window, document } = createUiContext();
+  const { elements, nodes, ids, registered } = createRecurringUiDom(window, document);
+  const occurrences = recurringOccurrencesFixture();
+
+  window.BudgetUI.renderUpcomingRecurringExpenses(elements, occurrences);
+  Object.keys(ids).forEach((key) => assert.strictEqual(registered[key], nodes[key], `getElements must register ${key}`));
+  assert.strictEqual(elements.recurringUpcomingSummary.textContent, '미기록 3건 · 예상 합계 60,000원');
+  assert.strictEqual(elements.recurringUpcomingEmpty.hidden, true);
+  assert.strictEqual(elements.recurringUpcomingList.hidden, false);
+  const badges = elements.recurringUpcomingList.querySelectorAll('.recurring-status');
+  assert.deepStrictEqual(badges.map((badge) => badge.textContent), ['지남', '오늘', '예정', '기록됨']);
+  assert.deepStrictEqual(
+    badges.map((badge) => badge.className),
+    [
+      'recurring-status is-overdue', 'recurring-status is-today',
+      'recurring-status is-upcoming', 'recurring-status is-recorded'
+    ]
+  );
+
+  const cards = elements.recurringUpcomingList.querySelectorAll('.recurring-card');
+  const recordedTitle = elements.recurringUpcomingList.querySelectorAll('.recurring-card-title')
+    .find((title) => title.textContent === '기록된 월세');
+  const recordedMeta = recordedTitle.closest('.recurring-card').querySelector('.recurring-card-meta');
+  assert.ok(recordedMeta.textContent.includes('2026-08-06'));
+  assert.ok(recordedMeta.textContent.includes('41,000원'));
+  assert.strictEqual(recordedMeta.textContent.includes('40,000원'), false);
+
+  const recordButtons = elements.recurringUpcomingList.querySelectorAll('button[data-action="record-recurring-expense"]');
+  assert.strictEqual(recordButtons.length, 3);
+  assert.strictEqual(cards.every((card) => card.dataset.recurringTransactionId === undefined), true);
+  const idOwners = elements.recurringUpcomingList.querySelectorAll('[data-recurring-transaction-id]');
+  assert.strictEqual(idOwners.length, 3);
+  assert.strictEqual(idOwners.every((owner) => owner.tagName === 'BUTTON'), true);
+  assert.strictEqual(
+    recordButtons[0].getAttribute('aria-label'),
+    '2026-08-01 <img src=x onerror=globalThis.pwned=true> 10,000원 기록하기'
+  );
+  assert.strictEqual(recordButtons.every((button) => button.getAttribute('data-cloud-write') === ''), true);
+  const maliciousTitle = elements.recurringUpcomingList.querySelectorAll('.recurring-card-title')[0];
+  assert.strictEqual(maliciousTitle.textContent, '<img src=x onerror=globalThis.pwned=true>');
+  assert.strictEqual(maliciousTitle.innerHTML, '');
+  assert.strictEqual(elements.recurringUpcomingList.querySelectorAll('img').length, 0);
+
+  const templates = [
+    { id: 'rt-rent', memo: '월세', category: '생활비', amount: 550000, dayOfMonth: 31, startsOn: '2026-08-01' },
+    { id: 'rt-subscription', memo: '영상 구독', category: '배달비', amount: 14900, dayOfMonth: 5, startsOn: '2026-08-01' }
+  ];
+  window.BudgetUI.renderRecurringExpenseTemplates(elements, templates);
+  assert.strictEqual(elements.recurringTemplateEmpty.hidden, true);
+  assert.strictEqual(elements.recurringTemplateList.hidden, false);
+  const editButtons = elements.recurringTemplateList.querySelectorAll('button[data-action="edit-recurring-template"]');
+  const deleteButtons = elements.recurringTemplateList.querySelectorAll('button[data-action="delete-recurring-template"]');
+  assert.deepStrictEqual(editButtons.map((button) => button.dataset.templateId), ['rt-rent', 'rt-subscription']);
+  assert.deepStrictEqual(deleteButtons.map((button) => button.dataset.templateId), ['rt-rent', 'rt-subscription']);
+  assert.strictEqual([...editButtons, ...deleteButtons].every((button) => button.getAttribute('data-cloud-write') === ''), true);
+  assert.strictEqual(editButtons[0].getAttribute('aria-label').includes('월세'), true);
+  assert.strictEqual(deleteButtons[1].getAttribute('aria-label').includes('영상 구독'), true);
+  assert.strictEqual([...editButtons, ...deleteButtons].every((button) => (
+    button.dataset.memo === undefined && button.dataset.category === undefined
+    && button.dataset.amount === undefined && button.dataset.dayOfMonth === undefined
+  )), true);
+
+  window.BudgetUI.fillRecurringExpenseCategoryOptions(elements);
+  const expenseCategories = window.BudgetStorage.EXPENSE_CATEGORIES;
+  assert.deepStrictEqual(elements.recurringTemplateCategory.children.map((option) => option.value), expenseCategories);
+  assert.deepStrictEqual(elements.recurringConfirmCategory.children.map((option) => option.value), expenseCategories);
+  assert.strictEqual(
+    [...elements.recurringTemplateCategory.children, ...elements.recurringConfirmCategory.children]
+      .some((option) => window.BudgetStorage.INCOME_CATEGORIES.includes(option.value)),
+    false
+  );
+  elements.recurringTemplateCategory.replaceChildren();
+  elements.recurringConfirmCategory.replaceChildren();
+  const defaultsElements = {
+    ...elements,
+    dateInput: document.createElement('input'),
+    monthInput: document.createElement('input'),
+    monthStartInput: document.createElement('input'),
+    budgetInput: document.createElement('input'),
+    categoryBudgetFields: document.createElement('div'),
+    categorySelect: document.createElement('select'),
+    typeSelect: document.createElement('select')
+  };
+  defaultsElements.typeSelect.value = 'expense';
+  window.BudgetUI.initDefaults(defaultsElements, { monthStartDay: 1 });
+  assert.deepStrictEqual(
+    elements.recurringTemplateCategory.children.map((option) => option.value),
+    expenseCategories,
+    'initDefaults fills recurring categories'
+  );
+  assert.deepStrictEqual(elements.recurringConfirmCategory.children.map((option) => option.value), expenseCategories);
+
+  window.BudgetUI.renderUpcomingRecurringExpenses(elements, []);
+  assert.strictEqual(elements.recurringUpcomingSummary.textContent, '미기록 예정 없음');
+  assert.strictEqual(elements.recurringUpcomingEmpty.hidden, false);
+  assert.strictEqual(elements.recurringUpcomingList.hidden, true);
+  assert.strictEqual(elements.recurringUpcomingList.children.length, 0);
+  window.BudgetUI.renderRecurringExpenseTemplates(elements, []);
+  assert.strictEqual(elements.recurringTemplateEmpty.hidden, false);
+  assert.strictEqual(elements.recurringTemplateList.hidden, true);
+  assert.strictEqual(elements.recurringTemplateList.children.length, 0);
+}
+
+function testUiRecurringDialogsAndTemplateFocusFlow() {
+  const { window, document } = createUiContext();
+  const { elements } = createRecurringUiDom(window, document);
+  const [first, second] = recurringOccurrencesFixture();
+  window.BudgetUI.renderUpcomingRecurringExpenses(elements, [first, second]);
+  let firstAction = elements.recurringUpcomingList.querySelector('[data-recurring-transaction-id="tx-recurring-rt-malicious-2026-08"]');
+
+  window.BudgetUI.openRecurringConfirmDialog(elements, first, firstAction);
+  assert.deepStrictEqual(
+    elements.recurringConfirmCategory.children.map((option) => option.value),
+    window.BudgetStorage.EXPENSE_CATEGORIES
+  );
+  assert.strictEqual(elements.recurringConfirmScheduledDate.textContent, '2026-08-01');
+  assert.strictEqual(elements.recurringConfirmDate.value, '2026-08-01');
+  assert.strictEqual(elements.recurringConfirmAmount.value, '10000');
+  assert.strictEqual(elements.recurringConfirmCategory.value, '생활비');
+  assert.strictEqual(elements.recurringConfirmMemo.value, '<img src=x onerror=globalThis.pwned=true>');
+  assert.deepStrictEqual(Object.keys(elements.recurringConfirmDialog.dataset), ['transactionId']);
+  assert.strictEqual(elements.recurringConfirmDialog.dataset.transactionId, first.transactionId);
+  assert.strictEqual(elements.recurringConfirmDialog.open, true);
+  assert.strictEqual(document.activeElement, elements.recurringConfirmDate);
+
+  elements.recurringConfirmMessage.textContent = '지우기';
+  window.BudgetUI.closeRecurringConfirmDialog(elements, { reason: 'cancel' });
+  assert.strictEqual(elements.recurringConfirmDialog.open, false);
+  assert.strictEqual(elements.recurringConfirmDialog.dataset.transactionId, undefined);
+  assert.strictEqual(elements.recurringConfirmScheduledDate.textContent, '');
+  assert.strictEqual(elements.recurringConfirmDate.value, '');
+  assert.strictEqual(elements.recurringConfirmAmount.value, '');
+  assert.strictEqual(elements.recurringConfirmCategory.value, '');
+  assert.strictEqual(elements.recurringConfirmMemo.value, '');
+  assert.strictEqual(elements.recurringConfirmMessage.textContent, '');
+  assert.strictEqual(document.activeElement, firstAction);
+
+  window.BudgetUI.openRecurringConfirmDialog(elements, first, firstAction);
+  window.BudgetUI.renderUpcomingRecurringExpenses(elements, [first, second]);
+  const sameIdReplacement = elements.recurringUpcomingList.querySelector(`[data-recurring-transaction-id="${first.transactionId}"]`);
+  window.BudgetUI.closeRecurringConfirmDialog(elements, { reason: 'cancel', source: 'native' });
+  assert.strictEqual(document.activeElement, sameIdReplacement, 'native cancel uses the same close path');
+
+  window.BudgetUI.openRecurringConfirmDialog(elements, first, sameIdReplacement);
+  window.BudgetUI.renderUpcomingRecurringExpenses(elements, [second]);
+  const nextUnrecorded = elements.recurringUpcomingList.querySelector('[data-action="record-recurring-expense"]');
+  window.BudgetUI.closeRecurringConfirmDialog(elements);
+  assert.strictEqual(document.activeElement, nextUnrecorded);
+
+  window.BudgetUI.openRecurringConfirmDialog(elements, second, nextUnrecorded);
+  window.BudgetUI.renderUpcomingRecurringExpenses(elements, []);
+  window.BudgetUI.closeRecurringConfirmDialog(elements);
+  assert.strictEqual(document.activeElement, elements.recurringUpcomingHeading);
+
+  window.BudgetUI.renderUpcomingRecurringExpenses(elements, [first]);
+  firstAction = elements.recurringUpcomingList.querySelector('[data-action="record-recurring-expense"]');
+  window.BudgetUI.openRecurringConfirmDialog(elements, first, firstAction);
+  window.BudgetUI.closeRecurringConfirmDialog(elements, { reason: 'saved' });
+  assert.strictEqual(document.activeElement, elements.recurringUpcomingHeading, 'save always returns to heading');
+
+  const templates = [
+    { id: 'rt-one', memo: '첫 번째', category: '생활비', amount: 10000, dayOfMonth: 1, startsOn: '2026-08-01' },
+    { id: 'rt-two', memo: '두 번째', category: '배달비', amount: 20000, dayOfMonth: 2, startsOn: '2026-08-01' },
+    { id: 'rt-three', memo: '세 번째', category: '의류비', amount: 30000, dayOfMonth: 3, startsOn: '2026-08-01' }
+  ];
+  window.BudgetUI.renderRecurringExpenseTemplates(elements, templates);
+  let editButtons = elements.recurringTemplateList.querySelectorAll('[data-action="edit-recurring-template"]');
+  window.BudgetUI.beginRecurringTemplateEdit(elements, templates[0], editButtons[0]);
+  assert.strictEqual(elements.recurringTemplateMemo.value, '첫 번째');
+  assert.strictEqual(elements.recurringTemplateCategory.value, '생활비');
+  assert.strictEqual(elements.recurringTemplateAmount.value, '10000');
+  assert.strictEqual(elements.recurringTemplateDay.value, '1');
+  assert.strictEqual(elements.recurringTemplateForm.dataset.templateId, 'rt-one');
+  assert.strictEqual(elements.recurringTemplateSave.textContent, '반복지출 수정 저장');
+  assert.strictEqual(elements.recurringTemplateCancel.hidden, false);
+  assert.strictEqual(document.activeElement, elements.recurringTemplateMemo);
+  elements.recurringTemplateMessage.textContent = '지우기';
+  window.BudgetUI.clearRecurringTemplateEdit(elements);
+  assert.strictEqual(elements.recurringTemplateMemo.value, '');
+  assert.strictEqual(elements.recurringTemplateCategory.value, '');
+  assert.strictEqual(elements.recurringTemplateAmount.value, '');
+  assert.strictEqual(elements.recurringTemplateDay.value, '');
+  assert.strictEqual(elements.recurringTemplateForm.dataset.templateId, undefined);
+  assert.strictEqual(elements.recurringTemplateSave.textContent, '반복지출 등록');
+  assert.strictEqual(elements.recurringTemplateCancel.hidden, true);
+  assert.strictEqual(elements.recurringTemplateMessage.textContent, '');
+  assert.strictEqual(document.activeElement, editButtons[0]);
+
+  window.BudgetUI.beginRecurringTemplateEdit(elements, templates[0], editButtons[0]);
+  window.BudgetUI.renderRecurringExpenseTemplates(elements, templates);
+  const replacementEdit = elements.recurringTemplateList.querySelector('[data-action="edit-recurring-template"][data-template-id="rt-one"]');
+  replacementEdit.remove();
+  const sameTemplateNextAction = elements.recurringTemplateList.querySelector('[data-action="delete-recurring-template"][data-template-id="rt-one"]');
+  window.BudgetUI.clearRecurringTemplateEdit(elements);
+  assert.strictEqual(document.activeElement, sameTemplateNextAction);
+
+  window.BudgetUI.beginRecurringTemplateEdit(elements, templates[0], sameTemplateNextAction);
+  window.BudgetUI.renderRecurringExpenseTemplates(elements, []);
+  window.BudgetUI.clearRecurringTemplateEdit(elements);
+  assert.strictEqual(document.activeElement, elements.recurringTemplateHeading);
+
+  window.BudgetUI.renderRecurringExpenseTemplates(elements, [templates[0], templates[2]]);
+  window.BudgetUI.clearRecurringTemplateEdit(elements, { reason: 'delete', deletedIndex: 1 });
+  editButtons = elements.recurringTemplateList.querySelectorAll('[data-action="edit-recurring-template"]');
+  assert.strictEqual(document.activeElement, editButtons[1], 'delete focuses the next template edit button');
+
+  window.BudgetUI.renderRecurringExpenseTemplates(elements, [templates[0], templates[1]]);
+  window.BudgetUI.clearRecurringTemplateEdit(elements, { reason: 'delete', deletedIndex: 2 });
+  editButtons = elements.recurringTemplateList.querySelectorAll('[data-action="edit-recurring-template"]');
+  assert.strictEqual(document.activeElement, editButtons[1], 'delete falls back to the previous template edit button');
+
+  window.BudgetUI.renderRecurringExpenseTemplates(elements, []);
+  window.BudgetUI.clearRecurringTemplateEdit(elements, { reason: 'delete', deletedIndex: 0 });
+  assert.strictEqual(document.activeElement, elements.recurringTemplateHeading);
+}
+
 function testCategoryFilterCombinesWithMonthTypeAndQuery() {
   const win = createContext();
   const transactions = [
@@ -4346,6 +4715,8 @@ const tests = [
   testUiValidationAndEditDialogFocusFlow,
   testUiCalendarRenderingPreservesFocusAndExplainsEmptyDates,
   testUiTransactionActionLabelsIncludeType,
+  testUiRendersRecurringOccurrencesAndTemplatesSafely,
+  testUiRecurringDialogsAndTemplateFocusFlow,
   testAppMarkupProvidesTabsCalendarEditDialogAndPreviewWarning,
   testAppStylesCoverTabsCalendarDialogAndMobile,
   testAppMarkupProvidesRecurringSectionsAndDialogContracts,

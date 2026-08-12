@@ -13,6 +13,8 @@
     memo: '#tx-memo',
     importData: '#import-file'
   };
+  let recurringConfirmFocusState = null;
+  let recurringTemplateFocusState = null;
 
   function $(selector) {
     return document.querySelector(selector);
@@ -112,6 +114,7 @@
     elements.budgetInput.value = monthBudget.monthlyBudget;
     renderCategoryBudgetFields(elements.categoryBudgetFields, monthBudget.categoryBudgets || {});
     fillCategoryOptions(elements.categorySelect, elements.typeSelect.value);
+    fillRecurringExpenseCategoryOptions(elements);
     syncCategoryBudgetInputs(elements, monthBudget.categoryBudgets);
   }
 
@@ -302,6 +305,250 @@
     });
   }
 
+  function formatRecurringWon(amount) {
+    return `${new Intl.NumberFormat('ko-KR').format(Number(amount) || 0)}원`;
+  }
+
+  function fillRecurringExpenseCategoryOptions(elements) {
+    const categories = window.BudgetStorage.EXPENSE_CATEGORIES;
+    [elements.recurringTemplateCategory, elements.recurringConfirmCategory].forEach((select) => {
+      if (!select) return;
+      const selected = select.value;
+      const options = categories.map((category) => {
+        const option = document.createElement('option');
+        option.value = category;
+        option.textContent = category;
+        return option;
+      });
+      select.replaceChildren(...options);
+      select.value = categories.includes(selected) ? selected : (categories[0] || '');
+    });
+  }
+
+  function renderUpcomingRecurringExpenses(elements, occurrences) {
+    const statusLabels = { overdue: '지남', today: '오늘', upcoming: '예정', recorded: '기록됨' };
+    const statusOrder = { overdue: 0, today: 1, upcoming: 2, recorded: 3 };
+    const rows = Array.isArray(occurrences) ? occurrences.slice().sort((a, b) => (
+      (statusOrder[a.status] ?? 4) - (statusOrder[b.status] ?? 4)
+      || String(a.scheduledDate || '').localeCompare(String(b.scheduledDate || ''))
+      || String(a.memo || '').localeCompare(String(b.memo || ''), 'ko-KR')
+    )) : [];
+    const unrecorded = rows.filter((occurrence) => occurrence.status !== 'recorded');
+    const expectedTotal = unrecorded.reduce((total, occurrence) => total + (Number(occurrence.amount) || 0), 0);
+
+    elements.recurringUpcomingSummary.textContent = unrecorded.length
+      ? `미기록 ${unrecorded.length}건 · 예상 합계 ${formatRecurringWon(expectedTotal)}`
+      : '미기록 예정 없음';
+    elements.recurringUpcomingEmpty.hidden = rows.length > 0;
+    elements.recurringUpcomingList.hidden = rows.length === 0;
+    elements.recurringUpcomingList.replaceChildren();
+
+    rows.forEach((occurrence) => {
+      const item = document.createElement('li');
+      item.className = 'recurring-card';
+
+      const heading = document.createElement('div');
+      heading.className = 'recurring-card-heading';
+      const title = document.createElement('strong');
+      title.className = 'recurring-card-title';
+      title.textContent = occurrence.memo || '';
+      const status = document.createElement('span');
+      status.className = `recurring-status is-${occurrence.status}`;
+      status.textContent = statusLabels[occurrence.status] || '예정';
+      heading.append(title, status);
+
+      const isRecorded = occurrence.status === 'recorded';
+      const recordedTransaction = isRecorded ? occurrence.transaction : null;
+      const shownDate = recordedTransaction ? recordedTransaction.date : occurrence.scheduledDate;
+      const shownAmount = recordedTransaction ? recordedTransaction.amount : occurrence.amount;
+      const shownCategory = recordedTransaction ? recordedTransaction.category : occurrence.category;
+      const meta = document.createElement('p');
+      meta.className = 'recurring-card-meta';
+      meta.textContent = `${isRecorded ? '기록일' : '예정일'} ${shownDate} · ${shownCategory} · ${formatRecurringWon(shownAmount)}`;
+      item.append(heading, meta);
+
+      if (!isRecorded) {
+        const actions = document.createElement('div');
+        actions.className = 'recurring-card-actions';
+        const recordButton = document.createElement('button');
+        recordButton.type = 'button';
+        recordButton.dataset.action = 'record-recurring-expense';
+        recordButton.dataset.recurringTransactionId = occurrence.transactionId;
+        recordButton.textContent = '기록하기';
+        recordButton.setAttribute('data-cloud-write', '');
+        recordButton.setAttribute(
+          'aria-label',
+          `${occurrence.scheduledDate} ${occurrence.memo || ''} ${formatRecurringWon(occurrence.amount)} 기록하기`
+        );
+        actions.append(recordButton);
+        item.append(actions);
+      }
+
+      elements.recurringUpcomingList.append(item);
+    });
+  }
+
+  function renderRecurringExpenseTemplates(elements, templates) {
+    const rows = Array.isArray(templates) ? templates : [];
+    elements.recurringTemplateEmpty.hidden = rows.length > 0;
+    elements.recurringTemplateList.hidden = rows.length === 0;
+    elements.recurringTemplateList.replaceChildren();
+
+    rows.forEach((template) => {
+      const item = document.createElement('li');
+      item.className = 'recurring-card';
+      const heading = document.createElement('div');
+      heading.className = 'recurring-card-heading';
+      const title = document.createElement('strong');
+      title.className = 'recurring-card-title';
+      title.textContent = template.memo || '';
+      heading.append(title);
+
+      const meta = document.createElement('p');
+      meta.className = 'recurring-card-meta';
+      meta.textContent = `${template.category} · 매월 ${template.dayOfMonth}일 · 예상 ${formatRecurringWon(template.amount)}`;
+
+      const actions = document.createElement('div');
+      actions.className = 'recurring-card-actions';
+      const editButton = document.createElement('button');
+      editButton.type = 'button';
+      editButton.className = 'secondary';
+      editButton.dataset.action = 'edit-recurring-template';
+      editButton.dataset.templateId = template.id;
+      editButton.textContent = '수정';
+      editButton.setAttribute('data-cloud-write', '');
+      editButton.setAttribute('aria-label', `${template.memo || ''} 반복지출 수정`);
+      const deleteButton = document.createElement('button');
+      deleteButton.type = 'button';
+      deleteButton.className = 'danger';
+      deleteButton.dataset.action = 'delete-recurring-template';
+      deleteButton.dataset.templateId = template.id;
+      deleteButton.textContent = '삭제';
+      deleteButton.setAttribute('data-cloud-write', '');
+      deleteButton.setAttribute('aria-label', `${template.memo || ''} 반복지출 삭제`);
+      actions.append(editButton, deleteButton);
+      item.append(heading, meta, actions);
+      elements.recurringTemplateList.append(item);
+    });
+  }
+
+  function recurringRecordActions(elements) {
+    return Array.from(elements.recurringUpcomingList.querySelectorAll('[data-action="record-recurring-expense"]'));
+  }
+
+  function beginRecurringTemplateEdit(elements, template, returnFocus) {
+    fillRecurringExpenseCategoryOptions(elements);
+    elements.recurringTemplateMemo.value = template.memo || '';
+    elements.recurringTemplateCategory.value = template.category || '';
+    elements.recurringTemplateAmount.value = String(template.amount || '');
+    elements.recurringTemplateDay.value = String(template.dayOfMonth || '');
+    elements.recurringTemplateForm.dataset.templateId = template.id;
+    elements.recurringTemplateSave.textContent = '반복지출 수정 저장';
+    elements.recurringTemplateCancel.hidden = false;
+    setMessage(elements.recurringTemplateMessage, '', null);
+    clearFieldErrors(elements.recurringTemplateForm);
+    recurringTemplateFocusState = {
+      element: returnFocus || null,
+      templateId: template.id
+    };
+    elements.recurringTemplateMemo.focus();
+  }
+
+  function clearRecurringTemplateEdit(elements, focusTargetOrOptions) {
+    const directTarget = focusTargetOrOptions && typeof focusTargetOrOptions.focus === 'function'
+      ? focusTargetOrOptions
+      : null;
+    const options = directTarget ? {} : (focusTargetOrOptions || {});
+    const focusState = recurringTemplateFocusState;
+
+    elements.recurringTemplateMemo.value = '';
+    elements.recurringTemplateCategory.value = '';
+    elements.recurringTemplateAmount.value = '';
+    elements.recurringTemplateDay.value = '';
+    delete elements.recurringTemplateForm.dataset.templateId;
+    elements.recurringTemplateSave.textContent = '반복지출 등록';
+    elements.recurringTemplateCancel.hidden = true;
+    setMessage(elements.recurringTemplateMessage, '', null);
+    clearFieldErrors(elements.recurringTemplateForm);
+    recurringTemplateFocusState = null;
+
+    let target = directTarget || options.focusTarget || null;
+    if (!target && options.reason === 'delete') {
+      const editButtons = Array.from(
+        elements.recurringTemplateList.querySelectorAll('[data-action="edit-recurring-template"]')
+      );
+      const deletedIndex = Number.isInteger(options.deletedIndex) ? options.deletedIndex : 0;
+      target = editButtons[deletedIndex] || editButtons[deletedIndex - 1] || elements.recurringTemplateHeading;
+    }
+    if (!target && focusState) {
+      if (focusState.element && document.contains(focusState.element)) {
+        target = focusState.element;
+      } else {
+        target = Array.from(elements.recurringTemplateList.querySelectorAll('[data-template-id]'))
+          .find((button) => button.dataset.templateId === focusState.templateId);
+      }
+    }
+    if (!target) target = elements.recurringTemplateHeading;
+    if (target && document.contains(target)) target.focus();
+  }
+
+  function openRecurringConfirmDialog(elements, occurrence, returnFocus) {
+    fillRecurringExpenseCategoryOptions(elements);
+    const actions = recurringRecordActions(elements);
+    const returnIndex = actions.indexOf(returnFocus);
+    const nextAction = returnIndex >= 0 ? actions[returnIndex + 1] : null;
+    recurringConfirmFocusState = {
+      element: returnFocus || null,
+      transactionId: occurrence.transactionId,
+      nextTransactionId: nextAction ? nextAction.dataset.recurringTransactionId : ''
+    };
+    elements.recurringConfirmScheduledDate.textContent = occurrence.scheduledDate || '';
+    elements.recurringConfirmDate.value = occurrence.scheduledDate || '';
+    elements.recurringConfirmAmount.value = String(occurrence.amount || '');
+    elements.recurringConfirmCategory.value = occurrence.category || '';
+    elements.recurringConfirmMemo.value = occurrence.memo || '';
+    elements.recurringConfirmDialog.dataset.transactionId = occurrence.transactionId;
+    setMessage(elements.recurringConfirmMessage, '', null);
+    clearFieldErrors(elements.recurringConfirmForm);
+    elements.recurringConfirmDialog.showModal();
+    elements.recurringConfirmDate.focus();
+  }
+
+  // Native dialog cancel and the explicit cancel button both call this function with reason "cancel".
+  // A successful save calls it with { reason: "saved" } so focus always returns to the section heading.
+  function closeRecurringConfirmDialog(elements, options = {}) {
+    const focusState = recurringConfirmFocusState;
+    const transactionId = elements.recurringConfirmDialog.dataset.transactionId
+      || (focusState && focusState.transactionId)
+      || '';
+    const saved = options.reason === 'saved' || options.saved === true;
+
+    elements.recurringConfirmScheduledDate.textContent = '';
+    elements.recurringConfirmDate.value = '';
+    elements.recurringConfirmAmount.value = '';
+    elements.recurringConfirmCategory.value = '';
+    elements.recurringConfirmMemo.value = '';
+    delete elements.recurringConfirmDialog.dataset.transactionId;
+    setMessage(elements.recurringConfirmMessage, '', null);
+    clearFieldErrors(elements.recurringConfirmForm);
+    elements.recurringConfirmDialog.close();
+    recurringConfirmFocusState = null;
+
+    let target = saved ? elements.recurringUpcomingHeading : null;
+    if (!target && focusState && focusState.element && document.contains(focusState.element)) {
+      target = focusState.element;
+    }
+    const actions = recurringRecordActions(elements);
+    if (!target && transactionId) {
+      target = actions.find((button) => button.dataset.recurringTransactionId === transactionId);
+    }
+    if (!target && focusState && focusState.nextTransactionId) {
+      target = actions.find((button) => button.dataset.recurringTransactionId === focusState.nextTransactionId);
+    }
+    if (!target) target = elements.recurringUpcomingHeading;
+    if (target && document.contains(target)) target.focus();
+  }
+
   function openEditDialog(elements, transaction, trigger) {
     elements.editId.value = transaction.id;
     elements.editDate.value = transaction.date;
@@ -468,6 +715,35 @@
       calendarDetailEmpty: $('#calendar-detail-empty'),
       calendarDetailCount: $('#calendar-detail-count'),
       previewDataWarning: $('#preview-data-warning'),
+      recurringUpcomingSection: $('#recurring-upcoming-section'),
+      recurringUpcomingHeading: $('#recurring-upcoming-heading'),
+      recurringUpcomingSummary: $('#recurring-upcoming-summary'),
+      recurringUpcomingList: $('#recurring-upcoming-list'),
+      recurringUpcomingEmpty: $('#recurring-upcoming-empty'),
+      recurringTemplateSection: $('#recurring-template-section'),
+      recurringTemplateForm: $('#recurring-template-form'),
+      recurringTemplateMemo: $('#recurring-template-memo'),
+      recurringTemplateCategory: $('#recurring-template-category'),
+      recurringTemplateAmount: $('#recurring-template-amount'),
+      recurringTemplateDay: $('#recurring-template-day'),
+      recurringTemplateSave: $('#recurring-template-save'),
+      recurringTemplateCancel: $('#recurring-template-cancel'),
+      recurringTemplateMessage: $('#recurring-template-message'),
+      recurringTemplateList: $('#recurring-template-list'),
+      recurringTemplateEmpty: $('#recurring-template-empty'),
+      recurringTemplateHeading: $('#recurring-template-heading'),
+      recurringTemplateHelp: $('#recurring-template-help'),
+      recurringConfirmDialog: $('#recurring-confirm-dialog'),
+      recurringConfirmForm: $('#recurring-confirm-form'),
+      recurringConfirmHeading: $('#recurring-confirm-heading'),
+      recurringConfirmScheduledDate: $('#recurring-confirm-scheduled-date'),
+      recurringConfirmDate: $('#recurring-confirm-date'),
+      recurringConfirmAmount: $('#recurring-confirm-amount'),
+      recurringConfirmCategory: $('#recurring-confirm-category'),
+      recurringConfirmMemo: $('#recurring-confirm-memo'),
+      recurringConfirmMessage: $('#recurring-confirm-message'),
+      recurringConfirmSave: $('#recurring-confirm-save'),
+      recurringConfirmCancel: $('#recurring-confirm-cancel'),
       editDialog: $('#edit-dialog'),
       editForm: $('#edit-transaction-form'),
       editId: $('#edit-id'),
@@ -551,6 +827,13 @@
     closeEditDialog,
     renderCalendar,
     renderCalendarDetails,
+    renderUpcomingRecurringExpenses,
+    renderRecurringExpenseTemplates,
+    fillRecurringExpenseCategoryOptions,
+    beginRecurringTemplateEdit,
+    clearRecurringTemplateEdit,
+    openRecurringConfirmDialog,
+    closeRecurringConfirmDialog,
     initDefaults,
     renderCategoryBudgetFields,
     syncCategoryBudgetInputs,
