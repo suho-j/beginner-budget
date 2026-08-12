@@ -436,6 +436,44 @@
     return Array.from(elements.recurringUpcomingList.querySelectorAll('[data-action="record-recurring-expense"]'));
   }
 
+  function isEligibleFocusTarget(target) {
+    if (
+      !target
+      || typeof target.focus !== 'function'
+      || !document.contains(target)
+      || target.disabled
+    ) return false;
+
+    let current = target;
+    while (current) {
+      if (
+        current.hidden
+        || current.inert
+        || (
+          typeof current.getAttribute === 'function'
+          && (
+            current.getAttribute('hidden') !== null
+            || current.getAttribute('inert') !== null
+            || current.getAttribute('aria-hidden') === 'true'
+          )
+        )
+      ) return false;
+      current = current.parentElement || current.parentNode;
+    }
+    return true;
+  }
+
+  function focusFirstEligible(candidates) {
+    const seen = new Set();
+    for (const target of candidates) {
+      if (seen.has(target) || !isEligibleFocusTarget(target)) continue;
+      seen.add(target);
+      target.focus();
+      if (document.activeElement === target) return true;
+    }
+    return false;
+  }
+
   function beginRecurringTemplateEdit(elements, template, returnFocus) {
     fillRecurringExpenseCategoryOptions(elements);
     elements.recurringTemplateMemo.value = template.memo || '';
@@ -472,24 +510,20 @@
     clearFieldErrors(elements.recurringTemplateForm);
     recurringTemplateFocusState = null;
 
-    let target = directTarget || options.focusTarget || null;
-    if (!target && options.reason === 'delete') {
+    const candidates = [directTarget, options.focusTarget];
+    if (options.reason === 'delete') {
       const editButtons = Array.from(
         elements.recurringTemplateList.querySelectorAll('[data-action="edit-recurring-template"]')
       );
       const deletedIndex = Number.isInteger(options.deletedIndex) ? options.deletedIndex : 0;
-      target = editButtons[deletedIndex] || editButtons[deletedIndex - 1] || elements.recurringTemplateHeading;
+      candidates.push(editButtons[deletedIndex], editButtons[deletedIndex - 1]);
+    } else if (focusState) {
+      candidates.push(focusState.element);
+      candidates.push(...Array.from(elements.recurringTemplateList.querySelectorAll('[data-template-id]'))
+        .filter((button) => button.dataset.templateId === focusState.templateId));
     }
-    if (!target && focusState) {
-      if (focusState.element && document.contains(focusState.element)) {
-        target = focusState.element;
-      } else {
-        target = Array.from(elements.recurringTemplateList.querySelectorAll('[data-template-id]'))
-          .find((button) => button.dataset.templateId === focusState.templateId);
-      }
-    }
-    if (!target) target = elements.recurringTemplateHeading;
-    if (target && document.contains(target)) target.focus();
+    candidates.push(elements.recurringTemplateHeading);
+    focusFirstEligible(candidates);
   }
 
   function openRecurringConfirmDialog(elements, occurrence, returnFocus) {
@@ -534,19 +568,25 @@
     elements.recurringConfirmDialog.close();
     recurringConfirmFocusState = null;
 
-    let target = saved ? elements.recurringUpcomingHeading : null;
-    if (!target && focusState && focusState.element && document.contains(focusState.element)) {
-      target = focusState.element;
-    }
     const actions = recurringRecordActions(elements);
-    if (!target && transactionId) {
-      target = actions.find((button) => button.dataset.recurringTransactionId === transactionId);
+    if (saved) {
+      focusFirstEligible([elements.recurringUpcomingHeading]);
+      return;
     }
-    if (!target && focusState && focusState.nextTransactionId) {
-      target = actions.find((button) => button.dataset.recurringTransactionId === focusState.nextTransactionId);
-    }
-    if (!target) target = elements.recurringUpcomingHeading;
-    if (target && document.contains(target)) target.focus();
+    const sameOccurrenceAction = transactionId
+      ? actions.find((button) => button.dataset.recurringTransactionId === transactionId)
+      : null;
+    const nextOccurrenceAction = focusState && focusState.nextTransactionId
+      ? actions.find((button) => button.dataset.recurringTransactionId === focusState.nextTransactionId)
+      : null;
+    const remainingAction = actions.find((button) => button.dataset.recurringTransactionId !== transactionId);
+    focusFirstEligible([
+      focusState && focusState.element,
+      sameOccurrenceAction,
+      nextOccurrenceAction,
+      remainingAction,
+      elements.recurringUpcomingHeading
+    ]);
   }
 
   function openEditDialog(elements, transaction, trigger) {

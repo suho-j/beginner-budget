@@ -103,6 +103,7 @@ function createUiContext() {
       this.className = '';
       this.classList = new FakeClassList(this);
       this.hidden = false;
+      this.inert = false;
       this.disabled = false;
       this.value = '';
       this.id = '';
@@ -166,6 +167,7 @@ function createUiContext() {
       if (name === 'class') this.className = normalized;
       if (name === 'tabindex') this.tabIndex = Number(normalized);
       if (name === 'hidden') this.hidden = true;
+      if (name === 'inert') this.inert = true;
       if (name.startsWith('data-')) {
         const key = name.slice(5).replace(/-([a-z])/g, (_, letter) => letter.toUpperCase());
         this.dataset[key] = normalized;
@@ -190,6 +192,7 @@ function createUiContext() {
       if (name === 'name') this.name = '';
       if (name === 'class') this.className = '';
       if (name === 'hidden') this.hidden = false;
+      if (name === 'inert') this.inert = false;
       if (name.startsWith('data-')) {
         const key = name.slice(5).replace(/-([a-z])/g, (_, letter) => letter.toUpperCase());
         delete this.dataset[key];
@@ -241,6 +244,16 @@ function createUiContext() {
     }
 
     focus() {
+      let current = this;
+      while (current) {
+        if (
+          current.hidden
+          || current.inert
+          || current.getAttribute('aria-hidden') === 'true'
+        ) return;
+        current = current.parentNode;
+      }
+      if (this.disabled) return;
       this.ownerDocument.activeElement = this;
       this.focusCount += 1;
     }
@@ -2855,7 +2868,7 @@ function testUiRendersRecurringOccurrencesAndTemplatesSafely() {
   assert.strictEqual(recordButtons.every((button) => button.getAttribute('data-cloud-write') === ''), true);
   const maliciousTitle = elements.recurringUpcomingList.querySelectorAll('.recurring-card-title')[0];
   assert.strictEqual(maliciousTitle.textContent, '<img src=x onerror=globalThis.pwned=true>');
-  assert.strictEqual(maliciousTitle.innerHTML, '');
+  assert.strictEqual(maliciousTitle.children.length, 0);
   assert.strictEqual(elements.recurringUpcomingList.querySelectorAll('img').length, 0);
 
   const templates = [
@@ -2969,6 +2982,41 @@ function testUiRecurringDialogsAndTemplateFocusFlow() {
   window.BudgetUI.closeRecurringConfirmDialog(elements);
   assert.strictEqual(document.activeElement, elements.recurringUpcomingHeading);
 
+  window.BudgetUI.renderUpcomingRecurringExpenses(elements, [first, second]);
+  firstAction = elements.recurringUpcomingList.querySelector(`[data-recurring-transaction-id="${first.transactionId}"]`);
+  const disabledNextAction = elements.recurringUpcomingList.querySelector(`[data-recurring-transaction-id="${second.transactionId}"]`);
+  window.BudgetUI.openRecurringConfirmDialog(elements, first, firstAction);
+  firstAction.disabled = true;
+  disabledNextAction.disabled = true;
+  window.BudgetUI.closeRecurringConfirmDialog(elements);
+  assert.strictEqual(
+    document.activeElement,
+    elements.recurringUpcomingHeading,
+    'disabled original, same-ID fallback, and next action must fall through to the heading'
+  );
+
+  window.BudgetUI.renderUpcomingRecurringExpenses(elements, [first, second]);
+  firstAction = elements.recurringUpcomingList.querySelector(`[data-recurring-transaction-id="${first.transactionId}"]`);
+  window.BudgetUI.openRecurringConfirmDialog(elements, first, firstAction);
+  window.BudgetUI.renderUpcomingRecurringExpenses(elements, [first, second]);
+  const disabledSameIdReplacement = elements.recurringUpcomingList.querySelector(`[data-recurring-transaction-id="${first.transactionId}"]`);
+  const disabledReplacementNext = elements.recurringUpcomingList.querySelector(`[data-recurring-transaction-id="${second.transactionId}"]`);
+  disabledSameIdReplacement.disabled = true;
+  disabledReplacementNext.disabled = true;
+  window.BudgetUI.closeRecurringConfirmDialog(elements);
+  assert.strictEqual(document.activeElement, elements.recurringUpcomingHeading, 'disabled rerendered same-ID action is skipped');
+
+  window.BudgetUI.renderUpcomingRecurringExpenses(elements, [first, second]);
+  firstAction = elements.recurringUpcomingList.querySelector(`[data-recurring-transaction-id="${first.transactionId}"]`);
+  window.BudgetUI.openRecurringConfirmDialog(elements, first, firstAction);
+  window.BudgetUI.renderUpcomingRecurringExpenses(elements, [first, second]);
+  const hiddenSameIdAction = elements.recurringUpcomingList.querySelector(`[data-recurring-transaction-id="${first.transactionId}"]`);
+  const disabledRenderedNext = elements.recurringUpcomingList.querySelector(`[data-recurring-transaction-id="${second.transactionId}"]`);
+  hiddenSameIdAction.parentNode.setAttribute('aria-hidden', 'true');
+  disabledRenderedNext.disabled = true;
+  window.BudgetUI.closeRecurringConfirmDialog(elements);
+  assert.strictEqual(document.activeElement, elements.recurringUpcomingHeading, 'aria-hidden ancestors are skipped');
+
   window.BudgetUI.renderUpcomingRecurringExpenses(elements, [first]);
   firstAction = elements.recurringUpcomingList.querySelector('[data-action="record-recurring-expense"]');
   window.BudgetUI.openRecurringConfirmDialog(elements, first, firstAction);
@@ -3016,6 +3064,36 @@ function testUiRecurringDialogsAndTemplateFocusFlow() {
   window.BudgetUI.clearRecurringTemplateEdit(elements);
   assert.strictEqual(document.activeElement, elements.recurringTemplateHeading);
 
+  window.BudgetUI.renderRecurringExpenseTemplates(elements, templates);
+  editButtons = elements.recurringTemplateList.querySelectorAll('[data-action="edit-recurring-template"]');
+  window.BudgetUI.beginRecurringTemplateEdit(elements, templates[0], editButtons[0]);
+  const disabledSameTemplateAction = elements.recurringTemplateList
+    .querySelector('[data-action="delete-recurring-template"][data-template-id="rt-one"]');
+  editButtons[0].disabled = true;
+  disabledSameTemplateAction.disabled = true;
+  window.BudgetUI.clearRecurringTemplateEdit(elements);
+  assert.strictEqual(
+    document.activeElement,
+    elements.recurringTemplateHeading,
+    'disabled original and same-template action must fall through to the heading'
+  );
+
+  window.BudgetUI.renderRecurringExpenseTemplates(elements, templates);
+  editButtons = elements.recurringTemplateList.querySelectorAll('[data-action="edit-recurring-template"]');
+  window.BudgetUI.beginRecurringTemplateEdit(elements, templates[0], editButtons[0]);
+  window.BudgetUI.clearRecurringTemplateEdit(elements, elements.recurringTemplateCancel);
+  assert.strictEqual(elements.recurringTemplateCancel.hidden, true);
+  assert.strictEqual(document.activeElement, editButtons[0], 'the now-hidden cancel button is never restored');
+
+  window.BudgetUI.renderRecurringExpenseTemplates(elements, templates);
+  editButtons = elements.recurringTemplateList.querySelectorAll('[data-action="edit-recurring-template"]');
+  window.BudgetUI.beginRecurringTemplateEdit(elements, templates[0], editButtons[0]);
+  window.BudgetUI.renderRecurringExpenseTemplates(elements, [templates[0]]);
+  const hiddenTemplateActions = elements.recurringTemplateList.querySelector('.recurring-card-actions');
+  hiddenTemplateActions.hidden = true;
+  window.BudgetUI.clearRecurringTemplateEdit(elements);
+  assert.strictEqual(document.activeElement, elements.recurringTemplateHeading, 'hidden template actions are skipped');
+
   window.BudgetUI.renderRecurringExpenseTemplates(elements, [templates[0], templates[2]]);
   window.BudgetUI.clearRecurringTemplateEdit(elements, { reason: 'delete', deletedIndex: 1 });
   editButtons = elements.recurringTemplateList.querySelectorAll('[data-action="edit-recurring-template"]');
@@ -3029,6 +3107,13 @@ function testUiRecurringDialogsAndTemplateFocusFlow() {
   window.BudgetUI.renderRecurringExpenseTemplates(elements, []);
   window.BudgetUI.clearRecurringTemplateEdit(elements, { reason: 'delete', deletedIndex: 0 });
   assert.strictEqual(document.activeElement, elements.recurringTemplateHeading);
+
+  window.BudgetUI.renderRecurringExpenseTemplates(elements, [templates[0], templates[2]]);
+  editButtons = elements.recurringTemplateList.querySelectorAll('[data-action="edit-recurring-template"]');
+  editButtons[0].disabled = true;
+  editButtons[1].disabled = true;
+  window.BudgetUI.clearRecurringTemplateEdit(elements, { reason: 'delete', deletedIndex: 1 });
+  assert.strictEqual(document.activeElement, elements.recurringTemplateHeading, 'disabled next and previous delete fallbacks are skipped');
 }
 
 function testCategoryFilterCombinesWithMonthTypeAndQuery() {
