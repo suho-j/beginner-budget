@@ -437,6 +437,7 @@ function createAppHarness(options = {}) {
   const documentListeners = new Map();
   const writeControls = [];
   const dynamicControls = [];
+  const availabilitySnapshots = [];
 
   function createElement(tagName = 'div') {
     const listeners = new Map();
@@ -527,7 +528,19 @@ function createAppHarness(options = {}) {
       await Promise.all(results);
     },
     querySelectorAll(selector) {
-      if (selector === '[data-cloud-write]') return writeControls.slice();
+      if (selector === '[data-cloud-write]') {
+        const controls = [...writeControls, ...dynamicControls];
+        controls.forEach = function forEach(callback, thisArg) {
+          Array.prototype.forEach.call(this, callback, thisArg);
+          availabilitySnapshots.push(this.map((control) => ({
+            action: control.dataset.action || '',
+            templateId: control.dataset.templateId || '',
+            transactionId: control.dataset.recurringTransactionId || '',
+            disabled: control.disabled
+          })));
+        };
+        return controls;
+      }
       if (selector === '[data-action="edit"]') {
         return dynamicControls.filter((control) => control.dataset.action === 'edit');
       }
@@ -539,12 +552,16 @@ function createAppHarness(options = {}) {
   };
   document.body = createElement('body');
 
+  const confirmCalls = [];
   const window = {
     document,
     console: { ...console, error() {}, warn() {} },
     crypto: { randomUUID: () => `harness-${Math.random().toString(16).slice(2)}` },
     location: { pathname: '/' },
-    confirm: () => true,
+    confirm(message) {
+      confirmCalls.push(message);
+      return typeof options.confirm === 'function' ? options.confirm(message) : true;
+    },
     setTimeout(callback) { callback(); return 1; },
     clearTimeout() {}
   };
@@ -573,10 +590,22 @@ function createAppHarness(options = {}) {
     'summaryBudgetRemaining', 'budgetStatusText', 'balanceHelp', 'budgetCard', 'balanceCard',
     'budgetRateLabel', 'budgetMeter', 'budgetMeterFill', 'dailyAllowance',
     'dailyAllowanceHelp', 'topCategory', 'topCategoryHelp', 'categoryBreakdownList',
-    'categoryBudgetStatusList'
+    'categoryBudgetStatusList', 'recurringUpcomingSection', 'recurringUpcomingHeading',
+    'recurringUpcomingSummary', 'recurringUpcomingList', 'recurringUpcomingEmpty',
+    'recurringTemplateSection', 'recurringTemplateForm', 'recurringTemplateMemo',
+    'recurringTemplateCategory', 'recurringTemplateAmount', 'recurringTemplateDay',
+    'recurringTemplateCancel', 'recurringTemplateMessage', 'recurringTemplateList',
+    'recurringTemplateEmpty', 'recurringTemplateHeading', 'recurringTemplateHelp',
+    'recurringConfirmDialog', 'recurringConfirmForm', 'recurringConfirmHeading',
+    'recurringConfirmScheduledDate', 'recurringConfirmDate', 'recurringConfirmAmount',
+    'recurringConfirmCategory', 'recurringConfirmMemo', 'recurringConfirmMessage',
+    'recurringConfirmCancel'
   ]) elements[name] = createElement(name.includes('Form') ? 'form' : 'div');
 
-  for (const name of ['monthStartSave', 'budgetSave', 'categoryBudgetSave', 'transactionSave']) {
+  for (const name of [
+    'monthStartSave', 'budgetSave', 'categoryBudgetSave', 'transactionSave',
+    'recurringTemplateSave', 'recurringConfirmSave'
+  ]) {
     elements[name] = createElement('button');
   }
 
@@ -598,20 +627,103 @@ function createAppHarness(options = {}) {
   elements.editType.value = 'expense';
   elements.editCategory.value = '생활비';
   elements.cloudPassword.value = 'secret';
+  elements.recurringTemplateMemo.name = 'memo';
+  elements.recurringTemplateCategory.name = 'category';
+  elements.recurringTemplateAmount.name = 'amount';
+  elements.recurringTemplateDay.name = 'dayOfMonth';
+  elements.recurringConfirmDate.name = 'date';
+  elements.recurringConfirmAmount.name = 'amount';
+  elements.recurringConfirmCategory.name = 'category';
+  elements.recurringConfirmMemo.name = 'memo';
+  elements.recurringTemplateSave.textContent = '반복지출 등록';
+  elements.recurringTemplateCancel.hidden = true;
+  elements.recurringTemplateForm.append(
+    elements.recurringTemplateMemo,
+    elements.recurringTemplateCategory,
+    elements.recurringTemplateAmount,
+    elements.recurringTemplateDay,
+    elements.recurringTemplateSave,
+    elements.recurringTemplateCancel
+  );
+  elements.recurringConfirmForm.append(
+    elements.recurringConfirmDate,
+    elements.recurringConfirmAmount,
+    elements.recurringConfirmCategory,
+    elements.recurringConfirmMemo,
+    elements.recurringConfirmSave,
+    elements.recurringConfirmCancel
+  );
   for (const control of [
     elements.monthStartSave, elements.budgetSave, elements.categoryBudgetSave, elements.transactionSave,
     elements.sampleButton, elements.importButton, elements.resetButton,
-    elements.cloudUploadButton, elements.editSave
+    elements.cloudUploadButton, elements.editSave, elements.recurringTemplateSave,
+    elements.recurringConfirmSave
   ]) control.setAttribute('data-cloud-write', '');
 
   const records = {
     cloudStatuses: [],
     renderedLists: [],
     renderedSummaries: [],
+    recurringUpcomingRenders: [],
+    recurringTemplateRenders: [],
+    recurringTemplateEditBegins: [],
+    recurringTemplateClears: [],
+    recurringConfirmOpens: [],
+    recurringConfirmCloses: [],
+    recurringCategoryFillCount: 0,
+    recurringDomainCalls: { add: [], update: [], delete: [], derive: [] },
+    validationErrors: [],
+    availabilitySnapshots,
+    confirmCalls,
     activeTabs: [],
     downloads: [],
     closeEditCount: 0
   };
+
+  const copyRecord = (value) => JSON.parse(JSON.stringify(value));
+  function replaceDynamicControls(group, controls) {
+    for (let index = dynamicControls.length - 1; index >= 0; index -= 1) {
+      if (dynamicControls[index].dynamicGroup === group) dynamicControls.splice(index, 1);
+    }
+    controls.forEach((control) => {
+      control.dynamicGroup = group;
+      control.closest = (selector) => (
+        selector.includes('[data-action]')
+        && (!selector.includes('[data-template-id]') || Boolean(control.dataset.templateId))
+          ? control
+          : null
+      );
+      dynamicControls.push(control);
+    });
+  }
+
+  const recurringDomain = {
+    add: window.BudgetTransactions.addRecurringExpenseTemplate,
+    update: window.BudgetTransactions.updateRecurringExpenseTemplate,
+    delete: window.BudgetTransactions.deleteRecurringExpenseTemplate,
+    derive: window.BudgetTransactions.deriveRecurringExpenseOccurrences
+  };
+  window.BudgetTransactions.addRecurringExpenseTemplate = (currentState, input, ...rest) => {
+    records.recurringDomainCalls.add.push({ state: copyRecord(currentState), input: copyRecord(input) });
+    return recurringDomain.add(currentState, input, ...rest);
+  };
+  window.BudgetTransactions.updateRecurringExpenseTemplate = (currentState, id, input, ...rest) => {
+    records.recurringDomainCalls.update.push({ state: copyRecord(currentState), id, input: copyRecord(input) });
+    return recurringDomain.update(currentState, id, input, ...rest);
+  };
+  window.BudgetTransactions.deleteRecurringExpenseTemplate = (currentState, id, ...rest) => {
+    records.recurringDomainCalls.delete.push({ state: copyRecord(currentState), id });
+    return recurringDomain.delete(currentState, id, ...rest);
+  };
+  window.BudgetTransactions.deriveRecurringExpenseOccurrences = (currentState, month, today, ...rest) => {
+    records.recurringDomainCalls.derive.push({
+      state: copyRecord(currentState),
+      month,
+      today: window.BudgetStorage.localDateString(today)
+    });
+    return recurringDomain.derive(currentState, month, today, ...rest);
+  };
+
   window.BudgetUI = {
     getElements: () => elements,
     initDefaults(target, state) {
@@ -628,6 +740,7 @@ function createAppHarness(options = {}) {
       target.budgetInput.valueAsNumber = budget.monthlyBudget;
       target.typeSelect.value = 'expense';
       target.categorySelect.value = '생활비';
+      this.fillRecurringExpenseCategoryOptions(target);
     },
     fillFilterCategoryOptions(select) { select.value = 'all'; },
     fillCategoryOptions(select, type) { select.value = type === 'income' ? '월급' : '생활비'; },
@@ -637,10 +750,89 @@ function createAppHarness(options = {}) {
     renderList(target, transactions) { records.renderedLists.push(JSON.parse(JSON.stringify(transactions))); },
     renderCalendar() {},
     renderCalendarDetails() {},
+    renderUpcomingRecurringExpenses(target, occurrences) {
+      records.recurringUpcomingRenders.push(copyRecord(occurrences));
+      replaceDynamicControls('recurring-upcoming', (occurrences || [])
+        .filter((occurrence) => occurrence.status !== 'recorded')
+        .map((occurrence) => {
+          const button = createElement('button');
+          button.dataset.action = 'record-recurring-expense';
+          button.dataset.recurringTransactionId = occurrence.transactionId;
+          return button;
+        }));
+    },
+    renderRecurringExpenseTemplates(target, templates) {
+      records.recurringTemplateRenders.push(copyRecord(templates));
+      const controls = [];
+      (templates || []).forEach((template) => {
+        for (const action of ['edit-recurring-template', 'delete-recurring-template']) {
+          const button = createElement('button');
+          button.dataset.action = action;
+          button.dataset.templateId = template.id;
+          controls.push(button);
+        }
+      });
+      replaceDynamicControls('recurring-template', controls);
+    },
+    fillRecurringExpenseCategoryOptions(target) {
+      records.recurringCategoryFillCount += 1;
+      if (!target.recurringTemplateCategory.value) target.recurringTemplateCategory.value = '생활비';
+      if (!target.recurringConfirmCategory.value) target.recurringConfirmCategory.value = '생활비';
+    },
+    beginRecurringTemplateEdit(target, template, trigger) {
+      records.recurringTemplateEditBegins.push({ template: copyRecord(template), trigger });
+      target.recurringTemplateMemo.value = template.memo;
+      target.recurringTemplateCategory.value = template.category;
+      target.recurringTemplateAmount.value = String(template.amount);
+      target.recurringTemplateDay.value = String(template.dayOfMonth);
+      target.recurringTemplateForm.dataset.templateId = template.id;
+      target.recurringTemplateSave.textContent = '반복지출 수정 저장';
+      target.recurringTemplateCancel.hidden = false;
+      target.recurringTemplateMemo.focus();
+    },
+    clearRecurringTemplateEdit(target, focusTargetOrOptions = {}) {
+      const directTarget = focusTargetOrOptions && typeof focusTargetOrOptions.focus === 'function'
+        ? focusTargetOrOptions
+        : null;
+      const optionsValue = directTarget ? {} : focusTargetOrOptions;
+      records.recurringTemplateClears.push({
+        directTarget,
+        reason: optionsValue.reason || '',
+        deletedIndex: optionsValue.deletedIndex,
+        focusTarget: optionsValue.focusTarget || null
+      });
+      target.recurringTemplateMemo.value = '';
+      target.recurringTemplateCategory.value = '';
+      target.recurringTemplateAmount.value = '';
+      target.recurringTemplateDay.value = '';
+      delete target.recurringTemplateForm.dataset.templateId;
+      target.recurringTemplateSave.textContent = '반복지출 등록';
+      target.recurringTemplateCancel.hidden = true;
+      (directTarget || optionsValue.focusTarget || target.recurringTemplateHeading).focus();
+    },
+    openRecurringConfirmDialog(target, occurrence, trigger) {
+      records.recurringConfirmOpens.push({ occurrence: copyRecord(occurrence), trigger });
+      target.recurringConfirmDialog.dataset.transactionId = occurrence.transactionId;
+      target.recurringConfirmDialog.open = true;
+    },
+    closeRecurringConfirmDialog(target, optionsValue = {}) {
+      records.recurringConfirmCloses.push(copyRecord(optionsValue));
+      delete target.recurringConfirmDialog.dataset.transactionId;
+      target.recurringConfirmDialog.open = false;
+    },
     setActiveTab(target, tab) { records.activeTabs.push(tab); },
     clearFieldErrors() {},
     showValidationErrors(scope, messageElement, errors) {
+      records.validationErrors.push(copyRecord(errors));
       this.setMessage(messageElement, errors.map((item) => item.message).join(' '), 'error');
+      const fields = {
+        memo: elements.recurringTemplateMemo,
+        category: elements.recurringTemplateCategory,
+        amount: elements.recurringTemplateAmount,
+        dayOfMonth: elements.recurringTemplateDay
+      };
+      const first = errors.find((item) => fields[item.field]);
+      if (first) fields[first.field].focus();
     },
     setMessage(element, text, kind) {
       element.textContent = text || '';
@@ -4790,6 +4982,347 @@ async function testAppSettingsConflictRetriesOnlyAfterCloudRefresh() {
   assert.strictEqual(harness.writeControls.every((control) => !control.disabled), true);
 }
 
+async function testAppRecurringTemplateCrudIsRemoteFirst() {
+  const baseWindow = createContext();
+  const storage = baseWindow.BudgetStorage;
+  const transactions = baseWindow.BudgetTransactions;
+  const selectedMonth = storage.monthKeyForDate(storage.localDateString(), 1);
+  const recordedDate = storage.scheduledDateForMonth(selectedMonth, 20);
+  const editTemplate = {
+    id: 'rt-edit', memo: '월세', category: '생활비', amount: 550000,
+    dayOfMonth: 10, startsOn: '2020-01-01'
+  };
+  const deleteTemplate = {
+    id: 'rt-delete', memo: '보험료', category: '비상금', amount: 80000,
+    dayOfMonth: 20, startsOn: '2020-01-01'
+  };
+  const confirmedTransaction = {
+    id: transactions.recurringTransactionId(deleteTemplate.id, selectedMonth),
+    date: recordedDate,
+    type: 'expense',
+    category: deleteTemplate.category,
+    amount: deleteTemplate.amount,
+    memo: deleteTemplate.memo,
+    source: 'user'
+  };
+  const initialState = storage.normalizeState({
+    ...storage.defaultState(),
+    recurringExpenseTemplates: [editTemplate, deleteTemplate],
+    transactions: [confirmedTransaction]
+  });
+  const saveOutcomes = [];
+  let confirmResult = true;
+  const harness = createAppHarness({
+    cloudState: initialState,
+    confirm: () => confirmResult,
+    cloud: {
+      saveSettings: () => {
+        const outcome = saveOutcomes.shift();
+        if (outcome instanceof Error) return Promise.reject(outcome);
+        if (outcome && outcome.promise) return outcome.promise;
+        return outcome || { ok: true };
+      }
+    }
+  });
+  const exportState = async (target = harness) => {
+    await target.elements.exportButton.dispatch('click');
+    return JSON.parse(target.records.downloads.at(-1).content);
+  };
+  const formValues = (target = harness) => ({
+    memo: target.elements.recurringTemplateMemo.value,
+    category: target.elements.recurringTemplateCategory.value,
+    amount: target.elements.recurringTemplateAmount.value,
+    dayOfMonth: target.elements.recurringTemplateDay.value
+  });
+  const allWrites = (target = harness) => target.document.querySelectorAll('[data-cloud-write]');
+  const assertEveryRenderUsesRecurringDomain = (target = harness) => {
+    assert.strictEqual(
+      target.records.recurringDomainCalls.derive.length,
+      target.records.recurringUpcomingRenders.length,
+      'each app render must derive and render recurring occurrences'
+    );
+    assert.strictEqual(
+      target.records.recurringDomainCalls.derive.length,
+      target.records.recurringTemplateRenders.length,
+      'each app render must render the exact template collection'
+    );
+  };
+
+  await harness.init();
+  const initialTemplateRender = harness.records.recurringTemplateRenders.at(-1);
+  const initialOccurrenceRender = harness.records.recurringUpcomingRenders.at(-1);
+  const initialRenderCount = harness.records.recurringTemplateRenders.length;
+
+  harness.elements.recurringTemplateMemo.value = '스트리밍';
+  harness.elements.recurringTemplateCategory.value = '배달비';
+  harness.elements.recurringTemplateAmount.value = '12,000';
+  harness.elements.recurringTemplateDay.value = '28';
+  const addInput = formValues();
+  const addGate = createDeferred();
+  saveOutcomes.push(addGate);
+  const adding = harness.elements.recurringTemplateForm.dispatch('submit', {
+    submitter: harness.elements.recurringTemplateSave
+  });
+  await Promise.resolve();
+
+  assert.strictEqual(
+    harness.cloudCalls.saveSettings.length,
+    1,
+    'valid template submit must start one settings CAS write'
+  );
+  assert.deepStrictEqual(formValues(), addInput);
+  assert.strictEqual(harness.records.recurringTemplateRenders.length, initialRenderCount);
+  assert.strictEqual(JSON.stringify((await exportState()).recurringExpenseTemplates), JSON.stringify(initialState.recurringExpenseTemplates));
+  assert.strictEqual(JSON.stringify(harness.records.recurringTemplateRenders.at(-1)), JSON.stringify(initialTemplateRender));
+  assert.strictEqual(allWrites().length > harness.writeControls.length, true, 'dynamic recurring writes must join the common lock');
+  assert.strictEqual(allWrites().every((control) => control.disabled), true);
+  assert.strictEqual(harness.records.recurringTemplateClears.length, 0);
+
+  addGate.resolve({ ok: true });
+  await adding;
+  const afterAddState = await exportState();
+  const addedTemplate = afterAddState.recurringExpenseTemplates.find((template) => template.memo === addInput.memo);
+  assert.ok(addedTemplate);
+  assert.deepStrictEqual(
+    harness.records.recurringDomainCalls.add.at(-1).input,
+    addInput
+  );
+  assert.strictEqual(harness.cloudCalls.saveSettings[0][0].recurringExpenseTemplates.length, 3);
+  assert.deepStrictEqual(formValues(), { memo: '', category: '', amount: '', dayOfMonth: '' });
+  assert.strictEqual(harness.elements.recurringTemplateForm.dataset.templateId, undefined);
+  assert.strictEqual(harness.document.activeElement, harness.elements.recurringTemplateHeading);
+  assert.strictEqual(allWrites().every((control) => !control.disabled), true);
+  assert.strictEqual(
+    harness.records.availabilitySnapshots.some((snapshot) => (
+      snapshot.filter((control) => control.action === 'edit-recurring-template').length === 3
+      && snapshot.every((control) => control.disabled)
+    )),
+    true,
+    'rendered dynamic controls must be disabled before an in-flight mutation unlocks'
+  );
+  assert.strictEqual(JSON.stringify(initialTemplateRender), JSON.stringify(initialState.recurringExpenseTemplates));
+  const expectedInitialOccurrences = transactions.deriveRecurringExpenseOccurrences(initialState, selectedMonth, new Date());
+  assert.strictEqual(JSON.stringify(initialOccurrenceRender), JSON.stringify(expectedInitialOccurrences));
+  assert.strictEqual(harness.records.recurringDomainCalls.derive[1].month, selectedMonth);
+  assertEveryRenderUsesRecurringDomain();
+
+  const rendersBeforeMonthChange = harness.records.recurringUpcomingRenders.length;
+  await harness.elements.nextMonthButton.dispatch('click');
+  const nextMonth = storage.addMonthsToMonth(selectedMonth, 1);
+  assert.strictEqual(harness.records.recurringDomainCalls.derive.at(-1).month, nextMonth);
+  assert.strictEqual(harness.records.recurringUpcomingRenders.length, rendersBeforeMonthChange + 1);
+  assert.strictEqual(
+    JSON.stringify(harness.records.recurringUpcomingRenders.at(-1)),
+    JSON.stringify(transactions.deriveRecurringExpenseOccurrences(afterAddState, nextMonth, new Date()))
+  );
+  await harness.elements.currentMonthButton.dispatch('click');
+  assert.strictEqual(harness.records.recurringDomainCalls.derive.at(-1).month, selectedMonth);
+  assertEveryRenderUsesRecurringDomain();
+
+  const editButton = harness.dynamicControls.find((control) => (
+    control.dataset.action === 'edit-recurring-template'
+    && control.dataset.templateId === editTemplate.id
+  ));
+  await harness.elements.recurringTemplateList.dispatch('click', { target: editButton });
+  assert.deepStrictEqual(harness.records.recurringTemplateEditBegins.at(-1).template, editTemplate);
+  assert.strictEqual(harness.records.recurringTemplateEditBegins.at(-1).trigger, editButton);
+  assert.strictEqual(harness.elements.recurringTemplateForm.dataset.templateId, editTemplate.id);
+  assert.strictEqual(harness.document.activeElement, harness.elements.recurringTemplateMemo);
+
+  harness.elements.recurringTemplateMemo.value = '';
+  harness.elements.recurringTemplateCategory.value = '배달비';
+  harness.elements.recurringTemplateAmount.value = '600,000';
+  harness.elements.recurringTemplateDay.value = '11';
+  const invalidValues = formValues();
+  const snapshotsBeforeValidation = harness.records.availabilitySnapshots.length;
+  const updateCallsBeforeValidation = harness.records.recurringDomainCalls.update.length;
+  await harness.elements.recurringTemplateForm.dispatch('submit', {
+    submitter: harness.elements.recurringTemplateSave
+  });
+  assert.strictEqual(harness.records.recurringDomainCalls.update.length, updateCallsBeforeValidation + 1);
+  assert.strictEqual(harness.records.recurringDomainCalls.update.at(-1).id, editTemplate.id);
+  assert.strictEqual(harness.cloudCalls.saveSettings.length, 1);
+  assert.deepStrictEqual(formValues(), invalidValues);
+  assert.strictEqual(harness.document.activeElement, harness.elements.recurringTemplateMemo);
+  assert.strictEqual(harness.records.availabilitySnapshots.length, snapshotsBeforeValidation);
+  assert.strictEqual(allWrites().every((control) => !control.disabled), true);
+  assert.strictEqual(harness.elements.recurringTemplateForm.dataset.templateId, editTemplate.id);
+
+  harness.elements.recurringTemplateMemo.value = '월세 수정';
+  const editValues = formValues();
+  const renderCountBeforeFailure = harness.records.recurringTemplateRenders.length;
+  saveOutcomes.push(new Error('network offline'));
+  await harness.elements.recurringTemplateForm.dispatch('submit', {
+    submitter: harness.elements.recurringTemplateSave
+  });
+  assert.strictEqual(harness.cloudCalls.saveSettings.length, 2);
+  assert.strictEqual(harness.records.recurringTemplateRenders.length, renderCountBeforeFailure);
+  assert.strictEqual(JSON.stringify((await exportState()).recurringExpenseTemplates), JSON.stringify(afterAddState.recurringExpenseTemplates));
+  assert.deepStrictEqual(formValues(), editValues);
+  assert.strictEqual(harness.elements.recurringTemplateForm.dataset.templateId, editTemplate.id);
+  assert.match(harness.elements.recurringTemplateMessage.textContent, /network offline/);
+  assert.strictEqual(harness.records.cloudStatuses.at(-1).readiness, 'ready');
+  assert.strictEqual(allWrites().every((control) => !control.disabled), true);
+
+  const editGate = createDeferred();
+  saveOutcomes.push(editGate);
+  const editing = harness.elements.recurringTemplateForm.dispatch('submit', {
+    submitter: harness.elements.recurringTemplateSave
+  });
+  await Promise.resolve();
+  assert.strictEqual(harness.cloudCalls.saveSettings.length, 3);
+  assert.strictEqual(harness.records.recurringTemplateRenders.length, renderCountBeforeFailure);
+  assert.strictEqual(JSON.stringify((await exportState()).recurringExpenseTemplates), JSON.stringify(afterAddState.recurringExpenseTemplates));
+  assert.deepStrictEqual(formValues(), editValues);
+  assert.strictEqual(harness.elements.recurringTemplateForm.dataset.templateId, editTemplate.id);
+  assert.strictEqual(allWrites().every((control) => control.disabled), true);
+  editGate.resolve({ ok: true });
+  await editing;
+  const afterEditState = await exportState();
+  const editedTemplate = afterEditState.recurringExpenseTemplates.find((template) => template.id === editTemplate.id);
+  assert.deepStrictEqual(editedTemplate, {
+    ...editTemplate,
+    memo: editValues.memo,
+    category: editValues.category,
+    amount: 600000,
+    dayOfMonth: 11
+  });
+  assert.strictEqual(JSON.stringify(harness.cloudCalls.saveSettings[2][0]), JSON.stringify(afterEditState));
+  assert.deepStrictEqual(formValues(), { memo: '', category: '', amount: '', dayOfMonth: '' });
+  assert.strictEqual(harness.elements.recurringTemplateForm.dataset.templateId, undefined);
+  assert.strictEqual(harness.document.activeElement, harness.elements.recurringTemplateHeading);
+  assert.strictEqual(allWrites().every((control) => !control.disabled), true);
+  assertEveryRenderUsesRecurringDomain();
+
+  const deleteEditButton = harness.dynamicControls.find((control) => (
+    control.dataset.action === 'edit-recurring-template'
+    && control.dataset.templateId === deleteTemplate.id
+  ));
+  await harness.elements.recurringTemplateList.dispatch('click', { target: deleteEditButton });
+  assert.strictEqual(harness.elements.recurringTemplateForm.dataset.templateId, deleteTemplate.id);
+  const deleteButton = harness.dynamicControls.find((control) => (
+    control.dataset.action === 'delete-recurring-template'
+    && control.dataset.templateId === deleteTemplate.id
+  ));
+  confirmResult = false;
+  await harness.elements.recurringTemplateList.dispatch('click', { target: deleteButton });
+  assert.strictEqual(harness.cloudCalls.saveSettings.length, 3);
+  assert.strictEqual(harness.records.recurringDomainCalls.delete.length, 0);
+
+  confirmResult = true;
+  const deleteGate = createDeferred();
+  saveOutcomes.push(deleteGate);
+  const deleting = harness.elements.recurringTemplateList.dispatch('click', { target: deleteButton });
+  await Promise.resolve();
+  assert.match(harness.records.confirmCalls.at(-1), /보험료/);
+  assert.strictEqual(harness.cloudCalls.saveSettings.length, 4);
+  assert.strictEqual(harness.records.recurringDomainCalls.delete.at(-1).id, deleteTemplate.id);
+  assert.strictEqual((await exportState()).recurringExpenseTemplates.some((template) => template.id === deleteTemplate.id), true);
+  assert.strictEqual(harness.records.recurringTemplateRenders.at(-1).some((template) => template.id === deleteTemplate.id), true);
+  assert.deepStrictEqual(formValues(), {
+    memo: deleteTemplate.memo,
+    category: deleteTemplate.category,
+    amount: String(deleteTemplate.amount),
+    dayOfMonth: String(deleteTemplate.dayOfMonth)
+  });
+  assert.strictEqual(harness.elements.recurringTemplateForm.dataset.templateId, deleteTemplate.id);
+  assert.strictEqual(allWrites().every((control) => control.disabled), true);
+  const confirmsBeforeDisabledClick = harness.records.confirmCalls.length;
+  const disabledDelete = harness.dynamicControls.find((control) => (
+    control.dataset.action === 'delete-recurring-template'
+    && control.dataset.templateId === editTemplate.id
+  ));
+  assert.strictEqual(disabledDelete.disabled, true);
+  await harness.elements.recurringTemplateList.dispatch('click', { target: disabledDelete });
+  assert.strictEqual(harness.records.confirmCalls.length, confirmsBeforeDisabledClick);
+  assert.strictEqual(harness.cloudCalls.saveSettings.length, 4);
+
+  deleteGate.resolve({ ok: true });
+  await deleting;
+  const afterDeleteState = await exportState();
+  assert.strictEqual(afterDeleteState.recurringExpenseTemplates.some((template) => template.id === deleteTemplate.id), false);
+  assert.strictEqual(afterDeleteState.transactions.some((transaction) => transaction.id === confirmedTransaction.id), true);
+  assert.strictEqual(harness.records.recurringTemplateRenders.at(-1).some((template) => template.id === deleteTemplate.id), false);
+  assert.deepStrictEqual(harness.records.recurringTemplateClears.at(-1), {
+    directTarget: null,
+    reason: 'delete',
+    deletedIndex: 1,
+    focusTarget: null
+  });
+  assert.strictEqual(harness.elements.recurringTemplateForm.dataset.templateId, undefined);
+  assert.strictEqual(harness.document.activeElement, harness.elements.recurringTemplateHeading);
+  assert.strictEqual(allWrites().every((control) => !control.disabled), true);
+  assert.strictEqual(harness.cloudCalls.insertTransaction.length, 0);
+  assert.strictEqual(harness.cloudCalls.updateTransaction.length, 0);
+  assert.strictEqual(harness.cloudCalls.deleteTransaction.length, 0);
+  assertEveryRenderUsesRecurringDomain();
+
+  const addCallsBeforeStaleCheck = harness.records.recurringDomainCalls.add.length;
+  const updateCallsBeforeStaleCheck = harness.records.recurringDomainCalls.update.length;
+  harness.elements.recurringTemplateMemo.value = '';
+  harness.elements.recurringTemplateCategory.value = '생활비';
+  harness.elements.recurringTemplateAmount.value = '1000';
+  harness.elements.recurringTemplateDay.value = '1';
+  await harness.elements.recurringTemplateForm.dispatch('submit', {
+    submitter: harness.elements.recurringTemplateSave
+  });
+  assert.strictEqual(harness.records.recurringDomainCalls.add.length, addCallsBeforeStaleCheck + 1);
+  assert.strictEqual(harness.records.recurringDomainCalls.update.length, updateCallsBeforeStaleCheck);
+  assert.strictEqual(harness.cloudCalls.saveSettings.length, 4);
+
+  const conflict = Object.assign(
+    new Error('다른 브라우저에서 예산 설정이 변경됐어요. 클라우드 데이터를 다시 불러와 주세요.'),
+    { code: '40001' }
+  );
+  const conflictHarness = createAppHarness({
+    cloudState: initialState,
+    cloud: { saveSettings: async () => { throw conflict; } }
+  });
+  await conflictHarness.init();
+  const conflictEditButton = conflictHarness.dynamicControls.find((control) => (
+    control.dataset.action === 'edit-recurring-template'
+    && control.dataset.templateId === editTemplate.id
+  ));
+  await conflictHarness.elements.recurringTemplateList.dispatch('click', { target: conflictEditButton });
+  conflictHarness.elements.recurringTemplateMemo.value = '충돌 중 월세';
+  conflictHarness.elements.recurringTemplateAmount.value = '777000';
+  const conflictValues = formValues(conflictHarness);
+  conflictHarness.elements.recurringConfirmMessage.textContent = '확인 입력 보존';
+  await conflictHarness.elements.recurringTemplateForm.dispatch('submit', {
+    submitter: conflictHarness.elements.recurringTemplateSave
+  });
+  assert.strictEqual(conflictHarness.cloudCalls.saveSettings.length, 1);
+  assert.strictEqual(
+    JSON.stringify((await exportState(conflictHarness)).recurringExpenseTemplates),
+    JSON.stringify(initialState.recurringExpenseTemplates)
+  );
+  assert.deepStrictEqual(formValues(conflictHarness), conflictValues);
+  assert.strictEqual(conflictHarness.elements.recurringTemplateForm.dataset.templateId, editTemplate.id);
+  assert.match(conflictHarness.elements.recurringTemplateMessage.textContent, /다른 브라우저/);
+  assert.match(conflictHarness.elements.globalMessage.textContent, /다른 브라우저/);
+  assert.strictEqual(conflictHarness.records.cloudStatuses.at(-1).readiness, 'load-error');
+  assert.strictEqual(allWrites(conflictHarness).every((control) => control.disabled), true);
+  await conflictHarness.elements.recurringTemplateForm.dispatch('submit', {
+    submitter: conflictHarness.elements.recurringTemplateSave
+  });
+  assert.strictEqual(conflictHarness.cloudCalls.saveSettings.length, 1);
+  assert.deepStrictEqual(formValues(conflictHarness), conflictValues);
+  await conflictHarness.elements.recurringTemplateCancel.dispatch('click');
+  assert.deepStrictEqual(formValues(conflictHarness), { memo: '', category: '', amount: '', dayOfMonth: '' });
+  assert.strictEqual(conflictHarness.elements.recurringTemplateForm.dataset.templateId, undefined);
+  assert.strictEqual(conflictHarness.cloudCalls.saveSettings.length, 1);
+  assert.strictEqual(allWrites(conflictHarness).every((control) => control.disabled), true);
+  conflictHarness.elements.recurringTemplateMessage.textContent = '템플릿 충돌 안내';
+  conflictHarness.elements.recurringConfirmMessage.textContent = '확인 입력 보존';
+  await conflictHarness.elements.cloudDownloadButton.dispatch('click');
+  assert.strictEqual(conflictHarness.cloudCalls.downloadState.length, 2);
+  assert.strictEqual(conflictHarness.records.cloudStatuses.at(-1).readiness, 'ready');
+  assert.strictEqual(conflictHarness.elements.recurringTemplateMessage.textContent, '');
+  assert.strictEqual(conflictHarness.elements.recurringConfirmMessage.textContent, '');
+  assert.strictEqual(allWrites(conflictHarness).every((control) => !control.disabled), true);
+  assertEveryRenderUsesRecurringDomain(conflictHarness);
+}
+
 async function testAppLogoutClearsPrivateStateAndFocusesLogin() {
   const base = createContext().BudgetStorage.defaultState();
   const harness = createAppHarness({
@@ -4908,6 +5441,7 @@ const tests = [
   testAppTransactionConflictPassesExpectedRowAndKeepsLocalState,
   testAppWholeStateConflictPassesExpectedStateAndKeepsLocalState,
   testAppSettingsConflictRetriesOnlyAfterCloudRefresh,
+  testAppRecurringTemplateCrudIsRemoteFirst,
   testAppLogoutClearsPrivateStateAndFocusesLogin
 ];
 

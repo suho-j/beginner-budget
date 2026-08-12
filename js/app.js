@@ -8,6 +8,8 @@
   let signedInUser = null;
   let mutationInFlight = false;
   const viewState = { tab: 'home', month: '', selectedDate: '' };
+  let recurringTemplateEditId = '';
+  let recurringOccurrences = [];
   const MAX_IMPORT_BYTES = 1024 * 1024;
 
   function syncMutationAvailability() {
@@ -42,7 +44,9 @@
       elements.budgetMessage,
       elements.categoryBudgetMessage,
       elements.monthStartMessage,
-      elements.editMessage
+      elements.editMessage,
+      elements.recurringTemplateMessage,
+      elements.recurringConfirmMessage
     ]) window.BudgetUI.setMessage(messageElement, '', null);
   }
 
@@ -188,6 +192,13 @@
     window.BudgetUI.renderList(elements, list);
     window.BudgetUI.renderCalendar(elements, calendarDays, transactionsByDate, viewState.selectedDate);
     window.BudgetUI.renderCalendarDetails(elements, viewState.selectedDate, selectedRows);
+    recurringOccurrences = window.BudgetTransactions.deriveRecurringExpenseOccurrences(
+      state,
+      viewState.month,
+      new Date()
+    );
+    window.BudgetUI.renderUpcomingRecurringExpenses(elements, recurringOccurrences);
+    window.BudgetUI.renderRecurringExpenseTemplates(elements, state.recurringExpenseTemplates);
     window.BudgetUI.setActiveTab(elements, viewState.tab);
     elements.calendarPeriodLabel.textContent = `${period.start} ~ ${period.end}`;
     syncMutationAvailability();
@@ -297,6 +308,85 @@
 
   function handleTypeChange() {
     window.BudgetUI.fillCategoryOptions(elements.categorySelect, elements.typeSelect.value);
+  }
+
+  async function handleRecurringTemplateSubmit(event) {
+    event.preventDefault();
+    window.BudgetUI.clearFieldErrors(elements.recurringTemplateForm);
+    const input = {
+      memo: elements.recurringTemplateMemo.value,
+      category: elements.recurringTemplateCategory.value,
+      amount: elements.recurringTemplateAmount.value,
+      dayOfMonth: elements.recurringTemplateDay.value
+    };
+    const wasEditing = Boolean(recurringTemplateEditId);
+    const result = wasEditing
+      ? window.BudgetTransactions.updateRecurringExpenseTemplate(state, recurringTemplateEditId, input)
+      : window.BudgetTransactions.addRecurringExpenseTemplate(state, input);
+    if (!result.ok) {
+      window.BudgetUI.showValidationErrors(
+        elements.recurringTemplateForm,
+        elements.recurringTemplateMessage,
+        result.errors
+      );
+      return;
+    }
+
+    const saved = await persistRemoteFirst(
+      result.state,
+      () => window.BudgetCloud.saveSettings(result.state),
+      elements.recurringTemplateMessage,
+      event.submitter
+    );
+    if (!saved) return;
+
+    recurringTemplateEditId = '';
+    window.BudgetUI.clearRecurringTemplateEdit(elements, elements.recurringTemplateHeading);
+    window.BudgetUI.setMessage(
+      elements.recurringTemplateMessage,
+      wasEditing ? '반복지출을 수정했어요.' : '반복지출을 등록했어요.',
+      'ok'
+    );
+  }
+
+  async function handleRecurringTemplateAction(event) {
+    const button = event.target.closest('[data-action][data-template-id]');
+    if (!button || button.disabled) return;
+    const templateIndex = state.recurringExpenseTemplates.findIndex(
+      (template) => template.id === button.dataset.templateId
+    );
+    if (templateIndex < 0) return;
+    const template = state.recurringExpenseTemplates[templateIndex];
+
+    if (button.dataset.action === 'edit-recurring-template') {
+      recurringTemplateEditId = template.id;
+      window.BudgetUI.beginRecurringTemplateEdit(elements, template, button);
+      return;
+    }
+    if (button.dataset.action !== 'delete-recurring-template') return;
+    if (!window.confirm(`${template.memo} 반복지출을 삭제할까요?`)) return;
+
+    const nextState = window.BudgetTransactions.deleteRecurringExpenseTemplate(state, template.id);
+    const saved = await persistRemoteFirst(
+      nextState,
+      () => window.BudgetCloud.saveSettings(nextState),
+      elements.recurringTemplateMessage,
+      button
+    );
+    if (!saved) return;
+
+    recurringTemplateEditId = '';
+    window.BudgetUI.clearRecurringTemplateEdit(elements, {
+      reason: 'delete',
+      deletedIndex: templateIndex
+    });
+    window.BudgetUI.setMessage(elements.recurringTemplateMessage, '반복지출을 삭제했어요.', 'ok');
+  }
+
+  function handleRecurringTemplateCancel(event) {
+    event.preventDefault();
+    recurringTemplateEditId = '';
+    window.BudgetUI.clearRecurringTemplateEdit(elements);
   }
 
   async function handleTransactionAction(event) {
@@ -671,6 +761,9 @@
     elements.budgetForm.addEventListener('submit', handleBudgetSubmit);
     elements.categoryBudgetForm.addEventListener('submit', handleCategoryBudgetSubmit);
     elements.transactionForm.addEventListener('submit', handleTransactionSubmit);
+    elements.recurringTemplateForm.addEventListener('submit', handleRecurringTemplateSubmit);
+    elements.recurringTemplateList.addEventListener('click', handleRecurringTemplateAction);
+    elements.recurringTemplateCancel.addEventListener('click', handleRecurringTemplateCancel);
     elements.typeSelect.addEventListener('change', handleTypeChange);
     elements.list.addEventListener('click', handleTransactionAction);
     elements.calendarDetailList.addEventListener('click', handleTransactionAction);
