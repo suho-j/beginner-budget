@@ -39,11 +39,11 @@ git diff --check
 - V2 SQL의 스키마·RLS·권한·seed·5인자 RPC 정적 계약
 - 가져오기·초기화·샘플·다운로드·로그아웃 전체 수명주기
 
-## 2. 최초 V2 seed 배타적 창
+## 2. V2 SQL 배타적 창 — 최초 시드와 안전 재실행
 
 ### 창을 열기 전 준비 — authoritative 아님
 
-운영 데이터는 공유 DB에서 여러 요청으로 갱신될 수 있으므로 SQL의 테이블 잠금만으로 writer의 요청 사이 중간 상태를 안전하게 복사할 수 없습니다. 최초 V2 seed에는 짧은 배타적 쓰기 창을 사용합니다.
+운영 데이터는 공유 DB에서 여러 요청으로 갱신될 수 있으므로 SQL의 테이블 잠금만으로 writer의 요청 사이 중간 상태를 안전하게 복사할 수 없습니다. 최초 V2 seed와 기존 marker의 안전 재실행 모두 짧은 배타적 쓰기 창을 사용합니다.
 
 1. 실행 ID, UTC 시작 시각, evidence 보관 위치를 준비합니다.
 2. 동결 전에 상태 파악용 백업이 필요하면 받을 수 있지만 파일명과 로그에 `PRELIMINARY-예비-권위없음`을 표시합니다. writer가 움직일 수 있는 시점의 백업은 **예비 자료이며 authoritative 백업이 아닙니다.** 이후 count·hash·충돌 감사나 복구 기준으로 사용하지 않습니다.
@@ -92,11 +92,11 @@ git diff --check
 동결을 명시적으로 확인한 **뒤에**, 같은 frozen snapshot에서 아래 순서로 수행합니다. 자격증명을 파일이나 로그에 남기지 않습니다.
 
 1. 운영 `budget_settings`, `transactions`의 **새 authoritative 전체 백업**을 만듭니다. 동결 전 예비 백업을 이름만 바꿔 재사용하지 않습니다.
-2. 같은 frozen snapshot에서 운영과 V1 두 테이블의 사용자별 count와 아래 `production/V1 invariant hash`를 기록합니다.
-3. 같은 snapshot에서 비표준 거래 ID의 결정적 매핑과 mapped→mapped 충돌 감사를 실행하고 충돌 0건을 기록합니다.
-4. `to_regclass`로 V2 객체의 설치 전 ABSENT/EXISTS 상태를 판정하고, EXISTS 객체만 count·full dump·full hash를 기록합니다.
-5. V2 transactions가 EXISTS일 때만 mapped→existing 충돌 감사를 실행해 0건을 기록합니다. ABSENT라면 relation을 조회하지 않고 `not applicable — ABSENT`로 기록합니다.
-6. 같은 frozen snapshot 증거와 감사를 끝낸 즉시, 다른 조회나 writer 재개 없이 V2 SQL을 적용합니다.
+2. 같은 frozen snapshot에서 운영과 V1 두 테이블의 사용자별 count와 아래 `production/V1 invariant hash`를 기록합니다. 이 값은 최초 시드의 source 기준이자 안전 재실행 중 운영·V1 무변경 기준입니다.
+3. `to_regclass`로 V2 객체의 설치 전 ABSENT/EXISTS 상태를 판정합니다. EXISTS relation은 count·full dump·full hash를 기록하고, metadata가 EXISTS일 때만 `production_snapshot_v2` marker를 조회해 marker ABSENT/EXISTS와 정확한 행을 기록합니다.
+4. 아래 판정표로 `A 최초 시드`, `A' 불완전 최초 설치`, `B 안전 재실행`, `중단` 중 하나를 증거에 기록합니다.
+5. A/A'일 때만 같은 snapshot에서 비표준 거래 ID의 결정적 매핑과 필요한 충돌 감사를 실행합니다. B에서는 현재 운영과 기존 V2가 이미 달라도 정상이므로 이를 재실행 합격 조건으로 쓰지 않습니다.
+6. 해당 분기의 사전 증거와 감사를 끝낸 즉시, 다른 조회나 writer 재개 없이 정확한 V2 SQL을 적용합니다.
 
 최소 사용자별 count 조회 예시는 다음과 같습니다.
 
@@ -110,7 +110,13 @@ select user_id, count(*) as transaction_count
 from public.transactions
 group by user_id
 order by user_id;
+
+select
+  (select count(*) from public.budget_settings) as settings_total,
+  (select count(*) from public.transactions) as transactions_total;
 ```
+
+사용자별 count와 전체 count를 같은 frozen snapshot 증거로 함께 보관합니다. A/A'의 새 marker source count는 이 전체 count와 비교합니다. B의 기존 marker source count에는 이 비교를 하지 않습니다.
 
 #### production/V1 invariant hash
 
@@ -161,17 +167,6 @@ order by user_id;
 
 조회와 저장은 같은 frozen window 안에서 수행합니다. 시각·테이블명·사용자별 행 수·hash를 한 묶음으로 기록하고, V2 SQL·marker fixture·기능 QA·정리가 끝난 뒤 같은 조회 결과와 문자열 그대로 비교합니다.
 
-ID 매핑은 V2 SQL과 동일한 다음 식을 사용합니다.
-
-```sql
-case
-  when id ~ '^[A-Za-z0-9._:-]+$' then id
-  else 'tx-migrated-' || md5(user_id::text || ':' || id)
-end
-```
-
-매핑 후보는 `(user_id, mapped_id)`로 그룹화해 mapped→mapped 중복을 찾고, 기존 V2 행과 `(user_id, id)`로 조인해 mapped→existing 값 충돌을 찾습니다. 설치 전 V2 transactions가 ABSENT라면 mapped→existing 조회로 그 relation을 참조하지 않고 `not applicable — ABSENT`로 기록합니다. 두 실제 실행 결과는 모두 0건이어야 합니다.
-
 #### 설치 전 V2 객체 ABSENT/EXISTS 분기
 
 V2 SQL 실행 전에 먼저 관계 존재 여부만 조회합니다.
@@ -209,41 +204,90 @@ select
 from public.preview_v2_seed_metadata as row_value;
 ```
 
-EXISTS는 곧 정상 스키마라는 뜻이 아닙니다. V2 SQL의 schema guard가 기존 객체의 정확한 계약을 검사하게 두고, drift가 있으면 실패 상태를 보존합니다. 기존 객체를 삭제·truncate·수선해 첫 설치처럼 만들지 않습니다. 정상 객체와 marker가 이미 있다면 재실행 불변성 계약을 적용합니다.
+metadata relation이 EXISTS일 때만 아래 조회를 실행합니다. 결과가 0행이면 marker `ABSENT`, 정확히 1행이면 marker `EXISTS`와 그 행 전체를 evidence에 기록합니다. metadata relation 자체가 ABSENT라면 조회하지 않고 `marker ABSENT — metadata relation ABSENT`로 기록합니다.
 
-### V2 SQL만 적용
+```sql
+select
+  seed_key,
+  completed_at,
+  source_settings_count,
+  source_transactions_count
+from public.preview_v2_seed_metadata
+where seed_key = 'production_snapshot_v2';
+```
 
-1. [V2 미리보기 SQL](supabase-preview-v2-setup.sql) 전체를 Supabase SQL Editor에서 한 단위로 실행합니다.
-2. V1 [미리보기 SQL](supabase-preview-setup.sql)이나 운영 SQL은 실행하지 않습니다.
-3. 설치 전 상태가 ABSENT였더라도 적용 뒤에는 V2 세 relation의 count·full dump·full hash를 위 조회로 항상 기록합니다.
-4. `production_snapshot_v2` marker와 기록된 source count를 authoritative 운영 snapshot과 대조합니다.
-5. 아래 `production→V2 seed semantic content comparison`이 양방향 0건인지 확인합니다.
-6. 운영과 V1의 `production/V1 invariant hash` 및 count를 다시 실행해 적용 전 문자열과 정확히 같은지 확인합니다.
-7. 하나라도 다르거나 SQL이 실패하면 일반 writer를 재개하지 말고 authoritative 백업과 실행 로그를 보존한 채 중단합니다.
+설치 전 판정은 다음 네 경우뿐입니다.
 
-#### production→V2 seed semantic content comparison
+| 판정 | 설치 전 상태 | 적용 기준 |
+|---|---|---|
+| A 최초 시드 | V2 세 relation과 marker가 모두 ABSENT | ABSENT relation을 조회하지 않고 최초 시드 감사를 수행합니다. |
+| A' 불완전 최초 설치 | V2 relation이 하나 이상 EXISTS지만 marker는 ABSENT | EXISTS relation의 사전 count·full dump·full hash를 보존하고, schema guard와 충돌 감사를 통과해야 합니다. 성공 뒤에는 A와 같은 최초 시드 결과를 요구합니다. |
+| B 안전 재실행 | V2 세 relation이 모두 EXISTS이고 marker도 EXISTS | 기존 V2 전체와 marker를 사전 기준으로 삼아 SQL 전후 byte-for-byte 불변을 요구합니다. |
+| 중단 | marker는 EXISTS지만 V2 세 relation 중 하나라도 ABSENT | 완전한 사전 V2 snapshot을 만들 수 없는 모순 상태입니다. SQL을 적용하지 않고 evidence를 보존해 별도 검토합니다. |
 
-이 비교는 invariant hash와 목적·컬럼이 다르며 같은 hash라고 부르지 않습니다. V2 SQL seed 블록의 `production_minus_preview`와 `preview_minus_production` 양방향 `EXCEPT`가 실행 기준입니다.
+EXISTS는 곧 정상 스키마라는 뜻이 아닙니다. V2 SQL의 schema guard가 기존 객체의 정확한 계약을 검사하게 두고, drift가 있으면 실패 상태를 보존합니다. 기존 객체를 삭제·truncate·수선해 첫 설치처럼 만들지 않습니다.
+
+A/A'의 ID 매핑은 V2 SQL과 동일한 다음 식을 사용합니다.
+
+```sql
+case
+  when id ~ '^[A-Za-z0-9._:-]+$' then id
+  else 'tx-migrated-' || md5(user_id::text || ':' || id)
+end
+```
+
+A/A'에서는 매핑 후보를 `(user_id, mapped_id)`로 그룹화해 mapped→mapped 중복 0건을 확인합니다. A'에서 V2 transactions가 EXISTS하면 기존 V2 행과 `(user_id, id)`로 조인해 mapped→existing 값 충돌도 0건인지 확인합니다. V2 transactions가 ABSENT라면 그 relation을 참조하지 않고 `not applicable — ABSENT`로 기록합니다. A'의 기존 settings·transactions는 V2 SQL 내부의 schema guard와 양방향 existing-conflict guard도 모두 통과해야 하며, 실패한 객체를 삭제·truncate·수선하지 않습니다.
+
+B에서는 이 seed 매핑·충돌 감사를 합격 조건으로 사용하지 않습니다. marker 확인 뒤 SQL seed 블록이 운영 data lock과 seed 충돌 검사 전에 반환하므로, 현재 운영 변경이나 기존 V2 편집·삭제·추가가 안전 재실행을 막아서는 안 됩니다.
+
+### 분기별 V2 SQL 적용과 판정
+
+A/A'/B로 판정되고 중단 사유가 없는 실행만 [V2 미리보기 SQL](supabase-preview-v2-setup.sql) 전체를 Supabase SQL Editor에서 정확히 한 단위로 적용합니다. V1 [미리보기 SQL](supabase-preview-setup.sql)이나 운영 SQL은 실행하지 않습니다. 성공 뒤에는 분기와 관계없이 V2 세 relation의 count·full dump·full hash와 marker 행을 다시 기록하고, 운영·V1의 count와 `production/V1 invariant hash`를 다시 계산해 이 실행의 동결 직후 값과 문자열 그대로 비교합니다.
+
+#### A/A' — marker ABSENT, 최초 시드 또는 불완전 최초 설치
+
+1. A'라면 기존 객체에 대한 schema guard와 충돌 감사까지 통과하는지 확인합니다. 실패하면 기존 객체를 고치거나 지우지 않습니다.
+2. SQL 성공 뒤 V2 세 relation의 count·full dump·full hash를 기록합니다.
+3. 새 `production_snapshot_v2` marker의 `source_settings_count`, `source_transactions_count`가 같은 frozen snapshot에서 기록한 authoritative 현재 운영 settings·transactions 전체 count와 각각 일치하는지 확인합니다.
+4. 아래 `production→V2 seed semantic content comparison`의 양방향 차이가 모두 0건인지 확인합니다.
+5. 운영·V1의 count와 `production/V1 invariant hash`가 이 실행의 동결 직후 값과 문자열 그대로 같아야 합니다.
+
+#### B — marker EXISTS, 안전 재실행
+
+1. 적용 전 V2 settings·transactions·metadata 각각의 count·모든 컬럼 full dump·full hash와 marker 정확한 행이 모두 기록됐는지 확인합니다.
+2. 정확한 V2 SQL을 적용하고 schema guard가 통과했는지 확인합니다.
+3. 적용 후 같은 세 relation의 count·full dump·full hash와 marker 행을 같은 형식으로 다시 기록합니다.
+4. 적용 전후 세 relation의 count·full dump·full hash와 marker 행이 문자열 그대로, byte-for-byte 동일해야 합니다.
+5. 운영·V1의 count와 `production/V1 invariant hash`도 이 실행의 동결 직후 값과 문자열 그대로 같아야 합니다.
+
+B에서는 marker의 source count를 **현재** 운영 count와 비교하지 않고, 현재 운영과 V2의 semantic equality도 요구하지 않습니다. marker source count는 최초 snapshot 당시의 역사적 값이며, 그 뒤 운영과 V2는 각각 정상적으로 변경될 수 있습니다. 이 차이는 실패나 reseed 근거가 아닙니다.
+
+어느 분기든 필수 비교가 다르거나 SQL이 실패하면 일반 writer를 재개하지 말고 authoritative 백업과 실행 로그를 보존한 채 중단합니다. A/A' 기준을 B에 적용하거나 B의 byte-for-byte 기준을 새 시드 전 ABSENT relation에 적용하지 않습니다.
+
+#### production→V2 seed semantic content comparison — A/A' 전용
+
+이 비교는 marker가 ABSENT였던 A/A'에만 적용합니다. invariant hash와 목적·컬럼이 다르며 같은 hash라고 부르지 않습니다. V2 SQL seed 블록의 `production_minus_preview`와 `preview_minus_production` 양방향 `EXCEPT`가 실행 기준입니다.
 
 - settings semantic content: `user_id`, `monthly_budget`, `category_budgets`. V2 `updated_at`은 V2 DB trigger가 소유하므로 의도적으로 제외합니다.
 - transactions semantic content: 사용자 범위로 결정적 매핑한 `id`, `user_id`, `date`, `type`, `category`, `amount`, `memo`, `source`, `created_at` 전체입니다.
 - settings와 transactions 두 방향 모두 결과가 0건이어야 합니다. 운영/V1 불변 여부는 별도의 `production/V1 invariant hash`로 판정합니다.
+- B에서는 이 비교를 실행 합격 조건으로 사용하지 않습니다.
 
-### marker 재실행 불변성
+### 최초 분기 판정 뒤 marker fixture 재실행 불변성
 
-marker는 창을 열기 전에 만든 `$qaMarker` 하나만 사용하며 seed marker를 삭제하지 않습니다. 최초 seed 성공 뒤, 기록된 QA 사용자로 다음 안전한 synthetic fixture를 수행합니다.
+A/A'의 최초 시드 검증 또는 B의 기존 marker 안전 재실행 검증을 먼저 끝내고 `production_snapshot_v2` marker가 EXISTS인 상태에서만 진행합니다. 창을 열기 전에 만든 `$qaMarker` 하나만 사용하며 seed marker를 삭제하지 않습니다. 기록된 QA 사용자로 다음 안전한 synthetic fixture를 수행합니다.
 
 1. memo가 모두 `<marker>-marker-...`로 시작하는 템플릿을 최소 2개 만들고, 생성 직후 **각 `{ userId, exact id, memo, purpose: 'marker-fixture', recordedAtUtc }`를 `templateIds` 배열에 append**합니다.
 2. 두 템플릿의 거래를 만들고, 생성 직후 **각 `{ userId, exact id, memo, purpose: 'marker-fixture', recordedAtUtc }`를 `transactionIds` 배열에 append**합니다.
 3. 첫 번째 템플릿과 거래를 marker memo로 수정하고 `events`에 edit를 기록합니다.
 4. 두 번째 거래와 템플릿을 삭제하고 `events`에 delete를 기록합니다. 삭제된 ID도 ledger 배열에서 제거하지 않습니다.
 5. 재실행 직전에 V2 settings·transactions·seed metadata의 count·full dump·full hash와 `production_snapshot_v2` marker 행을 evidence에 저장합니다.
-6. 같은 V2 SQL을 다시 실행합니다.
+6. 같은 V2 SQL을 다시 실행하고 schema guard 통과를 확인합니다.
 7. 세 relation의 count·full dump·full hash와 marker 행을 다시 저장하고 직전 값과 문자열 그대로, byte-for-byte 비교합니다.
 
 fixture용이든 이후 기능 QA용이든 새 템플릿·거래가 만들어질 때마다 memo에 같은 marker prefix를 유지하고 사용자 ID·exact ID·memo·용도·UTC 기록 시각을 해당 복수 배열에 즉시 append합니다. ID 하나만 덮어써 보관하지 않습니다. marker prefix는 누락 탐지용이고 ledger의 모든 사용자별 exact ID가 우선 정리 대상입니다.
 
-재실행은 최신 marker를 보고 seed 전체를 건너뛰어 V2의 add·edit·delete 결과를 그대로 보존해야 합니다. 운영과 V1의 count와 `updated_at` 포함 `production/V1 invariant hash`도 계속 동일해야 합니다. fixture는 이 시점에 정리하지 않아도 되지만 ledger에 남겨 기능 QA 종료 정리에서 모두 제거합니다. 명시적 reseed가 필요하면 marker를 지우지 말고 별도 검토된 절차를 만듭니다. 일반 writer는 계속 중단 상태입니다.
+fixture 재실행은 위 B와 같은 계약입니다. 최신 marker를 보고 seed 전체를 건너뛰어 V2의 add·edit·delete 결과를 그대로 보존해야 하며, marker source count와 현재 운영 count의 일치나 production→V2 semantic equality를 요구하지 않습니다. 운영과 V1의 count와 `updated_at` 포함 `production/V1 invariant hash`는 이 실행 안에서 계속 동일해야 합니다. fixture는 이 시점에 정리하지 않아도 되지만 ledger에 남겨 기능 QA 종료 정리에서 모두 제거합니다. 명시적 reseed가 필요하면 marker를 지우지 말고 별도 검토된 절차를 만듭니다. 일반 writer는 계속 중단 상태입니다.
 
 ## 3. 스키마 드리프트와 PostgreSQL 런타임
 

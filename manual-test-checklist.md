@@ -9,7 +9,7 @@
 - [ ] `git diff --check`가 통과했다.
 - [ ] 현재 검증 대상의 clean SHA를 기록했다.
 
-## 최초 V2 seed 배타적 창
+## V2 SQL 배타적 창 — 최초 시드와 안전 재실행
 
 - [ ] 실행 ID, UTC 시작 시각, 증거 보관 위치를 기록했다.
 - [ ] 동결 전 백업을 받았다면 `PRELIMINARY-예비-권위없음`으로 표시했고 authoritative 자료·충돌 감사·복구 기준으로 사용하지 않았다.
@@ -20,32 +20,54 @@
 - [ ] 같은 frozen snapshot에서 운영·V1 두 테이블의 사용자별 count와 `production/V1 invariant hash`를 기록했다.
 - [ ] settings invariant hash에 `user_id`, `monthly_budget`, `category_budgets`, UTC `updated_at`이 모두 포함된다.
 - [ ] transactions invariant hash에 `id`, `user_id`, `date`, `type`, `category`, `amount`, `memo`, `source`, UTC `created_at`이 모두 포함된다.
-- [ ] 같은 frozen snapshot에서 비표준 ID의 결정적 매핑 결과를 기록했다.
-- [ ] `(user_id, mapped_id)` 기준 mapped→mapped 충돌이 0건이다.
 - [ ] `to_regclass`로 V2 settings·transactions·seed metadata 각각을 `ABSENT` 또는 `EXISTS`로 기록했다.
 - [ ] ABSENT relation은 count·dump·hash 조회에서 참조하지 않았다.
 - [ ] EXISTS relation만 적용 전 count·모든 컬럼 full dump·full hash를 기록했고, 기존 객체를 삭제·truncate·수선하지 않았다.
-- [ ] V2 transactions가 EXISTS인 경우만 `(user_id, id)` 기준 mapped→existing 값 충돌을 조회해 0건을 기록했다. ABSENT라면 relation을 조회하지 않고 `not applicable — ABSENT`로 기록했다.
-- [ ] 위 frozen snapshot 자료 뒤 다른 writer를 열지 않고 즉시 [V2 SQL](docs/supabase-preview-v2-setup.sql)로 진행했다.
-- [ ] [V2 SQL](docs/supabase-preview-v2-setup.sql)만 한 단위로 적용했고 V1·운영 SQL은 실행하지 않았다.
-- [ ] 적용 뒤 V2 세 relation 모두의 count·모든 컬럼 full dump·full hash를 기록했다.
-- [ ] `production_snapshot_v2` marker와 source count가 authoritative 자료와 일치한다.
+- [ ] metadata relation이 EXISTS일 때만 `production_snapshot_v2`를 조회해 marker `ABSENT` 또는 `EXISTS`와 정확한 행을 기록했다. metadata relation이 ABSENT라면 조회하지 않고 `marker ABSENT — metadata relation ABSENT`로 기록했다.
+- [ ] `A 최초 시드`, `A' 불완전 최초 설치`, `B 안전 재실행`, `중단` 중 하나를 기록했다.
+- [ ] marker가 EXISTS인데 V2 세 relation 중 하나라도 ABSENT인 모순 상태라면 SQL을 적용하지 않고 중단했다.
+
+### A/A' — marker ABSENT
+
+- [ ] V2 세 relation이 모두 ABSENT면 A, 하나 이상 EXISTS지만 marker가 ABSENT면 A'로 판정했다.
+- [ ] 같은 frozen snapshot에서 비표준 ID의 결정적 매핑 결과를 기록하고 `(user_id, mapped_id)` 기준 mapped→mapped 충돌 0건을 확인했다.
+- [ ] A'에서 V2 transactions가 EXISTS인 경우만 `(user_id, id)` 기준 mapped→existing 값 충돌 0건을 확인했다. ABSENT라면 relation을 조회하지 않고 `not applicable — ABSENT`로 기록했다.
+- [ ] A'의 기존 객체에 schema drift나 existing-conflict가 있으면 삭제·truncate·수선하지 않고 V2 SQL 실패 상태를 보존했다.
+- [ ] 위 frozen snapshot 자료 뒤 다른 writer를 열지 않고 [V2 SQL](docs/supabase-preview-v2-setup.sql)만 정확히 한 단위로 적용했고 V1·운영 SQL은 실행하지 않았다.
+- [ ] 적용 뒤 V2 세 relation 모두의 count·모든 컬럼 full dump·full hash와 새 marker 행을 기록했다.
+- [ ] 새 marker의 source settings/transactions count가 같은 frozen snapshot의 authoritative 현재 운영 전체 count와 각각 일치한다.
 - [ ] `production→V2 seed semantic content comparison`에서 settings의 `user_id`, `monthly_budget`, `category_budgets` 양방향 차이가 0건이다. V2 trigger 소유 `updated_at`은 이 비교에서만 제외했다.
-- [ ] 같은 semantic comparison에서 transactions의 mapped ID와 모든 의미 필드(`user_id`, 날짜, 유형, 카테고리, 금액, 메모, source, `created_at`) 양방향 차이가 0건이다.
+- [ ] 같은 A/A' semantic comparison에서 transactions의 mapped ID와 모든 의미 필드(`user_id`, 날짜, 유형, 카테고리, 금액, 메모, source, `created_at`) 양방향 차이가 0건이다.
 - [ ] semantic content comparison을 `production/V1 invariant hash`와 같은 hash라고 부르거나 혼용하지 않았다.
-- [ ] 적용 후 운영·V1의 count와 `updated_at` 포함 invariant hash가 authoritative 값과 문자열 그대로 같다.
-- [ ] 최초 seed부터 marker fixture, 기능 QA, 정리 종료까지 일반 writer를 계속 중단했다.
+- [ ] 적용 후 운영·V1 count와 `updated_at` 포함 invariant hash가 이 실행의 동결 직후 값과 문자열 그대로 같다.
 
-## marker 재실행 fixture와 복수 ID ledger
+### B — marker EXISTS 안전 재실행
 
+- [ ] V2 세 relation과 `production_snapshot_v2` marker가 모두 EXISTS이며, 세 relation의 적용 전 count·모든 컬럼 full dump·full hash와 marker 정확한 행을 기록했다.
+- [ ] 다른 writer를 열지 않고 [V2 SQL](docs/supabase-preview-v2-setup.sql)만 정확히 한 단위로 적용해 schema guard 통과를 확인했다.
+- [ ] 적용 뒤 같은 세 relation의 count·모든 컬럼 full dump·full hash와 marker 행을 다시 기록했다.
+- [ ] 적용 전후 세 relation의 count·full dump·full hash와 marker 행이 문자열 그대로 byte-for-byte 일치한다.
+- [ ] marker source count를 현재 운영 count와 비교하지 않았고, production→V2 semantic equality를 B의 합격 조건으로 요구하지 않았다.
+- [ ] marker source count는 최초 snapshot의 역사적 값이며 이후 운영·V2가 정상적으로 달라질 수 있음을 실패나 reseed 근거로 사용하지 않았다.
+- [ ] 적용 후 운영·V1 count와 `updated_at` 포함 invariant hash가 이 실행의 동결 직후 값과 문자열 그대로 같다.
+
+### 공통 종료 조건
+
+- [ ] 선택하지 않은 분기의 조건을 현재 실행에 적용하지 않았다.
+- [ ] 최초 시드 또는 안전 재실행부터 marker fixture, 기능 QA, 정리 종료까지 일반 writer를 계속 중단했다.
+
+## 최초 분기 판정 뒤 marker 재실행 fixture와 복수 ID ledger
+
+- [ ] A/A' 최초 시드 검증 또는 B 기존 marker 안전 재실행 검증을 먼저 끝냈고 `production_snapshot_v2` marker가 EXISTS다.
 - [ ] 창 시작 때 만든 동일 `$qaMarker`를 사용했고 marker 재실행용 새 marker를 만들지 않았다.
 - [ ] marker memo를 가진 V2-only 템플릿을 2개 이상 만들고 각 user-scoped exact ID record를 생성 즉시 `templateIds` 배열에 append했다.
 - [ ] marker memo를 가진 V2-only 거래를 만들고 각 user-scoped exact ID record를 생성 즉시 `transactionIds` 배열에 append했다.
 - [ ] marker fixture에서 edit와 delete를 각각 수행하고 시각·행동·ID를 `events`에 append했다.
 - [ ] fixture 중 삭제한 ID도 ledger 배열에서 제거하지 않았다.
 - [ ] SQL 재실행 직전 V2 세 relation의 count·모든 컬럼 full dump·full hash와 seed marker 행을 기록했다.
-- [ ] 동일 V2 SQL을 재실행한 뒤 같은 자료를 기록해 문자열 그대로 byte-for-byte 일치했다.
+- [ ] 동일 V2 SQL을 재실행해 schema guard 통과를 확인한 뒤 같은 자료를 기록해 문자열 그대로 byte-for-byte 일치했다.
 - [ ] marker 재실행에서 add·edit·delete 결과가 보존되고 운영·V1 count와 `updated_at` 포함 invariant hash도 변하지 않았다.
+- [ ] fixture 재실행에도 B 계약을 적용해 marker source count와 현재 운영 count의 일치나 production→V2 semantic equality를 요구하지 않았다.
 - [ ] marker를 삭제하거나 임의 reseed하지 않았다.
 - [ ] marker fixture 데이터는 최종 정리 ledger에 남겨 두었고 일반 writer를 재개하지 않았다.
 
