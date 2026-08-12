@@ -713,7 +713,7 @@ function testRecurringTemplateNormalizationDropsInvalidDuplicatesAndCapsAt100() 
     startsOn: '2024-02-29'
   };
   const invalidTemplates = [
-    { ...first, id: 'bad id', memo: '잘못된 ID' },
+    { ...first, id: 'tx-safe-id', memo: '잘못된 ID' },
     { ...first, memo: '나중 중복' },
     { ...first, id: 'rt-blank', memo: '   ' },
     { ...first, id: 'rt-long', memo: '가'.repeat(81) },
@@ -749,7 +749,10 @@ function testRecurringTemplateNormalizationDropsInvalidDuplicatesAndCapsAt100() 
     dayOfMonth: 31,
     startsOn: '2024-02-29'
   });
-  assert.strictEqual(normalized.some((template) => template.memo === '잘못된 ID'), false);
+  assert.strictEqual(
+    normalized.some((template) => template.id === 'tx-safe-id' || template.memo === '잘못된 ID'),
+    false
+  );
   assert.strictEqual(normalized.some((template) => template.memo === '나중 중복'), false);
   assert.strictEqual(
     normalized.some((template) => [
