@@ -4539,7 +4539,150 @@ function testPreviewSupabaseSetupDefinesFullFiveArgumentCasAndDropsOverloads() {
   assert.doesNotMatch(source, /grant execute on function public\.replace_preview_budget_samples/i);
 }
 
+function assertPreviewV2LiveVerificationContract() {
+  const source = fs.readFileSync(
+    path.join(__dirname, 'supabase-preview-v2-live-verification.sql'),
+    'utf8'
+  );
+  const executable = source.replace(/--[^\r\n]*/g, '');
+
+  assert.match(source, /^\\set ON_ERROR_STOP on$/m);
+  for (const variable of ['live_phase', 'run_id', 'qa_user_a', 'qa_user_b', 'qa_marker']) {
+    assert.match(source, new RegExp(`^\\\\if :\\{\\?${variable}\\}$`, 'm'));
+  }
+  for (const phase of [
+    'auth_gate',
+    'preflight',
+    'seed_canonical',
+    'snapshot',
+    'permissions',
+    'rls_a',
+    'rls_b',
+    'cas_a',
+    'cas_b',
+    'duplicate_scope'
+  ]) {
+    assert.match(source, new RegExp(`'${phase}'`));
+  }
+
+  assert.doesNotMatch(
+    source,
+    /\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b/i,
+    'live verification must receive QA UUIDs at runtime'
+  );
+  assert.doesNotMatch(source, /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i, 'QA emails must not be stored');
+  assert.match(source, /set timezone to 'UTC'/i);
+  assert.match(source, /set statement_timeout = '[0-9]+s'/i);
+  assert.match(source, /set lock_timeout = '[0-9]+s'/i);
+  assert.match(source, /set idle_in_transaction_session_timeout = '[0-9]+s'/i);
+  assert.match(source, /set_config\(\s*'application_name'[\s\S]*preview-v2-live/i);
+  assert.match(source, /preview_v2\.live\.run_id/i);
+  const authGate = source.match(/\\if :phase_auth_gate([\s\S]*?)\\endif/i);
+  assert.ok(authGate, 'pre-setup auth_gate phase must exist');
+  assert.match(authGate[1], /from auth\.users/i);
+  assert.match(authGate[1], /count\(\*\) filter \(where id = current_setting\('preview_v2\.live\.qa_user_a'\)::uuid\)/i);
+  assert.match(authGate[1], /count\(\*\) filter \(where id = current_setting\('preview_v2\.live\.qa_user_b'\)::uuid\)/i);
+  assert.doesNotMatch(authGate[1], /public\.(?:preview_v2_|budget_settings|transactions|preview_)/i, 'auth_gate must be safe before V2 setup');
+  assert.match(source, /from auth\.users[\s\S]*current_setting\('preview_v2\.live\.qa_user_a'\)[\s\S]*current_setting\('preview_v2\.live\.qa_user_b'\)/i);
+  assert.match(source, /to_regclass\('public\.preview_v2_budget_settings'\)/i);
+  assert.match(source, /to_regclass\('public\.preview_v2_transactions'\)/i);
+  assert.match(source, /to_regclass\('public\.preview_v2_seed_metadata'\)/i);
+  assert.match(source, /seed_key\s*=\s*'production_snapshot_v2'/i);
+
+  assert.match(source, /production_minus_preview[\s\S]*preview_minus_production/i);
+  assert.ok((source.match(/\bexcept\b/gi) || []).length >= 4, 'fresh seed comparison must be bidirectional');
+  for (const table of [
+    'budget_settings',
+    'transactions',
+    'preview_budget_settings',
+    'preview_transactions',
+    'preview_v2_budget_settings',
+    'preview_v2_transactions',
+    'preview_v2_seed_metadata'
+  ]) {
+    assert.match(source, new RegExp(`public\\.${table}\\b`, 'i'));
+  }
+  assert.match(source, /full_hash/i);
+  assert.doesNotMatch(source, /full_dump/i, 'live evidence must not contain plaintext financial row dumps');
+  assert.doesNotMatch(source, /jsonb_agg\(to_jsonb\(row_value\)/i, 'V2 snapshots must emit hashes and counts only');
+  assert.match(source, /invariant_hash/i);
+  assert.match(source, /'production\.total'\s+as evidence_type/i);
+  assert.match(source, /'preview_v1\.total'\s+as evidence_type/i);
+
+  assert.match(
+    source,
+    /select set_config\('request\.jwt\.claim\.sub',\s*current_setting\('preview_v2\.live\.session_user'\),\s*true\);\s*set local role authenticated;/i
+  );
+  assert.match(source, /RLS cross-user SELECT leaked/i);
+  assert.match(source, /RLS cross-user UPDATE changed a row/i);
+  assert.match(source, /RLS hid the authenticated user transaction/i);
+  assert.match(source, /RLS own UPDATE did not change exactly one row/i);
+  assert.match(source, /RLS own DELETE did not remove exactly one row/i);
+  assert.match(source, /exception when sqlstate '42501'/i);
+  assert.match(source, /has_function_privilege\(\s*'public'[\s\S]*replace_preview_v2_budget_state/i);
+  assert.match(source, /has_function_privilege\(\s*'anon'[\s\S]*replace_preview_v2_budget_state/i);
+  assert.ok((source.match(/exception when sqlstate '40001'/gi) || []).length >= 2, 'both stale settings and transaction snapshots must assert 40001');
+  assert.match(source, /exception when sqlstate '23505'/i);
+  assert.match(source, /different QA users must each retain the deterministic ID/i);
+
+  for (const phase of ['permissions', 'rls', 'cas', 'duplicate_scope']) {
+    const phaseBody = source.match(new RegExp(
+      `-- rollback-only ${phase} phase begin([\\s\\S]*?)-- rollback-only ${phase} phase end`,
+      'i'
+    ));
+    assert.ok(phaseBody, `${phase} mutation phase must exist`);
+    const firstBegin = phaseBody[1].search(/^begin;$/mi);
+    const lastRollback = phaseBody[1].search(/^rollback;$/mi);
+    const firstMutation = phaseBody[1].search(/^\s*(?:insert\s+into|update|delete\s+from)\s+public\.preview_v2_/mi);
+    assert.ok(firstBegin >= 0 && lastRollback > firstBegin, `${phase} must have a BEGIN/ROLLBACK boundary`);
+    if (firstMutation >= 0) {
+      assert.ok(firstBegin < firstMutation && firstMutation < lastRollback, `${phase} V2 mutations must be inside rollback`);
+    }
+    assert.doesNotMatch(phaseBody[1].slice(lastRollback + 'rollback;'.length), /^\s*(?:insert\s+into|update|delete\s+from)\s+public\.preview_v2_/mi);
+  }
+  assert.doesNotMatch(executable, /^\s*commit\s*;/gmi, 'live fixtures must never commit');
+  assert.doesNotMatch(source, /^\\(?:i|ir)\b/gmi, 'live verifier must not execute the setup SQL itself');
+  assert.doesNotMatch(source, /preview_v2_runtime_barrier/i, 'seed/RPC overlap belongs to the isolated PostgreSQL 17 harness');
+  assert.match(source, /Task 13[\s\S]*PostgreSQL 17/i);
+  assert.match(source, /rollback-only phases do not prove a cross-session committed[\s\S]*PENDING/i);
+  assert.match(source, /append-only QA ledger[\s\S]*exact[\s\S]*cleanup/i);
+
+  assert.doesNotMatch(
+    executable,
+    /\b(?:insert\s+into|update|delete\s+from|truncate(?:\s+table)?)\s+public\.(?:budget_settings|transactions|preview_budget_settings|preview_transactions)\b/i,
+    'production and V1 are read-only evidence sources'
+  );
+  assert.doesNotMatch(
+    executable,
+    /\b(?:truncate(?:\s+table)?|drop\s+table|alter\s+table)\s+public\.(?:preview_v2_budget_settings|preview_v2_transactions|preview_v2_seed_metadata)\b/i,
+    'live verifier must not alter or clear V2 relations'
+  );
+  assert.doesNotMatch(
+    executable,
+    /\bdelete\s+from\s+public\.(?:preview_v2_budget_settings|preview_v2_seed_metadata)\b/i,
+    'live verifier must not delete settings or seed markers'
+  );
+  const outsideRollbackBlocks = ['permissions', 'rls', 'cas', 'duplicate_scope'].reduce(
+    (remaining, phase) => remaining.replace(new RegExp(
+      `-- rollback-only ${phase} phase begin[\\s\\S]*?-- rollback-only ${phase} phase end`,
+      'i'
+    ), ''),
+    source
+  );
+  assert.doesNotMatch(
+    outsideRollbackBlocks,
+    /\bdelete\s+from\s+public\.preview_v2_transactions\b/i,
+    'transaction deletes are allowed only inside explicit rollback-only phases'
+  );
+  assert.doesNotMatch(
+    executable,
+    /\b(?:insert\s+into|update|delete\s+from|truncate(?:\s+table)?)\s+public\.preview_v2_seed_metadata\b/i,
+    'the production_snapshot_v2 marker is immutable during live verification'
+  );
+}
+
 function testPreviewV2SupabaseSetupCreatesIsolatedRlsObjects() {
+  assertPreviewV2LiveVerificationContract();
   const source = fs.readFileSync(path.join(__dirname, '..', 'docs', 'supabase-preview-v2-setup.sql'), 'utf8');
   const executable = source.replace(/--[^\r\n]*/g, '');
 
