@@ -7,6 +7,9 @@ param(
   [Parameter(ParameterSetName = 'Build')]
   [ValidateSet('None', 'AfterV2Swap', 'AfterIndexWrite', 'AfterReadmeWrite')]
   [string]$FailureInjection = 'None',
+  [Parameter(ParameterSetName = 'Build', DontShow)]
+  [ValidateSet('None', 'DeployReadmeBeforePublish', 'CleanupFailureAfterSuccess')]
+  [string]$SelfTestScenario = 'None',
   [Parameter(Mandatory, ParameterSetName = 'SelfTest')][switch]$SelfTest
 )
 
@@ -197,16 +200,110 @@ function Assert-V2Artifact {
   if ($failed) { throw 'V2 version.json does not match the fixed metadata contract.' }
 }
 
-function Assert-SourceMatchesArtifact {
+function Assert-CommitMatchesArtifact {
   param(
     [Parameter(Mandatory)][string]$Source,
+    [Parameter(Mandatory)][string]$Commit,
     [Parameter(Mandatory)][string]$ArtifactRoot
   )
 
   foreach ($relative in $artifactFiles) {
-    $sourceHash = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $Source $relative)).Hash
-    $artifactHash = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $ArtifactRoot $relative)).Hash
-    if ($sourceHash -ne $artifactHash) { throw "V2 artifact mismatch: $relative" }
+    $commitObject = "${Commit}:$($relative.Replace('\', '/'))"
+    $expectedBlob = ((Invoke-RepositoryGit -Root $Source -Arguments @('rev-parse', $commitObject)) -join '').Trim()
+    $actualBlob = ((Invoke-RepositoryGit -Root $Source -Arguments @(
+      'hash-object', '--no-filters', '--', (Join-Path $ArtifactRoot $relative)
+    )) -join '').Trim()
+    if ($expectedBlob -notmatch '^[0-9a-f]{40,64}$' -or $actualBlob -ne $expectedBlob) {
+      throw "V2 artifact does not match SourceCommit blob: $relative"
+    }
+  }
+}
+
+function Export-CommitArtifact {
+  param(
+    [Parameter(Mandatory)][string]$Source,
+    [Parameter(Mandatory)][string]$Commit,
+    [Parameter(Mandatory)][string]$ArchivePath,
+    [Parameter(Mandatory)][string]$Destination,
+    [Parameter(Mandatory)][string]$TarExecutable
+  )
+
+  $safeRoot = $Source.Replace('\', '/')
+  $archiveOutput = @(& git -c "safe.directory=$safeRoot" -c 'core.excludesFile=' -C $Source `
+    archive '--format=tar' "--output=$ArchivePath" $Commit '--' @artifactFiles 2>&1)
+  if ($LASTEXITCODE -ne 0) {
+    throw "git archive failed for SourceCommit $Commit`: $($archiveOutput -join [Environment]::NewLine)"
+  }
+
+  $tarOutput = @(& $TarExecutable -xf $ArchivePath -C $Destination 2>&1)
+  if ($LASTEXITCODE -ne 0) {
+    throw "tar extraction failed: $($tarOutput -join [Environment]::NewLine)"
+  }
+
+  $expectedFiles = @($artifactFiles | ForEach-Object { $_.Replace('\', '/') } | Sort-Object)
+  $actualFiles = Get-RelativeFiles -Root $Destination
+  if (Compare-Object $expectedFiles $actualFiles) {
+    throw 'SourceCommit archive did not contain the exact seven-file artifact contract.'
+  }
+  Assert-CommitMatchesArtifact -Source $Source -Commit $Commit -ArtifactRoot $Destination
+}
+
+function Assert-DeployStableBeforePublish {
+  param(
+    [Parameter(Mandatory)][string]$Root,
+    [Parameter(Mandatory)][string]$ExpectedHead,
+    [Parameter(Mandatory)][string]$V1Root,
+    [Parameter(Mandatory)][string[]]$ExpectedV1,
+    [Parameter(Mandatory)][string[]]$ExpectedMutable
+  )
+
+  $exactRoot = Get-ExactRepositoryRoot -Root $Root
+  if (-not [string]::Equals($exactRoot, $Root, [System.StringComparison]::OrdinalIgnoreCase)) {
+    throw 'Deploy repository toplevel changed before publish.'
+  }
+  Assert-RepositoryPreflight -Root $Root -ExpectedBranch 'main' `
+    -ExpectedRepository $expectedDeployRepository -Label 'Deploy'
+  $head = ((Invoke-RepositoryGit -Root $Root -Arguments @('rev-parse', 'HEAD')) -join '').Trim().ToLowerInvariant()
+  if ($head -ne $ExpectedHead) { throw 'Deploy repository HEAD changed before publish.' }
+  if (Compare-Object $ExpectedV1 (Get-TreeHashes -TreeRoot $V1Root -RelativeToRoot $Root)) {
+    throw 'V1 artifact changed before publish.'
+  }
+  if (Compare-Object $ExpectedMutable (Get-MutableDeploySnapshot -Root $Root)) {
+    throw 'Deploy index, README, or V2 artifact changed before publish.'
+  }
+}
+
+function Assert-DeployOnlyExpectedChanges {
+  param([Parameter(Mandatory)][string]$Root)
+
+  $changed = @(
+    (Invoke-RepositoryGit -Root $Root -Arguments @('diff', '--name-only', 'HEAD', '--'))
+    (Invoke-RepositoryGit -Root $Root -Arguments @('ls-files', '--others', '--exclude-standard'))
+  ) | ForEach-Object { ([string]$_).Trim().Replace('\', '/') } | Where-Object { $_ } | Sort-Object -Unique
+
+  $unexpected = @($changed | Where-Object { $_ -ne 'index.html' -and $_ -ne 'README.md' -and -not $_.StartsWith('v2/') })
+  if ($unexpected.Count -gt 0) {
+    throw "Artifact publish changed paths outside index.html, README.md, and v2/: $($unexpected -join ', ')"
+  }
+}
+
+function Assert-SelfTestScenarioAllowed {
+  param(
+    [Parameter(Mandatory)][string]$Scenario,
+    [Parameter(Mandatory)][string]$Source,
+    [Parameter(Mandatory)][string]$Deploy
+  )
+
+  if ($Scenario -eq 'None') { return }
+  if ($env:BEGINNER_BUDGET_ARTIFACT_SELF_TEST -ne '1') {
+    throw 'Internal artifact self-test scenarios are disabled.'
+  }
+  $selfTestPrefix = [System.IO.Path]::GetFullPath(
+    (Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::LocalApplicationData)) 'Temp')
+  ).TrimEnd('\', '/') + [System.IO.Path]::DirectorySeparatorChar + 'beginner-budget-v2-artifact-selftest-'
+  if (-not $Source.StartsWith($selfTestPrefix, [System.StringComparison]::OrdinalIgnoreCase) `
+    -or -not $Deploy.StartsWith($selfTestPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+    throw 'Internal artifact self-test scenarios require isolated temporary repositories.'
   }
 }
 
@@ -319,8 +416,10 @@ function Invoke-ArtifactSelfTest {
       $path = Join-Path $Deploy $relative
       $snapshot.Add("$relative $((Get-FileHash -Algorithm SHA256 -LiteralPath $path).Hash)")
     }
-    Get-ChildItem -LiteralPath (Join-Path $Deploy 'v2') -Recurse -File | Sort-Object FullName | ForEach-Object {
-      $snapshot.Add("$($_.FullName.Substring($Deploy.Length).Replace('\', '/')) $((Get-FileHash -Algorithm SHA256 -LiteralPath $_.FullName).Hash)")
+    foreach ($tree in @('v1', 'v2')) {
+      Get-ChildItem -LiteralPath (Join-Path $Deploy $tree) -Recurse -File | Sort-Object FullName | ForEach-Object {
+        $snapshot.Add("$($_.FullName.Substring($Deploy.Length).Replace('\', '/')) $((Get-FileHash -Algorithm SHA256 -LiteralPath $_.FullName).Hash)")
+      }
     }
     return @($snapshot)
   }
@@ -333,11 +432,14 @@ function Invoke-ArtifactSelfTest {
       '-SourceCommit', $Fixture.Commit, '-BuiltAtUtc', $selfTestBuiltAt
     ) + $ExtraArguments
     $oldPreference = $ErrorActionPreference
+    $oldSelfTestEnvironment = $env:BEGINNER_BUDGET_ARTIFACT_SELF_TEST
     $ErrorActionPreference = 'Continue'
     try {
+      $env:BEGINNER_BUDGET_ARTIFACT_SELF_TEST = '1'
       $output = @(& powershell @arguments 2>&1)
       $exitCode = $LASTEXITCODE
     } finally {
+      $env:BEGINNER_BUDGET_ARTIFACT_SELF_TEST = $oldSelfTestEnvironment
       $ErrorActionPreference = $oldPreference
     }
     return [pscustomobject]@{ ExitCode = $exitCode; Output = ($output -join "`n") }
@@ -392,7 +494,52 @@ function Invoke-ArtifactSelfTest {
     $rollback = New-SelfTestFixture 'rollback'
     Assert-SelfTestFailurePreservesDeploy $rollback @('-FailureInjection', 'AfterIndexWrite')
 
-    Write-Output 'V2 artifact self-tests passed: happy, dirty, subdir, branch, stale, rollback'
+    $hiddenWorkingTree = New-SelfTestFixture 'assume-unchanged'
+    $hiddenWorkingPath = Join-Path $hiddenWorkingTree.Source 'js/app.js'
+    Write-SelfTestFile $hiddenWorkingPath 'working tree bytes that are not committed'
+    Invoke-SelfTestGit $hiddenWorkingTree.Source @('update-index', '--assume-unchanged', 'js/app.js')
+    $hiddenStatus = ((& git -c core.excludesFile= -C $hiddenWorkingTree.Source status --porcelain) -join "`n")
+    if ($hiddenStatus) { throw "Assume-unchanged self-test source was not status-clean: $hiddenStatus" }
+    $hiddenResult = Invoke-SelfTestBuild $hiddenWorkingTree
+    if ($hiddenResult.ExitCode -ne 0) { throw "Assume-unchanged self-test failed: $($hiddenResult.Output)" }
+    $expectedCommitBlob = ((& git -c core.excludesFile= -C $hiddenWorkingTree.Source rev-parse `
+      "$($hiddenWorkingTree.Commit):js/app.js") -join '').Trim()
+    $deployedCommitBlob = ((& git -c core.excludesFile= -C $hiddenWorkingTree.Source hash-object --no-filters -- `
+      (Join-Path $hiddenWorkingTree.Deploy 'v2/js/app.js')) -join '').Trim()
+    $workingTreeBlob = ((& git -c core.excludesFile= -C $hiddenWorkingTree.Source hash-object --no-filters -- `
+      $hiddenWorkingPath) -join '').Trim()
+    if ($deployedCommitBlob -ne $expectedCommitBlob -or $workingTreeBlob -eq $expectedCommitBlob) {
+      throw 'Artifact did not use exact SourceCommit bytes for an assume-unchanged working file.'
+    }
+
+    $concurrent = New-SelfTestFixture 'prepublish-concurrent'
+    $concurrentBefore = Get-SelfTestSnapshot $concurrent.Deploy
+    $concurrentResult = Invoke-SelfTestBuild $concurrent @('-SelfTestScenario', 'DeployReadmeBeforePublish')
+    if ($concurrentResult.ExitCode -eq 0) { throw 'Prepublish concurrent mutation self-test unexpectedly succeeded.' }
+    if ((Get-Content -Raw -LiteralPath (Join-Path $concurrent.Deploy 'README.md')) -ne 'concurrent deploy mutation') {
+      throw 'Prepublish failure did not preserve the concurrent README bytes.'
+    }
+    $concurrentAfter = Get-SelfTestSnapshot $concurrent.Deploy
+    if (Compare-Object @($concurrentBefore | Where-Object { -not $_.StartsWith('README.md ') }) `
+        @($concurrentAfter | Where-Object { -not $_.StartsWith('README.md ') })) {
+      throw 'Prepublish concurrent mutation changed deploy files outside README.md.'
+    }
+    $concurrentStatus = ((& git -c core.excludesFile= -C $concurrent.Deploy status --porcelain) -join "`n")
+    if ($concurrentStatus.Trim() -ne 'M README.md') {
+      throw "Prepublish concurrent mutation status was not preserved exactly: $concurrentStatus"
+    }
+
+    $cleanupFailure = New-SelfTestFixture 'cleanup-failure'
+    $cleanupResult = Invoke-SelfTestBuild $cleanupFailure @('-SelfTestScenario', 'CleanupFailureAfterSuccess')
+    if ($cleanupResult.ExitCode -ne 0 `
+      -or -not $cleanupResult.Output.Contains('V2 artifact cleanup warning')) {
+      throw "Cleanup warning self-test failed: $($cleanupResult.Output)"
+    }
+    if (-not (Test-Path -LiteralPath (Join-Path $cleanupFailure.Deploy 'v2/version.json'))) {
+      throw 'Cleanup warning self-test did not retain the successful artifact.'
+    }
+
+    Write-Output 'V2 artifact self-tests passed: happy, dirty, subdir, branch, stale, rollback, commit-bytes, concurrent, cleanup-warning'
   } finally {
     if (Test-Path -LiteralPath $selfTestRoot) {
       $resolvedSelfTestRoot = (Resolve-Path -LiteralPath $selfTestRoot).Path
@@ -440,6 +587,7 @@ if ([string]::Equals($sourceRoot, $deployRoot, [System.StringComparison]::Ordina
   -or (Test-PathContains -Parent $deployRoot -Candidate $sourceRoot)) {
   throw 'SourceRoot and DeployRoot must be distinct, non-nested git repositories.'
 }
+Assert-SelfTestScenarioAllowed -Scenario $SelfTestScenario -Source $sourceRoot -Deploy $deployRoot
 
 Assert-RepositoryPreflight -Root $sourceRoot -ExpectedBranch $expectedSourceBranch `
   -ExpectedRepository $expectedSourceRepository -Label 'Source'
@@ -456,12 +604,10 @@ if (-not (Test-Path -LiteralPath $v1Root -PathType Container)) {
   throw 'Deploy repository must already contain the V1 artifact.'
 }
 foreach ($relative in $artifactFiles) {
-  $sourceFile = Join-Path $sourceRoot $relative
-  if (-not (Test-Path -LiteralPath $sourceFile -PathType Leaf)) {
-    throw "Required source artifact is missing: $relative"
-  }
-  $null = Invoke-RepositoryGit -Root $sourceRoot -Arguments @('ls-files', '--error-unmatch', '--', $relative.Replace('\', '/'))
+  $commitObject = "${sourceCommitNormalized}:$($relative.Replace('\', '/'))"
+  $null = Invoke-RepositoryGit -Root $sourceRoot -Arguments @('cat-file', '-e', $commitObject)
 }
+$tarExecutable = (Get-Command tar -CommandType Application -ErrorAction Stop).Source
 
 $v1Before = Get-TreeHashes -TreeRoot $v1Root -RelativeToRoot $deployRoot
 $mutableBefore = Get-MutableDeploySnapshot -Root $deployRoot
@@ -473,17 +619,16 @@ $runRoot = Join-Path $tempRoot ('beginner-budget-preview-v2-artifact-' + [guid]:
 $payloadRoot = Join-Path $runRoot 'payload'
 $stagedV2Root = Join-Path $payloadRoot 'v2'
 $backupRoot = Join-Path $runRoot 'backup'
+$archivePath = Join-Path $runRoot 'source-commit.tar'
 $deployMutationStarted = $false
 $hadIndex = Test-Path -LiteralPath (Join-Path $deployRoot 'index.html') -PathType Leaf
 $hadReadme = Test-Path -LiteralPath (Join-Path $deployRoot 'README.md') -PathType Leaf
 $hadV2 = Test-Path -LiteralPath (Join-Path $deployRoot 'v2') -PathType Container
 
 try {
-  New-Item -ItemType Directory -Path (Join-Path $stagedV2Root 'css'), (Join-Path $stagedV2Root 'js'), $backupRoot | Out-Null
-  foreach ($relative in $artifactFiles) {
-    $target = Join-Path $stagedV2Root $relative
-    Copy-Item -LiteralPath (Join-Path $sourceRoot $relative) -Destination $target
-  }
+  New-Item -ItemType Directory -Path $stagedV2Root, $backupRoot | Out-Null
+  Export-CommitArtifact -Source $sourceRoot -Commit $sourceCommitNormalized `
+    -ArchivePath $archivePath -Destination $stagedV2Root -TarExecutable $tarExecutable
 
   $version = [ordered]@{
     version = 'v2'
@@ -509,14 +654,21 @@ try {
     -Content ($readmeTemplate.Replace('__SOURCE_COMMIT__', $sourceCommitNormalized).TrimStart() + "`n")
 
   Assert-V2Artifact -ArtifactRoot $stagedV2Root -ExpectedCommit $sourceCommitNormalized -ExpectedBuiltAt $BuiltAtUtc
-  Assert-SourceMatchesArtifact -Source $sourceRoot -ArtifactRoot $stagedV2Root
+  Assert-CommitMatchesArtifact -Source $sourceRoot -Commit $sourceCommitNormalized -ArtifactRoot $stagedV2Root
   $expectedPayloadFiles = @('README.md', 'index.html') + @(
     $artifactFiles + 'version.json' | ForEach-Object { 'v2/' + $_.Replace('\', '/') }
   ) | Sort-Object
   if (Compare-Object $expectedPayloadFiles (Get-RelativeFiles -Root $payloadRoot)) {
     throw 'Staged deploy payload contains unexpected paths.'
   }
+  $expectedMutableAfter = Get-MutableDeploySnapshot -Root $payloadRoot
   Assert-SourceStable -Root $sourceRoot -ExpectedCommit $sourceCommitNormalized
+
+  if ($SelfTestScenario -eq 'DeployReadmeBeforePublish') {
+    Write-Utf8NoBom -Path (Join-Path $deployRoot 'README.md') -Content 'concurrent deploy mutation'
+  }
+  Assert-DeployStableBeforePublish -Root $deployRoot -ExpectedHead $deployHeadBefore `
+    -V1Root $v1Root -ExpectedV1 $v1Before -ExpectedMutable $mutableBefore
 
   if ($hadIndex) { Copy-Item -LiteralPath (Join-Path $deployRoot 'index.html') -Destination (Join-Path $backupRoot 'index.html') }
   if ($hadReadme) { Copy-Item -LiteralPath (Join-Path $deployRoot 'README.md') -Destination (Join-Path $backupRoot 'README.md') }
@@ -535,7 +687,11 @@ try {
   if ($FailureInjection -eq 'AfterReadmeWrite') { throw 'Injected artifact failure after README write.' }
 
   Assert-V2Artifact -ArtifactRoot $deployV2 -ExpectedCommit $sourceCommitNormalized -ExpectedBuiltAt $BuiltAtUtc
-  Assert-SourceMatchesArtifact -Source $sourceRoot -ArtifactRoot $deployV2
+  Assert-CommitMatchesArtifact -Source $sourceRoot -Commit $sourceCommitNormalized -ArtifactRoot $deployV2
+  if (Compare-Object $expectedMutableAfter (Get-MutableDeploySnapshot -Root $deployRoot)) {
+    throw 'Published index, README, or V2 bytes do not match the validated staged payload.'
+  }
+  Assert-DeployOnlyExpectedChanges -Root $deployRoot
   if (Compare-Object $v1Before (Get-TreeHashes -TreeRoot $v1Root -RelativeToRoot $deployRoot)) {
     throw 'V1 artifact changed.'
   }
@@ -558,11 +714,18 @@ try {
   }
   throw $operationError
 } finally {
-  if (Test-Path -LiteralPath $runRoot) {
-    $resolvedRunRoot = (Resolve-Path -LiteralPath $runRoot).Path
-    $safePrefix = $tempRoot.TrimEnd('\', '/') + [System.IO.Path]::DirectorySeparatorChar + 'beginner-budget-preview-v2-artifact-'
-    if ($resolvedRunRoot.StartsWith($safePrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
-      Remove-Item -LiteralPath $resolvedRunRoot -Recurse -Force
+  try {
+    if (Test-Path -LiteralPath $runRoot) {
+      $resolvedRunRoot = (Resolve-Path -LiteralPath $runRoot).Path
+      $safePrefix = $tempRoot.TrimEnd('\', '/') + [System.IO.Path]::DirectorySeparatorChar + 'beginner-budget-preview-v2-artifact-'
+      if ($resolvedRunRoot.StartsWith($safePrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+        Remove-Item -LiteralPath $resolvedRunRoot -Recurse -Force
+        if ($SelfTestScenario -eq 'CleanupFailureAfterSuccess') {
+          throw 'Injected cleanup failure after safe removal.'
+        }
+      }
     }
+  } catch {
+    Write-Warning "V2 artifact cleanup warning: $_"
   }
 }
