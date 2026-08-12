@@ -12,20 +12,42 @@
 ## 최초 V2 seed 배타적 창
 
 - [ ] 실행 ID, UTC 시작 시각, 증거 보관 위치를 기록했다.
-- [ ] 운영 `budget_settings`, `transactions` 전체를 읽기 전용 백업했다.
-- [ ] 운영·V1·V2·로컬의 모든 로그인 탭과 백그라운드/API writer를 멈췄다.
-- [ ] 창 안에서 운영 두 테이블의 사용자별 count와 전체 컬럼 canonical hash를 authoritative 자료로 기록했다.
-- [ ] 비표준 ID의 결정적 매핑 결과를 기록했다.
+- [ ] 동결 전 백업을 받았다면 `PRELIMINARY-예비-권위없음`으로 표시했고 authoritative 자료·충돌 감사·복구 기준으로 사용하지 않았다.
+- [ ] `$qaMarker = 'QA-V2-RECURRING-' + (Get-Date -Format 'yyyyMMdd-HHmmss')`를 만들고 `templateIds = @()`, `transactionIds = @()`, `events = @()`인 실행 전체 append-only evidence ledger를 증거 위치에 저장했다. 각 ID 배열 항목은 `{ userId, id, memo, purpose, recordedAtUtc }` record이며 append 직후 파일도 갱신한다.
+- [ ] 운영·V1·V2·로컬의 모든 인증된 탭과 백그라운드/API writer를 멈췄다.
+- [ ] 탭·프로세스·API writer 동결을 명시적으로 확인하고 확인 시각을 기록했다.
+- [ ] **동결 확인 뒤** 운영 두 테이블의 새 authoritative 전체 백업을 만들었다. 동결 전 예비 백업을 재사용하지 않았다.
+- [ ] 같은 frozen snapshot에서 운영·V1 두 테이블의 사용자별 count와 `production/V1 invariant hash`를 기록했다.
+- [ ] settings invariant hash에 `user_id`, `monthly_budget`, `category_budgets`, UTC `updated_at`이 모두 포함된다.
+- [ ] transactions invariant hash에 `id`, `user_id`, `date`, `type`, `category`, `amount`, `memo`, `source`, UTC `created_at`이 모두 포함된다.
+- [ ] 같은 frozen snapshot에서 비표준 ID의 결정적 매핑 결과를 기록했다.
 - [ ] `(user_id, mapped_id)` 기준 mapped→mapped 충돌이 0건이다.
-- [ ] `(user_id, id)` 기준 mapped→existing 값 충돌이 0건이다.
-- [ ] 적용 전 운영·V1·V2 두 테이블의 count와 canonical hash를 기록했다.
+- [ ] `to_regclass`로 V2 settings·transactions·seed metadata 각각을 `ABSENT` 또는 `EXISTS`로 기록했다.
+- [ ] ABSENT relation은 count·dump·hash 조회에서 참조하지 않았다.
+- [ ] EXISTS relation만 적용 전 count·모든 컬럼 full dump·full hash를 기록했고, 기존 객체를 삭제·truncate·수선하지 않았다.
+- [ ] V2 transactions가 EXISTS인 경우만 `(user_id, id)` 기준 mapped→existing 값 충돌을 조회해 0건을 기록했다. ABSENT라면 relation을 조회하지 않고 `not applicable — ABSENT`로 기록했다.
+- [ ] 위 frozen snapshot 자료 뒤 다른 writer를 열지 않고 즉시 [V2 SQL](docs/supabase-preview-v2-setup.sql)로 진행했다.
 - [ ] [V2 SQL](docs/supabase-preview-v2-setup.sql)만 한 단위로 적용했고 V1·운영 SQL은 실행하지 않았다.
+- [ ] 적용 뒤 V2 세 relation 모두의 count·모든 컬럼 full dump·full hash를 기록했다.
 - [ ] `production_snapshot_v2` marker와 source count가 authoritative 자료와 일치한다.
-- [ ] 운영→V2 settings·transactions canonical 양방향 차이가 모두 0건이다.
-- [ ] 적용 후 운영과 V1 두 테이블의 count·canonical hash가 적용 전과 같다.
-- [ ] marker 뒤 V2 테스트 변경을 만든 후 SQL을 재실행해 V2 행·값과 marker가 byte-for-byte 그대로다.
+- [ ] `production→V2 seed semantic content comparison`에서 settings의 `user_id`, `monthly_budget`, `category_budgets` 양방향 차이가 0건이다. V2 trigger 소유 `updated_at`은 이 비교에서만 제외했다.
+- [ ] 같은 semantic comparison에서 transactions의 mapped ID와 모든 의미 필드(`user_id`, 날짜, 유형, 카테고리, 금액, 메모, source, `created_at`) 양방향 차이가 0건이다.
+- [ ] semantic content comparison을 `production/V1 invariant hash`와 같은 hash라고 부르거나 혼용하지 않았다.
+- [ ] 적용 후 운영·V1의 count와 `updated_at` 포함 invariant hash가 authoritative 값과 문자열 그대로 같다.
+- [ ] 최초 seed부터 marker fixture, 기능 QA, 정리 종료까지 일반 writer를 계속 중단했다.
+
+## marker 재실행 fixture와 복수 ID ledger
+
+- [ ] 창 시작 때 만든 동일 `$qaMarker`를 사용했고 marker 재실행용 새 marker를 만들지 않았다.
+- [ ] marker memo를 가진 V2-only 템플릿을 2개 이상 만들고 각 user-scoped exact ID record를 생성 즉시 `templateIds` 배열에 append했다.
+- [ ] marker memo를 가진 V2-only 거래를 만들고 각 user-scoped exact ID record를 생성 즉시 `transactionIds` 배열에 append했다.
+- [ ] marker fixture에서 edit와 delete를 각각 수행하고 시각·행동·ID를 `events`에 append했다.
+- [ ] fixture 중 삭제한 ID도 ledger 배열에서 제거하지 않았다.
+- [ ] SQL 재실행 직전 V2 세 relation의 count·모든 컬럼 full dump·full hash와 seed marker 행을 기록했다.
+- [ ] 동일 V2 SQL을 재실행한 뒤 같은 자료를 기록해 문자열 그대로 byte-for-byte 일치했다.
+- [ ] marker 재실행에서 add·edit·delete 결과가 보존되고 운영·V1 count와 `updated_at` 포함 invariant hash도 변하지 않았다.
 - [ ] marker를 삭제하거나 임의 reseed하지 않았다.
-- [ ] 모든 비교가 끝난 뒤에만 writer를 재개했다.
+- [ ] marker fixture 데이터는 최종 정리 ledger에 남겨 두었고 일반 writer를 재개하지 않았다.
 
 ## 스키마·PostgreSQL 런타임 — PENDING
 
@@ -45,28 +67,30 @@
 - [ ] A/B가 같은 결정적 거래 ID를 각각 저장할 수 있다.
 - [ ] 같은 사용자 중복은 정확히 `23505`이고 upsert가 일어나지 않는다.
 - [ ] 템플릿 settings stale CAS가 `40001`이고 로컬 입력을 덮어쓰지 않는다.
-- [ ] 실제 검증 전후 운영·V1 count/hash가 같다.
+- [ ] A/B 검증으로 새로 만든 모든 템플릿·거래의 memo를 같은 `$qaMarker`로 시작하고, 저장 성공 직후 user-scoped exact ID record를 같은 복수 ledger에 append했다.
+- [ ] 실제 검증 전후 운영·V1 count와 `updated_at` 포함 `production/V1 invariant hash`가 문자열 그대로 같다.
 
 ## V2 QA 준비
 
-- [ ] `$qaMarker = 'QA-V2-RECURRING-' + (Get-Date -Format 'yyyyMMdd-HHmmss')`로 불변 접두사를 만들었다.
+- [ ] 창 시작 때 만든 같은 `$qaMarker`와 복수 ID ledger를 그대로 사용했고 새 marker·단일 ID 변수로 교체하지 않았다.
 - [ ] 시작 시각, URL, source SHA, 테스트 예산 월을 기록했다.
 - [ ] 원래 총예산과 카테고리 예산을 기록했다.
-- [ ] 템플릿 생성 직후 exact 템플릿 ID를 기록했다.
-- [ ] 반복 거래 확정 직후 exact 거래 ID를 기록했다.
+- [ ] marker fixture와 기능 QA에서 만든 **모든** 템플릿의 `{ userId, exact id, marker memo, purpose, recordedAtUtc }`를 저장 성공 직후 `templateIds` 배열에 append했다.
+- [ ] marker fixture와 기능 QA에서 만든 **모든** 거래의 `{ userId, exact id, marker memo, purpose, recordedAtUtc }`를 저장 성공 직후 `transactionIds` 배열에 append했다.
+- [ ] 수정·삭제 이벤트도 `events`에 append했고 이미 삭제된 ID를 배열에서 제거하지 않았다.
 - [ ] 모든 QA 메모가 `$qaMarker`로 시작한다.
 
 ## 반복지출 기능
 
 - [ ] V2 화면은 홈·내역·캘린더·설정 네 탭이며 다섯 번째 탭이 없다.
-- [ ] 설정에서 이름·지출 카테고리·예상 금액·1~31일로 템플릿을 등록한다.
+- [ ] 설정에서 이름·지출 카테고리·예상 금액·1~31일로 템플릿을 등록하고 각 exact ID를 복수 ledger에 즉시 append한다.
 - [ ] 템플릿 이름·카테고리·금액·발생일을 수정해도 ID와 시작일이 유지된다.
 - [ ] 미확정 템플릿을 삭제하면 예정 목록에서 사라지고 기존 거래는 바뀌지 않는다.
 - [ ] 예정 목록에서 `지남`, `오늘`, `예정`, `기록됨` 네 라벨을 확인한다. 새 템플릿으로 `지남`을 만들 때는 OS 시계 대신 격리 브라우저 context의 `Date`만 고정·전진했다.
 - [ ] 순서가 `지남 → 오늘 → 예정 → 기록됨`, 같은 상태 안에서는 날짜 순이다.
 - [ ] 31일 설정이 2월 28일/29일과 30일인 달에는 월말로 표시되지만 설정은 31로 남는다.
 - [ ] 확인 dialog에 원래 예정일이 표시된다.
-- [ ] 확인 전 사용일·실제 금액·카테고리·메모를 모두 수정할 수 있다.
+- [ ] 확인 전 사용일·실제 금액·카테고리·marker 메모를 모두 수정하고 생성된 각 exact 거래 ID를 복수 ledger에 즉시 append한다.
 - [ ] 실제 사용일을 다른 달로 바꿔도 거래 ID 끝의 `YYYY-MM`은 원래 예정 월이다.
 - [ ] 미확정 예정 금액은 요약·예산 사용률·카테고리 합계·캘린더에 포함되지 않는다.
 - [ ] 확정 후 실제 거래가 합계에 정확히 한 번 포함된다.
@@ -82,7 +106,8 @@
 - [ ] JSON 내보내기에 version 2, 템플릿, 확정 거래가 포함된다.
 - [ ] V1 또는 version 누락 백업을 가져오면 템플릿은 빈 배열로 승격된다.
 - [ ] future version, 손상된 transactions/templates 배열, 유효 데이터 0건 백업은 현재 상태를 지우지 않고 거부된다.
-- [ ] 샘플 교체, 전체 초기화, 클라우드 재다운로드가 템플릿·거래 전체 상태 계약을 지킨다.
+- [ ] marker fixture import·export·클라우드 재다운로드가 템플릿·거래 전체 상태 계약을 지키고 import로 생긴 모든 user-scoped ID도 즉시 ledger에 append했다.
+- [ ] 샘플·전체 초기화의 87개 자동 테스트 커버리지와 별개로, marker 주입 또는 롤백 보장 격리 PostgreSQL/live 하네스 결과는 **PENDING**이다. 고정 memo 샘플·전체 상태 삭제를 공유 DB frozen run에서 실행하지 않았고, 자동 테스트만으로 수동 항목을 통과 처리하지 않았다.
 - [ ] 로그아웃하면 금융 데이터, 반복지출 dialog/edit 상태, 필터가 화면과 메모리에서 사라지고 쓰기가 잠긴다.
 
 ## 데스크톱·360×800·접근성
@@ -99,16 +124,19 @@
 
 ## QA 정리
 
-- [ ] 기록한 exact 거래 ID를 삭제했다.
-- [ ] 기록한 exact 템플릿 ID를 삭제했다.
+- [ ] `transactionIds` 배열을 `userId`별로 나누고 모든 exact 거래 ID를 먼저 순회해 삭제하거나 이미 0건임을 기록했다.
+- [ ] `templateIds` 배열을 `userId`별로 나누고 모든 exact 템플릿 ID를 다음으로 순회해 삭제하거나 이미 0건임을 기록했다.
+- [ ] exact-ID pass 뒤 marker prefix로 잔여 항목을 찾아 발견한 ID를 ledger에 append하고 삭제해 marker 0건을 만들었다.
 - [ ] 변경한 총예산과 카테고리 예산을 시작 값으로 복원했다.
-- [ ] 클라우드를 다시 받고 브라우저의 모든 예산 월에서 exact ID와 marker prefix가 0건이다.
-- [ ] JSON 내보내기에서 exact ID와 marker prefix가 0건이다.
-- [ ] `preview_v2_transactions`에서 exact 거래 ID 또는 marker prefix가 0건이다.
-- [ ] `preview_v2_budget_settings.__recurring_expense_templates`에서 exact 템플릿 ID 또는 marker prefix가 0건이다.
-- [ ] 사용자별 V2 두 테이블의 최종 count를 기록했다.
-- [ ] 운영·V1 count/hash가 시작 전과 같다.
-- [ ] 브라우저·DB 양쪽 0건, 예산 원복, 운영·V1 불변 뒤에만 writer를 재개했다.
+- [ ] 클라우드를 다시 받고 브라우저의 모든 예산 월에서 ledger의 **어느 ID도 없고** marker prefix도 0건이다.
+- [ ] JSON 내보내기에서 ledger의 어느 ID도 없고 marker prefix도 0건이다.
+- [ ] `preview_v2_transactions`에서 user-scoped ledger record를 사용한 `id = any(<해당 user transactionIds 배열>) OR memo like '<marker>%'`가 모든 ledger user에게 0건이다.
+- [ ] `preview_v2_budget_settings.__recurring_expense_templates`에서 user-scoped ledger record를 사용한 `id = any(<해당 user templateIds 배열>) OR memo like '<marker>%'`가 모든 ledger user에게 0건이다.
+- [ ] marker fixture에서 이미 삭제한 ID까지 ledger 전체의 브라우저·export·DB 0건 증거가 있다.
+- [ ] 사용자별 V2 두 테이블의 최종 count·모든 컬럼 full dump·full hash와 seed marker를 기록했다.
+- [ ] 운영·V1 count와 `updated_at` 포함 invariant hash가 동결 직후 authoritative 값과 문자열 그대로 같다.
+- [ ] marker fixture와 기능 QA의 모든 ledger ID·marker 제거, 예산 원복, 운영·V1 불변 뒤에만 일반 writer를 재개하고 시각을 기록했다.
+- [ ] marker fixture가 하나라도 남아 있는 동안 writer를 재개하지 않았다.
 
 ## 공개 `/v2/` — PENDING
 
@@ -117,7 +145,7 @@
 - [ ] `/v2/version.json`의 `sourceCommit`, `testCount`, V2 객체가 clean source와 일치한다.
 - [ ] 공개 `/v2/`에서 전체 기능·접근성·콘솔 QA를 반복했다.
 - [ ] 공개 QA exact ID와 marker를 브라우저 전체 월·export JSON·V2 DB에서 모두 정리했다.
-- [ ] 공개 QA 전후 운영·V1 count/hash가 같다.
+- [ ] 공개 QA 전후 운영·V1 count와 `updated_at` 포함 `production/V1 invariant hash`가 문자열 그대로 같다.
 
 ## V1 역사적 회귀 문구
 
