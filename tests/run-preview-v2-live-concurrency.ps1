@@ -928,13 +928,47 @@ function Get-RemainingProbeSeconds {
 function Get-InvariantSql {
   return @'
 set timezone to 'UTC'; set statement_timeout = '15s'; set lock_timeout = '3s';
-select jsonb_build_object(
- 'production.settings', jsonb_build_object('count',(select count(*) from public.budget_settings),'invariant_hash',(select md5(coalesce(string_agg(to_jsonb(r)::text,E'\n' order by to_jsonb(r)::text),'')) from public.budget_settings r)),
- 'production.transactions', jsonb_build_object('count',(select count(*) from public.transactions),'invariant_hash',(select md5(coalesce(string_agg(to_jsonb(r)::text,E'\n' order by to_jsonb(r)::text),'')) from public.transactions r)),
- 'preview_v1.settings', jsonb_build_object('count',(select count(*) from public.preview_budget_settings),'invariant_hash',(select md5(coalesce(string_agg(to_jsonb(r)::text,E'\n' order by to_jsonb(r)::text),'')) from public.preview_budget_settings r)),
- 'preview_v1.transactions', jsonb_build_object('count',(select count(*) from public.preview_transactions),'invariant_hash',(select md5(coalesce(string_agg(to_jsonb(r)::text,E'\n' order by to_jsonb(r)::text),'')) from public.preview_transactions r)),
- 'preview_v2.seed_metadata', jsonb_build_object('count',(select count(*) from public.preview_v2_seed_metadata),'full_hash',(select md5(coalesce(string_agg(to_jsonb(r)::text,E'\n' order by to_jsonb(r)::text),'')) from public.preview_v2_seed_metadata r))
-)::text;
+do $preview_v2_invariant$
+declare
+  v_preview_v1_settings jsonb;
+  v_preview_v1_transactions jsonb;
+  v_invariant jsonb;
+begin
+  if to_regclass('public.preview_budget_settings') is null then
+    v_preview_v1_settings := jsonb_build_object('relation_state','ABSENT','count',0,'invariant_hash',null);
+  else
+    execute $preview_v1_settings_query$
+      select jsonb_build_object(
+        'relation_state','EXISTS',
+        'count',count(*),
+        'invariant_hash',md5(coalesce(string_agg(to_jsonb(r)::text,E'\n' order by to_jsonb(r)::text),''))
+      ) from public.preview_budget_settings r
+    $preview_v1_settings_query$ into v_preview_v1_settings;
+  end if;
+
+  if to_regclass('public.preview_transactions') is null then
+    v_preview_v1_transactions := jsonb_build_object('relation_state','ABSENT','count',0,'invariant_hash',null);
+  else
+    execute $preview_v1_transactions_query$
+      select jsonb_build_object(
+        'relation_state','EXISTS',
+        'count',count(*),
+        'invariant_hash',md5(coalesce(string_agg(to_jsonb(r)::text,E'\n' order by to_jsonb(r)::text),''))
+      ) from public.preview_transactions r
+    $preview_v1_transactions_query$ into v_preview_v1_transactions;
+  end if;
+
+  v_invariant := jsonb_build_object(
+    'production.settings', jsonb_build_object('count',(select count(*) from public.budget_settings),'invariant_hash',(select md5(coalesce(string_agg(to_jsonb(r)::text,E'\n' order by to_jsonb(r)::text),'')) from public.budget_settings r)),
+    'production.transactions', jsonb_build_object('count',(select count(*) from public.transactions),'invariant_hash',(select md5(coalesce(string_agg(to_jsonb(r)::text,E'\n' order by to_jsonb(r)::text),'')) from public.transactions r)),
+    'preview_v1.settings', v_preview_v1_settings,
+    'preview_v1.transactions', v_preview_v1_transactions,
+    'preview_v2.seed_metadata', jsonb_build_object('count',(select count(*) from public.preview_v2_seed_metadata),'full_hash',(select md5(coalesce(string_agg(to_jsonb(r)::text,E'\n' order by to_jsonb(r)::text),'')) from public.preview_v2_seed_metadata r))
+  );
+  perform set_config('preview_v2.live.invariant',v_invariant::text,false);
+end;
+$preview_v2_invariant$;
+select current_setting('preview_v2.live.invariant');
 '@
 }
 
@@ -946,21 +980,59 @@ function Assert-InvariantSnapshotEqual {
 function Assert-DisposableUsers {
   $a = ConvertTo-PsqlLiteral $QaUserA.ToLowerInvariant()
   $b = ConvertTo-PsqlLiteral $QaUserB.ToLowerInvariant()
-  $sql = @"
+  $sql = @'
 set statement_timeout='15s';
-with users(user_id) as (values ($a::uuid),($b::uuid))
-select jsonb_agg(jsonb_build_object(
- 'user_id',u.user_id,
- 'auth_count',(select count(*) from auth.users where id=u.user_id),
- 'production_count',(select count(*) from public.budget_settings where user_id=u.user_id)+(select count(*) from public.transactions where user_id=u.user_id),
- 'preview_v1_count',(select count(*) from public.preview_budget_settings where user_id=u.user_id)+(select count(*) from public.preview_transactions where user_id=u.user_id),
- 'preview_v2_count',(select count(*) from public.preview_v2_budget_settings where user_id=u.user_id)+(select count(*) from public.preview_v2_transactions where user_id=u.user_id),
- 'pre_absent',((select count(*) from public.budget_settings where user_id=u.user_id)+(select count(*) from public.transactions where user_id=u.user_id)+
-               (select count(*) from public.preview_budget_settings where user_id=u.user_id)+(select count(*) from public.preview_transactions where user_id=u.user_id)+
-               (select count(*) from public.preview_v2_budget_settings where user_id=u.user_id)+(select count(*) from public.preview_v2_transactions where user_id=u.user_id)=0),
- 'marker_count',(select count(*) from public.preview_v2_seed_metadata where seed_key='production_snapshot_v2')
-) order by u.user_id)::text from users u;
-"@
+do $disposable_user_gate$
+declare
+  v_user uuid;
+  v_auth_count bigint;
+  v_production_count bigint;
+  v_preview_v1_count bigint;
+  v_preview_v2_count bigint;
+  v_marker_count bigint;
+  v_rows jsonb := '[]'::jsonb;
+begin
+  foreach v_user in array array[__QA_USER_A__::uuid,__QA_USER_B__::uuid]
+  loop
+    select count(*) into v_auth_count from auth.users where id=v_user;
+    select
+      (select count(*) from public.budget_settings where user_id=v_user)+
+      (select count(*) from public.transactions where user_id=v_user)
+    into v_production_count;
+
+    v_preview_v1_count := 0;
+    if to_regclass('public.preview_budget_settings') is not null then
+      execute 'select count(*) from public.preview_budget_settings where user_id=$1'
+      into v_preview_v1_count using v_user;
+    end if;
+    if to_regclass('public.preview_transactions') is not null then
+      execute 'select $1 + count(*) from public.preview_transactions where user_id=$2'
+      into v_preview_v1_count using v_preview_v1_count,v_user;
+    end if;
+
+    select
+      (select count(*) from public.preview_v2_budget_settings where user_id=v_user)+
+      (select count(*) from public.preview_v2_transactions where user_id=v_user)
+    into v_preview_v2_count;
+    select count(*) into v_marker_count
+    from public.preview_v2_seed_metadata where seed_key='production_snapshot_v2';
+
+    v_rows := v_rows || jsonb_build_array(jsonb_build_object(
+      'user_id',v_user,
+      'auth_count',v_auth_count,
+      'production_count',v_production_count,
+      'preview_v1_count',v_preview_v1_count,
+      'preview_v2_count',v_preview_v2_count,
+      'pre_absent',(v_production_count+v_preview_v1_count+v_preview_v2_count=0),
+      'marker_count',v_marker_count
+    ));
+  end loop;
+  perform set_config('preview_v2.live.disposable_user_gate',v_rows::text,false);
+end;
+$disposable_user_gate$;
+select current_setting('preview_v2.live.disposable_user_gate');
+'@
+  $sql=$sql.Replace('__QA_USER_A__',$a).Replace('__QA_USER_B__',$b)
   $result = Invoke-Psql -Name 'disposable_user_gate' -Sql $sql
   $parsedRows = ConvertFrom-Json -InputObject $result.Stdout
   $rows = @($parsedRows)

@@ -4594,6 +4594,17 @@ function assertPreviewV2LiveVerificationContract() {
   assert.match(authGate[1], /count\(\*\) filter \(where id = current_setting\('preview_v2\.live\.qa_user_b'\)::uuid\)/i);
   assert.doesNotMatch(authGate[1], /public\.(?:preview_v2_|budget_settings|transactions|preview_)/i, 'auth_gate must be safe before V2 setup');
   assert.match(source, /from auth\.users[\s\S]*current_setting\('preview_v2\.live\.qa_user_a'\)[\s\S]*current_setting\('preview_v2\.live\.qa_user_b'\)/i);
+  const preflight = source.match(/\\if :phase_preflight([\s\S]*?)\\endif/i);
+  assert.ok(preflight, 'post-setup preflight phase must exist');
+  const requiredRelations = preflight[1].match(/unnest\(array\[([\s\S]*?)\]\)/i);
+  assert.ok(requiredRelations, 'post-setup required relation list must exist');
+  assert.doesNotMatch(
+    requiredRelations[1],
+    /public\.preview_(?:budget_settings|transactions)/i,
+    'V1 relations are optional and must not block a V2-only installation'
+  );
+  assert.match(preflight[1], /to_regclass\('public\.preview_budget_settings'\)/i);
+  assert.match(preflight[1], /to_regclass\('public\.preview_transactions'\)/i);
   assert.match(source, /to_regclass\('public\.preview_v2_budget_settings'\)/i);
   assert.match(source, /to_regclass\('public\.preview_v2_transactions'\)/i);
   assert.match(source, /to_regclass\('public\.preview_v2_seed_metadata'\)/i);
@@ -4618,6 +4629,15 @@ function assertPreviewV2LiveVerificationContract() {
   assert.match(source, /invariant_hash/i);
   assert.match(source, /'production\.total'\s+as evidence_type/i);
   assert.match(source, /'preview_v1\.total'\s+as evidence_type/i);
+  const snapshot = source.match(/\\if :phase_snapshot([\s\S]*?)\\endif/i);
+  assert.ok(snapshot, 'read-only snapshot phase must exist');
+  assert.match(snapshot[1], /do \$preview_v1_snapshot\$/i);
+  assert.match(snapshot[1], /if to_regclass\('public\.preview_budget_settings'\) is null/i);
+  assert.match(snapshot[1], /if to_regclass\('public\.preview_transactions'\) is null/i);
+  assert.match(snapshot[1], /execute \$preview_v1_settings_query\$/i);
+  assert.match(snapshot[1], /execute \$preview_v1_transactions_query\$/i);
+  assert.match(snapshot[1], /preview_v2\.live\.preview_v1_settings/i);
+  assert.match(snapshot[1], /preview_v2\.live\.preview_v1_transactions/i);
 
   assert.match(
     source,
@@ -5159,6 +5179,16 @@ function testPreviewV2LiveConcurrencyRunnerContract() {
   assert.match(source, /production\.transactions/i);
   assert.match(source, /preview_v1\.settings/i);
   assert.match(source, /preview_v1\.transactions/i);
+  const invariantFunction = source.slice(source.indexOf('function Get-InvariantSql'), source.indexOf('function Assert-InvariantSnapshotEqual'));
+  assert.match(invariantFunction, /if to_regclass\('public\.preview_budget_settings'\) is null/i);
+  assert.match(invariantFunction, /if to_regclass\('public\.preview_transactions'\) is null/i);
+  assert.match(invariantFunction, /execute \$preview_v1_settings_query\$/i);
+  assert.match(invariantFunction, /execute \$preview_v1_transactions_query\$/i);
+  const disposableFunction = source.slice(source.indexOf('function Assert-DisposableUsers'), source.indexOf('function Initialize-Fixtures'));
+  assert.match(disposableFunction, /if to_regclass\('public\.preview_budget_settings'\) is not null/i);
+  assert.match(disposableFunction, /if to_regclass\('public\.preview_transactions'\) is not null/i);
+  assert.match(disposableFunction, /execute[^;]+public\.preview_budget_settings/i);
+  assert.match(disposableFunction, /execute[^;]+public\.preview_transactions/i);
   assert.match(source, /invariant_hash/i);
   assert.match(source, /full_hash/i);
   assert.match(source, /Assert-InvariantSnapshotEqual/i);
@@ -5190,6 +5220,8 @@ function testPreviewV2LiveConcurrencyRunnerContract() {
   const currentTestPlan = fs.readFileSync(path.join(__dirname, '..', 'docs', 'TEST_PLAN.md'), 'utf8');
   const currentChecklist = fs.readFileSync(path.join(__dirname, '..', 'manual-test-checklist.md'), 'utf8');
   const implementationPlan = fs.readFileSync(path.join(__dirname, '..', 'docs', 'superpowers', 'plans', '2026-08-12-budget-recurring-upcoming-v2.md'), 'utf8');
+  assert.match(currentTestPlan, /V1 relation ABSENT/i);
+  assert.match(currentChecklist, /V1 relation ABSENT/i);
   assert.match(currentTestPlan, /성공 기준은[^\r\n]*정확히 `89 tests passed`/i);
   assert.match(currentChecklist, /node tests\/run-tests\.cjs`가 정확히 `89 tests passed`/i);
   const finalDeliveryPlan = implementationPlan.slice(implementationPlan.indexOf('### Task 15:'), implementationPlan.indexOf('## 최종 완료 기준'));

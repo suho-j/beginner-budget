@@ -94,7 +94,7 @@ git diff --check
 동결을 명시적으로 확인한 **뒤에**, 같은 frozen snapshot에서 아래 순서로 수행합니다. 자격증명을 파일이나 로그에 남기지 않습니다.
 
 1. 운영 `budget_settings`, `transactions`의 **새 authoritative 전체 백업**을 승인된 암호화 백업 위치에 만듭니다. 이 원문 백업은 live verification stdout이나 evidence 폴더에 복사하지 않고, evidence에는 백업 ID·UTC 생성 시각·대상 project ref만 기록합니다. 동결 전 예비 백업을 이름만 바꿔 재사용하지 않습니다.
-2. 같은 frozen snapshot에서 운영과 V1 두 테이블의 사용자별 count와 아래 `production/V1 invariant hash`를 기록합니다. 이 값은 최초 시드의 source 기준이자 안전 재실행 중 운영·V1 무변경 기준입니다.
+2. 같은 frozen snapshot에서 운영 두 테이블의 사용자별 count와 아래 invariant hash를 기록합니다. 이어 `to_regclass`로 V1 두 relation의 존재 여부를 각각 기록합니다. V1 relation이 EXISTS면 사용자별 count와 hash를 기록하고, **V1 relation ABSENT**면 그 relation을 조회하지 않은 채 ABSENT 상태 자체를 전후 불변 기준으로 기록합니다. 이 묶음을 아래 `production/V1 invariant hash`라고 부르며, 최초 시드의 source 기준이자 안전 재실행 중 운영·V1 무변경 기준입니다.
 3. `to_regclass`로 V2 객체의 설치 전 ABSENT/EXISTS 상태를 판정합니다. EXISTS relation은 count와 모든 컬럼을 포함한 canonical hash만 기록하고 금융 행 원문은 출력하지 않습니다. metadata가 EXISTS일 때만 `production_snapshot_v2` marker를 조회해 marker ABSENT/EXISTS와 정확한 행을 기록합니다.
 4. 아래 판정표로 `A 최초 시드`, `A' 불완전 최초 설치`, `B 안전 재실행`, `중단` 중 하나를 증거에 기록합니다.
 5. A/A'일 때만 같은 snapshot에서 비표준 거래 ID의 결정적 매핑과 필요한 충돌 감사를 실행합니다. B에서는 현재 운영과 기존 V2가 이미 달라도 정상이므로 이를 재실행 합격 조건으로 쓰지 않습니다.
@@ -122,9 +122,9 @@ select
 
 #### production/V1 invariant hash
 
-이 hash는 운영과 V1이 V2 작업 중 단 한 필드도 바뀌지 않았음을 전후 비교하기 위한 값입니다. seed 내용 비교용이 아닙니다. 정렬과 UTC 시각 표현을 고정하고 **모든 관련 컬럼**을 넣습니다. settings의 `updated_at`만 바뀌어도 반드시 hash가 달라져야 합니다.
+이 hash는 운영과 설치되어 있는 V1이 V2 작업 중 단 한 필드도 바뀌지 않았음을 전후 비교하기 위한 값입니다. seed 내용 비교용이 아닙니다. 정렬과 UTC 시각 표현을 고정하고 **모든 관련 컬럼**을 넣습니다. settings의 `updated_at`만 바뀌어도 반드시 hash가 달라져야 합니다. V1 relation이 처음부터 ABSENT라면 종료 시에도 ABSENT여야 하며, V2 검증 때문에 V1 객체를 새로 만들지 않습니다.
 
-아래 조회를 `public.budget_settings`, `public.transactions`에 실행한 뒤, 테이블명만 `public.preview_budget_settings`, `public.preview_transactions`로 바꿔 V1 결과도 저장합니다.
+아래 조회를 `public.budget_settings`, `public.transactions`에 실행합니다. V1은 먼저 `to_regclass('public.preview_budget_settings')`와 `to_regclass('public.preview_transactions')`를 각각 확인하고, EXISTS인 relation에만 같은 조회를 실행합니다. ABSENT relation을 정적 SQL로 참조하면 PostgreSQL이 조회 실행 전에 실패하므로, live verifier와 committed-concurrency runner는 `to_regclass` 분기 뒤 동적 SQL로만 V1 count/hash를 계산합니다.
 
 ```sql
 set timezone to 'UTC';

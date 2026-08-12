@@ -168,8 +168,6 @@ begin
   from unnest(array[
     'public.budget_settings',
     'public.transactions',
-    'public.preview_budget_settings',
-    'public.preview_transactions',
     'public.preview_v2_budget_settings',
     'public.preview_v2_transactions',
     'public.preview_v2_seed_metadata'
@@ -203,6 +201,8 @@ $preflight$;
 
 select
   'preflight' as evidence_type,
+  coalesce(to_regclass('public.preview_budget_settings')::text, 'ABSENT') as preview_v1_settings_relation,
+  coalesce(to_regclass('public.preview_transactions')::text, 'ABSENT') as preview_v1_transactions_relation,
   to_regclass('public.preview_v2_budget_settings')::text as settings_relation,
   to_regclass('public.preview_v2_transactions')::text as transactions_relation,
   to_regclass('public.preview_v2_seed_metadata')::text as metadata_relation,
@@ -345,30 +345,92 @@ select
   (select count(*) from public.budget_settings) as settings_total,
   (select count(*) from public.transactions) as transactions_total;
 
+do $preview_v1_snapshot$
+declare
+  v_settings jsonb;
+  v_transactions jsonb;
+begin
+  if to_regclass('public.preview_budget_settings') is null then
+    v_settings := jsonb_build_object(
+      'relation_state', 'ABSENT',
+      'row_count', 0,
+      'users', '[]'::jsonb
+    );
+  else
+    execute $preview_v1_settings_query$
+      select jsonb_build_object(
+        'relation_state', 'EXISTS',
+        'row_count', coalesce(sum(user_row_count), 0),
+        'users', coalesce(jsonb_agg(
+          jsonb_build_object(
+            'user_id', user_id,
+            'row_count', user_row_count,
+            'invariant_hash', invariant_hash
+          ) order by user_id
+        ), '[]'::jsonb)
+      )
+      from (
+        select
+          user_id,
+          count(*) as user_row_count,
+          md5(coalesce(string_agg(to_jsonb(row_value)::text, E'\n'
+            order by to_jsonb(row_value)::text), '')) as invariant_hash
+        from public.preview_budget_settings as row_value
+        group by user_id
+      ) as per_user
+    $preview_v1_settings_query$ into v_settings;
+  end if;
+
+  if to_regclass('public.preview_transactions') is null then
+    v_transactions := jsonb_build_object(
+      'relation_state', 'ABSENT',
+      'row_count', 0,
+      'users', '[]'::jsonb
+    );
+  else
+    execute $preview_v1_transactions_query$
+      select jsonb_build_object(
+        'relation_state', 'EXISTS',
+        'row_count', coalesce(sum(user_row_count), 0),
+        'users', coalesce(jsonb_agg(
+          jsonb_build_object(
+            'user_id', user_id,
+            'row_count', user_row_count,
+            'invariant_hash', invariant_hash
+          ) order by user_id
+        ), '[]'::jsonb)
+      )
+      from (
+        select
+          user_id,
+          count(*) as user_row_count,
+          md5(coalesce(string_agg(to_jsonb(row_value)::text, E'\n'
+            order by to_jsonb(row_value)::text), '')) as invariant_hash
+        from public.preview_transactions as row_value
+        group by user_id
+      ) as per_user
+    $preview_v1_transactions_query$ into v_transactions;
+  end if;
+
+  perform set_config('preview_v2.live.preview_v1_settings', v_settings::text, false);
+  perform set_config('preview_v2.live.preview_v1_transactions', v_transactions::text, false);
+end;
+$preview_v1_snapshot$;
+
 select
   'preview_v1.settings' as evidence_type,
-  user_id,
-  count(*) as row_count,
-  md5(coalesce(string_agg(to_jsonb(row_value)::text, E'\n'
-    order by to_jsonb(row_value)::text), '')) as invariant_hash
-from public.preview_budget_settings as row_value
-group by user_id
-order by user_id;
+  current_setting('preview_v2.live.preview_v1_settings')::jsonb as relation_evidence;
 
 select
   'preview_v1.transactions' as evidence_type,
-  user_id,
-  count(*) as row_count,
-  md5(coalesce(string_agg(to_jsonb(row_value)::text, E'\n'
-    order by to_jsonb(row_value)::text), '')) as invariant_hash
-from public.preview_transactions as row_value
-group by user_id
-order by user_id;
+  current_setting('preview_v2.live.preview_v1_transactions')::jsonb as relation_evidence;
 
 select
   'preview_v1.total' as evidence_type,
-  (select count(*) from public.preview_budget_settings) as settings_total,
-  (select count(*) from public.preview_transactions) as transactions_total;
+  jsonb_build_object(
+    'settings', current_setting('preview_v2.live.preview_v1_settings')::jsonb,
+    'transactions', current_setting('preview_v2.live.preview_v1_transactions')::jsonb
+  ) as relation_evidence;
 
 select
   'preview_v2.settings' as evidence_type,

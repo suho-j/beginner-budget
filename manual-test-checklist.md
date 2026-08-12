@@ -18,7 +18,8 @@
 - [ ] 운영·V1·V2·로컬의 모든 인증된 탭과 백그라운드/API writer를 멈췄다.
 - [ ] 탭·프로세스·API writer 동결을 명시적으로 확인하고 확인 시각을 기록했다.
 - [ ] **동결 확인 뒤** 운영 두 테이블의 새 authoritative 전체 백업을 승인된 암호화 위치에 만들었다. evidence에는 백업 ID·시각·project ref만 남기고 금융 원문 백업을 복사하지 않았으며 동결 전 예비 백업을 재사용하지 않았다.
-- [ ] 같은 frozen snapshot에서 운영·V1 두 테이블의 사용자별 count와 `production/V1 invariant hash`를 기록했다.
+- [ ] 같은 frozen snapshot에서 운영 두 테이블의 사용자별 count/hash를 기록하고, `to_regclass`로 V1 두 relation을 각각 판정했다. V1 relation EXISTS는 사용자별 count/hash, **V1 relation ABSENT**는 ABSENT 상태 자체를 `production/V1 invariant hash` 증거에 기록했다.
+- [ ] V1 relation ABSENT를 정적 SQL로 참조하지 않았고, 종료 시에도 ABSENT인지 확인했다. V2 검증을 위해 V1 객체를 새로 만들지 않았다.
 - [ ] settings invariant hash에 `user_id`, `monthly_budget`, `category_budgets`, UTC `updated_at`이 모두 포함된다.
 - [ ] transactions invariant hash에 `id`, `user_id`, `date`, `type`, `category`, `amount`, `memo`, `source`, UTC `created_at`이 모두 포함된다.
 - [ ] `to_regclass`로 V2 settings·transactions·seed metadata 각각을 `ABSENT` 또는 `EXISTS`로 기록했다.
