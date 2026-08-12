@@ -3237,6 +3237,251 @@ function testPreviewSupabaseSetupDefinesFullFiveArgumentCasAndDropsOverloads() {
   assert.doesNotMatch(source, /grant execute on function public\.replace_preview_budget_samples/i);
 }
 
+function testPreviewV2SupabaseSetupCreatesIsolatedRlsObjects() {
+  const source = fs.readFileSync(path.join(__dirname, '..', 'docs', 'supabase-preview-v2-setup.sql'), 'utf8');
+  const executable = source.replace(/--[^\r\n]*/g, '');
+
+  assert.match(source, /create table if not exists public\.preview_v2_budget_settings\s*\(/i);
+  assert.match(source, /create table if not exists public\.preview_v2_transactions\s*\(/i);
+  assert.match(source, /create table if not exists public\.preview_v2_seed_metadata\s*\(/i);
+  assert.match(source, /seed_key\s*=\s*'production_snapshot_v2'/i);
+
+  const transactionsTable = source.match(
+    /create table if not exists public\.preview_v2_transactions\s*\(([\s\S]*?)\n\);/i
+  );
+  assert.ok(transactionsTable, 'V2 transactions table body must be present');
+  assert.match(transactionsTable[1], /id text not null/i);
+  assert.match(transactionsTable[1], /user_id uuid not null references auth\.users\(id\) on delete cascade/i);
+  assert.match(transactionsTable[1], /primary key\s*\(\s*user_id\s*,\s*id\s*\)/i);
+  assert.doesNotMatch(transactionsTable[1], /\bid text primary key\b/i, 'transaction IDs are user-scoped');
+  assert.doesNotMatch(transactionsTable[1], /primary key\s*\(\s*id\s*\)/i, 'global transaction IDs are forbidden');
+  assert.match(
+    transactionsTable[1],
+    /constraint preview_v2_transactions_id_canonical\s+check \(id ~ '\^\[A-Za-z0-9\._:-\]\+\$'\)/i
+  );
+
+  assert.match(
+    source,
+    /create or replace function public\.set_preview_v2_budget_settings_updated_at\(\)[\s\S]*security invoker/i
+  );
+  assert.match(
+    source,
+    /greatest\(\s*clock_timestamp\(\),\s*old\.updated_at \+ interval '1 microsecond'\s*\)/i
+  );
+  assert.match(
+    source,
+    /create trigger set_preview_v2_budget_settings_updated_at[\s\S]*on public\.preview_v2_budget_settings[\s\S]*execute function public\.set_preview_v2_budget_settings_updated_at\(\)/i
+  );
+  for (const role of ['public', 'anon']) {
+    assert.match(
+      source,
+      new RegExp(`revoke all on function public\\.set_preview_v2_budget_settings_updated_at\\(\\) from ${role}`, 'i')
+    );
+  }
+
+  for (const table of ['preview_v2_budget_settings', 'preview_v2_transactions']) {
+    assert.match(source, new RegExp(`alter table public\\.${table} enable row level security`, 'i'));
+  }
+  for (const operation of ['select', 'insert', 'update']) {
+    assert.match(
+      source,
+      new RegExp(`create policy "Preview V2 users can ${operation} own settings"[\\s\\S]*?for ${operation}[\\s\\S]*?auth\\.uid\\(\\) = user_id`, 'i')
+    );
+  }
+  for (const operation of ['select', 'insert', 'update', 'delete']) {
+    assert.match(
+      source,
+      new RegExp(`create policy "Preview V2 users can ${operation} own transactions"[\\s\\S]*?for ${operation}[\\s\\S]*?auth\\.uid\\(\\) = user_id`, 'i')
+    );
+  }
+
+  const tablePermissions = [
+    ['preview_v2_budget_settings', 'grant select, insert, update on table public.preview_v2_budget_settings to authenticated;'],
+    ['preview_v2_transactions', 'grant select, insert, update, delete on table public.preview_v2_transactions to authenticated;']
+  ];
+  for (const [table, grant] of tablePermissions) {
+    const grantIndex = source.toLowerCase().indexOf(grant);
+    assert.ok(grantIndex >= 0, `${table} must have its exact minimum grant`);
+    for (const role of ['public', 'anon', 'authenticated']) {
+      const revokeIndex = source.toLowerCase().indexOf(`revoke all on table public.${table} from ${role};`);
+      assert.ok(revokeIndex >= 0 && revokeIndex < grantIndex, `${table} ${role} revoke must precede grants`);
+    }
+    assert.deepStrictEqual(
+      source.match(new RegExp(`grant [^;]+ on table public\\.${table} to authenticated;`, 'gi')),
+      [grant]
+    );
+  }
+
+  assert.match(
+    source,
+    /revoke all on function public\.replace_preview_v2_budget_state\(integer, jsonb, jsonb, timestamptz, jsonb\) from public/i
+  );
+  assert.match(
+    source,
+    /revoke all on function public\.replace_preview_v2_budget_state\(integer, jsonb, jsonb, timestamptz, jsonb\) from anon/i
+  );
+  assert.match(
+    source,
+    /grant execute on function public\.replace_preview_v2_budget_state\(integer, jsonb, jsonb, timestamptz, jsonb\) to authenticated/i
+  );
+  assert.deepStrictEqual(
+    source.match(/grant execute on function public\.replace_preview_v2_budget_state[^;]+to authenticated;/gi),
+    ['grant execute on function public.replace_preview_v2_budget_state(integer, jsonb, jsonb, timestamptz, jsonb) to authenticated;']
+  );
+
+  assert.match(source, /drop function if exists public\.replace_preview_v2_budget_state\(integer,\s*jsonb,\s*jsonb\)/i);
+  assert.match(source, /drop function if exists public\.replace_preview_v2_budget_state\(integer,\s*jsonb,\s*jsonb,\s*timestamptz\)/i);
+  assert.match(source, /drop function if exists public\.replace_preview_v2_budget_samples\(date, date, jsonb\)/i);
+  assert.match(source, /drop function if exists public\.replace_preview_v2_budget_samples\(date, date, jsonb, jsonb\)/i);
+  assert.match(
+    source,
+    /select\s+c\.relname as table_name,\s*c\.relrowsecurity as row_security[\s\S]*from pg_catalog\.pg_class as c[\s\S]*join pg_catalog\.pg_namespace as n/i
+  );
+  assert.doesNotMatch(
+    source,
+    /select[\s\S]*row_security[\s\S]*from information_schema\.tables/i,
+    'row_security must come from pg_catalog.pg_class'
+  );
+
+  assert.doesNotMatch(executable, /create table if not exists public\.preview_(?:budget_settings|transactions|seed_metadata)\b/i);
+  assert.doesNotMatch(executable, /create or replace function public\.(?:set_preview_budget_settings_updated_at|replace_preview_budget_state)\b/i);
+}
+
+function testPreviewV2SeedAndFiveArgumentCasNeverMutateV1OrProduction() {
+  const source = fs.readFileSync(path.join(__dirname, '..', 'docs', 'supabase-preview-v2-setup.sql'), 'utf8');
+  const executable = source.replace(/--[^\r\n]*/g, '');
+  const seedStart = source.indexOf('-- Atomic one-time V2 production snapshot.');
+  const seedEnd = source.indexOf('-- Atomically replace one authenticated user', seedStart);
+  assert.ok(seedStart >= 0 && seedEnd > seedStart, 'atomic V2 seed section must be present');
+  const seed = source.slice(seedStart, seedEnd).toLowerCase();
+
+  const begin = seed.indexOf('begin isolation level read committed');
+  const metadataLock = seed.indexOf('lock table public.preview_v2_seed_metadata in share row exclusive mode');
+  const markerCheck = seed.indexOf("seed_key = 'production_snapshot_v2'");
+  const skipReturn = seed.indexOf('return;', markerCheck);
+  const productionTransactionsLock = seed.indexOf('lock table public.transactions in share mode');
+  const previewTransactionsLock = seed.indexOf('lock table public.preview_v2_transactions in share row exclusive mode');
+  const productionSettingsLock = seed.indexOf('lock table public.budget_settings in share mode');
+  const previewSettingsLock = seed.indexOf('lock table public.preview_v2_budget_settings in share row exclusive mode');
+  const mappedCollisionGuard = seed.indexOf("raise exception 'preview v2 seed candidate id collision'");
+  const existingCollisionGuard = seed.indexOf("raise exception 'existing preview v2 transaction conflict'");
+  const settingsInsert = seed.indexOf('insert into public.preview_v2_budget_settings');
+  const transactionsInsert = seed.indexOf('insert into public.preview_v2_transactions');
+  const settingsCompare = seed.indexOf("raise exception 'preview v2 settings canonical comparison failed'");
+  const transactionsCompare = seed.indexOf("raise exception 'preview v2 transactions canonical comparison failed'");
+  const markerInsert = seed.indexOf('insert into public.preview_v2_seed_metadata');
+  const commit = seed.lastIndexOf('commit;');
+
+  assert.ok(begin >= 0 && begin < metadataLock);
+  assert.ok(metadataLock < markerCheck && markerCheck < skipReturn);
+  assert.ok(skipReturn < productionTransactionsLock, 'completed marker must skip every seed data lock and mutation');
+  assert.ok(productionTransactionsLock < previewTransactionsLock, 'production transactions lock first');
+  assert.ok(previewTransactionsLock < productionSettingsLock, 'all transaction locks precede settings locks');
+  assert.ok(productionSettingsLock < previewSettingsLock && previewSettingsLock < mappedCollisionGuard);
+  assert.ok(mappedCollisionGuard < existingCollisionGuard && existingCollisionGuard < settingsInsert);
+  assert.ok(settingsInsert < transactionsInsert);
+  assert.ok(transactionsInsert < settingsCompare && settingsCompare < transactionsCompare);
+  assert.ok(transactionsCompare < markerInsert && markerInsert < commit);
+  assert.match(
+    seed,
+    /else 'tx-migrated-' \|\| md5\(production\.user_id::text \|\| ':' \|\| production\.id\)/i
+  );
+  assert.match(seed, /group by\s+user_id,\s*preview_id\s+having count\(\*\) > 1/i);
+  assert.match(
+    seed,
+    /join public\.preview_v2_transactions as existing\s+on existing\.user_id = candidate\.user_id\s+and existing\.id = candidate\.preview_id/i
+  );
+  assert.match(seed, /where preview\.user_id = production\.user_id\s+and preview\.id = case/i);
+  assert.ok((seed.match(/\bexcept\b/g) || []).length >= 6, 'conflict and canonical guards must compare both directions');
+  assert.doesNotMatch(seed, /^\s*on\s+conflict\b/im, 'seed collisions must not be hidden');
+
+  const rpcStart = source.search(/create or replace function public\.replace_preview_v2_budget_state\s*\(/i);
+  const permissionStart = source.search(/revoke all on function public\.replace_preview_v2_budget_state/i);
+  assert.ok(rpcStart >= 0 && permissionStart > rpcStart, 'five-argument V2 RPC must precede permissions');
+  const rpc = source.slice(rpcStart, permissionStart);
+  assert.match(
+    rpc,
+    /create or replace function public\.replace_preview_v2_budget_state\(\s*p_monthly_budget integer,\s*p_category_budgets jsonb,\s*p_transactions jsonb,\s*p_expected_updated_at timestamptz,\s*p_expected_transactions jsonb\s*\)/i
+  );
+  assert.match(rpc, /returns table \(uploaded_count integer, updated_at timestamptz\)/i);
+  assert.match(rpc, /security invoker/i);
+  assert.match(rpc, /p_monthly_budget is null or p_monthly_budget <= 0/i);
+  assert.match(rpc, /jsonb_typeof\(p_category_budgets\) <> 'object'/i);
+  assert.match(rpc, /jsonb_typeof\(p_transactions\) <> 'array'/i);
+  assert.match(rpc, /jsonb_typeof\(p_expected_transactions\) <> 'array'/i);
+  assert.match(rpc, /p_transactions \|\| p_expected_transactions/i);
+  assert.match(rpc, /\(transaction_row ->> 'id'\) !~ '\^\[A-Za-z0-9\._:-\]\+\$'/i);
+  assert.match(rpc, /to_char\(to_date\(transaction_row ->> 'date', 'YYYY-MM-DD'\), 'YYYY-MM-DD'\)/i);
+  assert.match(rpc, /coalesce\(transaction_row ->> 'type', ''\) not in \('income', 'expense'\)/i);
+  assert.match(rpc, /nullif\(btrim\(transaction_row ->> 'category'\), ''\) is null/i);
+  assert.match(rpc, /\(transaction_row ->> 'amount'\)::numeric not between 1 and 2147483647/i);
+  assert.match(rpc, /coalesce\(transaction_row ->> 'source', 'user'\) not in \('user', 'sample'\)/i);
+  assert.match(rpc, /char_length\(coalesce\(transaction_row ->> 'memo', ''\)\) > 80/i);
+  assert.match(rpc, /__month_start_day[\s\S]*between 1 and 31/i);
+  assert.match(rpc, /__monthly_budgets[\s\S]*<> 'object'/i);
+  assert.match(rpc, /__recurring_expense_templates[\s\S]*<> 'array'/i);
+  assert.match(rpc, /duplicate transaction ids are not allowed/i);
+  assert.match(rpc, /duplicate expected transaction ids are not allowed/i);
+  assert.strictEqual(
+    (rpc.match(/group by v_user_id,\s*transaction_row ->> 'id'/gi) || []).length,
+    2,
+    'both replacement and expected snapshots must reject user-scoped duplicate IDs'
+  );
+  assert.match(
+    rpc,
+    /order by transaction_row\.id collate "C"[\s\S]*from jsonb_to_recordset\(p_expected_transactions\)/i
+  );
+
+  const validationEnd = rpc.indexOf('into v_expected_transactions');
+  const transactionLock = rpc.indexOf('lock table public.preview_v2_transactions in share row exclusive mode');
+  const settingsLock = rpc.search(/from public\.preview_v2_budget_settings as settings[\s\S]*?for update/i);
+  const settingsCheck = rpc.indexOf('v_current_updated_at is distinct from p_expected_updated_at');
+  const transactionSnapshot = rpc.indexOf('into v_current_transactions');
+  const transactionCheck = rpc.indexOf('v_current_transactions is distinct from v_expected_transactions');
+  const settingsWrite = rpc.indexOf('update public.preview_v2_budget_settings');
+  const transactionDelete = rpc.indexOf('delete from public.preview_v2_transactions');
+  const transactionInsert = rpc.indexOf('insert into public.preview_v2_transactions');
+  assert.ok(validationEnd >= 0 && validationEnd < transactionLock, 'JSON validation and canonicalization precede locking');
+  assert.ok(transactionLock < settingsLock, 'RPC must lock transactions before the settings row');
+  assert.ok(settingsLock < settingsCheck && settingsCheck < transactionSnapshot);
+  assert.ok(transactionSnapshot < transactionCheck && transactionCheck < settingsWrite, 'both CAS checks precede writes');
+  assert.ok(settingsWrite < transactionDelete && transactionDelete < transactionInsert, 'whole-state replacement is ordered and atomic');
+  assert.match(rpc, /delete from public\.preview_v2_transactions\s+where user_id = v_user_id/i);
+  assert.match(rpc, /insert into public\.preview_v2_transactions[\s\S]*from jsonb_to_recordset\(p_transactions\)/i);
+  assert.match(rpc, /errcode = '40001'/i);
+  assert.match(rpc, /return query select jsonb_array_length\(p_transactions\)::integer, v_new_updated_at/i);
+  assert.doesNotMatch(rpc, /public\.(?:budget_settings|transactions|preview_budget_settings|preview_transactions)\b/i);
+
+  assert.doesNotMatch(
+    executable,
+    /\b(?:insert\s+into|update|delete\s+from|alter\s+table|truncate(?:\s+table)?|drop\s+table)\s+public\.(?:budget_settings|transactions)\b/i,
+    'production tables are read and locked seed sources only'
+  );
+  assert.doesNotMatch(
+    executable,
+    /\b(?:grant|revoke)[^;]*\bon\s+(?:table|function)\s+public\.(?:budget_settings|transactions|replace_budget_state|replace_budget_samples)\b/i,
+    'production privileges must remain unchanged'
+  );
+  assert.doesNotMatch(
+    executable,
+    /\b(?:create(?:\s+or\s+replace)?|drop)\s+function\s+public\.(?:set_budget_settings_updated_at|replace_budget_state|replace_budget_samples)\b/i,
+    'production functions must remain unchanged'
+  );
+  assert.doesNotMatch(
+    executable,
+    /\b(?:create|drop)\s+policy[\s\S]*?\bon\s+public\.(?:budget_settings|transactions)\b/i,
+    'production policies must remain unchanged'
+  );
+  assert.doesNotMatch(
+    executable,
+    /\b(?:create|drop)\s+trigger[\s\S]*?\bon\s+public\.(?:budget_settings|transactions)\b/i,
+    'production triggers must remain unchanged'
+  );
+  assert.doesNotMatch(executable, /public\.(?:preview_budget_settings|preview_transactions|preview_seed_metadata)\b/i);
+  assert.doesNotMatch(executable, /public\.(?:set_preview_budget_settings_updated_at|replace_preview_budget_state|replace_preview_budget_samples)\b/i);
+  assert.doesNotMatch(source, /production_snapshot_v1/i);
+}
+
 function testUiCloudStatusShowsLoadingRetryAndSignedOutStates() {
   const { window, document } = createUiContext();
   window.BudgetCloud = { isConfigured: () => true };
@@ -3695,6 +3940,8 @@ const tests = [
   testPreviewSeedIsGuardedAtomicAndSkippedForeverAfterMarker,
   testPreviewSeedRunbookRequiresShortWriteFreeGateAndCanonicalComparison,
   testPreviewSupabaseSetupDefinesFullFiveArgumentCasAndDropsOverloads,
+  testPreviewV2SupabaseSetupCreatesIsolatedRlsObjects,
+  testPreviewV2SeedAndFiveArgumentCasNeverMutateV1OrProduction,
   testUiCloudStatusShowsLoadingRetryAndSignedOutStates,
   testAppShowsIsolatedCopyBannerOnlyInPreviewEnvironment,
   testAppDisablesWritesDuringInitialSessionLookup,
