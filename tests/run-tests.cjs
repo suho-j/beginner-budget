@@ -1401,6 +1401,225 @@ function testImportExport() {
   assert.strictEqual(mixed.summary.skippedCount, 1);
 }
 
+function testRecurringImportExportAllowsTemplateOnlyAndRejectsFutureVersion() {
+  const win = createContext();
+  const storage = win.BudgetStorage;
+  const transactions = win.BudgetTransactions;
+  const template = {
+    id: 'rt-rent',
+    memo: '월세',
+    category: '생활비',
+    amount: 550000,
+    dayOfMonth: 12,
+    startsOn: '2026-08-01'
+  };
+  const recurringState = storage.normalizeState({
+    version: 2,
+    recurringExpenseTemplates: [template],
+    transactions: []
+  });
+  const occurrence = transactions.deriveRecurringExpenseOccurrences(
+    recurringState,
+    '2026-08',
+    new Date(2026, 7, 1)
+  )[0];
+  const confirmed = transactions.addRecurringExpenseTransaction(recurringState, occurrence, {
+    date: occurrence.scheduledDate,
+    category: occurrence.category,
+    amount: occurrence.amount,
+    memo: occurrence.memo
+  });
+
+  assert.strictEqual(confirmed.ok, true);
+  assert.strictEqual(confirmed.transaction.id, 'tx-recurring-rt-rent-2026-08');
+
+  const exportedJson = transactions.exportState(confirmed.state);
+  const exported = JSON.parse(exportedJson);
+  assert.strictEqual(exported.version, 2);
+  assert.deepStrictEqual(exported.recurringExpenseTemplates, [template]);
+  assert.strictEqual(exported.transactions[0].id, 'tx-recurring-rt-rent-2026-08');
+
+  const roundTrip = transactions.importState(exportedJson);
+  assert.strictEqual(roundTrip.ok, true);
+  assert.strictEqual(roundTrip.state.version, 2);
+  assert.deepStrictEqual(plain(roundTrip.state.recurringExpenseTemplates.map((item) => item.id)), ['rt-rent']);
+  assert.deepStrictEqual(plain(roundTrip.state.transactions.map((transaction) => transaction.id)), [
+    'tx-recurring-rt-rent-2026-08'
+  ]);
+  assert.deepStrictEqual(plain(roundTrip.summary), {
+    sourceTransactionCount: 1,
+    importedTransactionCount: 1,
+    skippedTransactionCount: 0,
+    sourceTemplateCount: 1,
+    importedTemplateCount: 1,
+    skippedTemplateCount: 0,
+    sourceCount: 1,
+    importedCount: 1,
+    skippedCount: 0
+  });
+
+  const legacyTransaction = {
+    id: 'legacy-v1',
+    date: '2026-08-01',
+    type: 'expense',
+    category: '생활비',
+    amount: 1000,
+    memo: '이전 백업',
+    source: 'user'
+  };
+  const explicitV1 = transactions.importState(JSON.stringify({
+    version: 1,
+    transactions: [legacyTransaction]
+  }));
+  const missingVersion = transactions.importState(JSON.stringify({
+    transactions: [{ ...legacyTransaction, id: 'legacy-missing-version' }]
+  }));
+
+  [explicitV1, missingVersion].forEach((result) => {
+    assert.strictEqual(result.ok, true);
+    assert.strictEqual(result.state.version, 2);
+    assert.deepStrictEqual(plain(result.state.recurringExpenseTemplates), []);
+  });
+
+  const templateOnly = transactions.importState(JSON.stringify({
+    version: 2,
+    transactions: [],
+    recurringExpenseTemplates: [template]
+  }));
+  assert.strictEqual(templateOnly.ok, true);
+  assert.deepStrictEqual(plain(templateOnly.state.transactions), []);
+  assert.deepStrictEqual(plain(templateOnly.state.recurringExpenseTemplates), [template]);
+  assert.deepStrictEqual(plain(templateOnly.summary), {
+    sourceTransactionCount: 0,
+    importedTransactionCount: 0,
+    skippedTransactionCount: 0,
+    sourceTemplateCount: 1,
+    importedTemplateCount: 1,
+    skippedTemplateCount: 0,
+    sourceCount: 0,
+    importedCount: 0,
+    skippedCount: 0
+  });
+
+  const currentSnapshot = JSON.stringify(confirmed.state);
+  const emptyBackup = transactions.importState(JSON.stringify({
+    version: 2,
+    transactions: [],
+    recurringExpenseTemplates: []
+  }));
+  assert.strictEqual(emptyBackup.ok, false);
+  assert.strictEqual(emptyBackup.state, null);
+  assert.strictEqual(JSON.stringify(confirmed.state), currentSnapshot);
+
+  const originalNormalizeState = storage.normalizeState;
+  let normalizeCalls = 0;
+  storage.normalizeState = (...args) => {
+    normalizeCalls += 1;
+    return originalNormalizeState(...args);
+  };
+  const futureVersion = transactions.importState(JSON.stringify({
+    version: 3,
+    transactions: [legacyTransaction],
+    recurringExpenseTemplates: [template],
+    futureOnlyData: { mustNotBeDiscarded: true }
+  }));
+  storage.normalizeState = originalNormalizeState;
+
+  assert.strictEqual(futureVersion.ok, false);
+  assert.strictEqual(futureVersion.state, null);
+  assert.match(futureVersion.errors[0].message, /새로운 버전/);
+  assert.strictEqual(normalizeCalls, 0);
+
+  [0, -1, 1.5, 'not-a-version'].forEach((version) => {
+    const invalidVersion = transactions.importState(JSON.stringify({
+      version,
+      transactions: [legacyTransaction]
+    }));
+    assert.strictEqual(invalidVersion.ok, false);
+    assert.strictEqual(invalidVersion.state, null);
+    assert.match(invalidVersion.errors[0].message, /버전.*올바르지/);
+  });
+
+  const mixed = transactions.importState(JSON.stringify({
+    version: 2,
+    transactions: [
+      legacyTransaction,
+      { ...legacyTransaction, id: 'invalid-date', date: '2026-02-30' }
+    ],
+    recurringExpenseTemplates: [
+      template,
+      { ...template, id: 'rt-invalid-amount', amount: 0 }
+    ]
+  }));
+  assert.strictEqual(mixed.ok, true);
+  assert.deepStrictEqual(plain(mixed.summary), {
+    sourceTransactionCount: 2,
+    importedTransactionCount: 1,
+    skippedTransactionCount: 1,
+    sourceTemplateCount: 2,
+    importedTemplateCount: 1,
+    skippedTemplateCount: 1,
+    sourceCount: 2,
+    importedCount: 1,
+    skippedCount: 1
+  });
+
+  const collectionFallbacks = [
+    {
+      result: transactions.importState(JSON.stringify({
+        version: 2,
+        recurringExpenseTemplates: [template]
+      })),
+      transactionCount: 0,
+      templateCount: 1
+    },
+    {
+      result: transactions.importState(JSON.stringify({
+        version: 2,
+        transactions: { unexpected: true },
+        recurringExpenseTemplates: [template]
+      })),
+      transactionCount: 0,
+      templateCount: 1
+    },
+    {
+      result: transactions.importState(JSON.stringify({
+        version: 2,
+        transactions: [legacyTransaction]
+      })),
+      transactionCount: 1,
+      templateCount: 0
+    },
+    {
+      result: transactions.importState(JSON.stringify({
+        version: 2,
+        transactions: [legacyTransaction],
+        recurringExpenseTemplates: { unexpected: true }
+      })),
+      transactionCount: 1,
+      templateCount: 0
+    }
+  ];
+  collectionFallbacks.forEach(({ result, transactionCount, templateCount }) => {
+    assert.strictEqual(result.ok, true);
+    assert.strictEqual(result.summary.sourceTransactionCount, transactionCount);
+    assert.strictEqual(result.summary.importedTransactionCount, transactionCount);
+    assert.strictEqual(result.summary.skippedTransactionCount, 0);
+    assert.strictEqual(result.summary.sourceTemplateCount, templateCount);
+    assert.strictEqual(result.summary.importedTemplateCount, templateCount);
+    assert.strictEqual(result.summary.skippedTemplateCount, 0);
+    assert.strictEqual(result.summary.sourceCount, transactionCount);
+    assert.strictEqual(result.summary.importedCount, transactionCount);
+    assert.strictEqual(result.summary.skippedCount, 0);
+  });
+
+  const templateBytes = JSON.stringify(confirmed.state.recurringExpenseTemplates);
+  const withSamples = transactions.createSampleState(confirmed.state, '2026-09');
+  const withReplacedSamples = transactions.createSampleState(withSamples, '2026-09', { replace: true });
+  assert.strictEqual(JSON.stringify(withSamples.recurringExpenseTemplates), templateBytes);
+  assert.strictEqual(JSON.stringify(withReplacedSamples.recurringExpenseTemplates), templateBytes);
+}
+
 function testLegacyExpenseCategoriesMapToFourBudgets() {
   const win = createContext();
   const state = win.BudgetStorage.normalizeState({
@@ -3235,6 +3454,7 @@ const tests = [
   testSummaryAndSampleReplace,
   testSampleReplaceHonorsCustomBudgetMonthStart,
   testImportExport,
+  testRecurringImportExportAllowsTemplateOnlyAndRejectsFutureVersion,
   testLegacyExpenseCategoriesMapToFourBudgets,
   testCloudStateMappingKeepsBudgetAndTransactions,
   testCloudUsesSharedLoginEmail,

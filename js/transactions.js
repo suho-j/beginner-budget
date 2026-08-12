@@ -577,21 +577,47 @@
       if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
         return { ok: false, state: null, errors: [error('importData', '가계부 백업 JSON 객체가 아니에요.')] };
       }
-      if (!Array.isArray(parsed.transactions) || parsed.transactions.length === 0) {
-        return { ok: false, state: null, errors: [error('importData', '가져올 거래 내역이 없어요. 빈 백업으로 현재 데이터를 교체하지 않습니다.')] };
+      const sourceVersion = Object.prototype.hasOwnProperty.call(parsed, 'version')
+        ? Number(parsed.version)
+        : 1;
+      if (!Number.isInteger(sourceVersion) || sourceVersion < 1) {
+        return { ok: false, state: null, errors: [error('importData', '백업 버전이 올바르지 않아요.')] };
+      }
+      if (sourceVersion > window.BudgetStorage.CURRENT_STATE_VERSION) {
+        return { ok: false, state: null, errors: [error('importData', '더 새로운 버전의 백업이에요. 앱을 업데이트해 주세요.')] };
+      }
+
+      const rawTransactions = Array.isArray(parsed.transactions) ? parsed.transactions : [];
+      const rawTemplates = Array.isArray(parsed.recurringExpenseTemplates)
+        ? parsed.recurringExpenseTemplates
+        : [];
+      if (rawTransactions.length === 0 && rawTemplates.length === 0) {
+        return { ok: false, state: null, errors: [error('importData', '가져올 거래나 반복 지출이 없어요. 현재 데이터는 그대로 둡니다.')] };
       }
       const normalized = window.BudgetStorage.normalizeState(parsed);
-      if (normalized.transactions.length === 0) {
-        return { ok: false, state: null, errors: [error('importData', '유효한 거래가 없어 가져오기를 중단했어요.')] };
+      if (normalized.transactions.length === 0 && normalized.recurringExpenseTemplates.length === 0) {
+        return { ok: false, state: null, errors: [error('importData', '유효한 거래나 반복 지출이 없어 가져오기를 중단했어요.')] };
       }
+      const sourceTransactionCount = rawTransactions.length;
+      const importedTransactionCount = normalized.transactions.length;
+      const skippedTransactionCount = sourceTransactionCount - importedTransactionCount;
+      const sourceTemplateCount = rawTemplates.length;
+      const importedTemplateCount = normalized.recurringExpenseTemplates.length;
+      const skippedTemplateCount = sourceTemplateCount - importedTemplateCount;
       return {
         ok: true,
         state: normalized,
         errors: [],
         summary: {
-          sourceCount: parsed.transactions.length,
-          importedCount: normalized.transactions.length,
-          skippedCount: parsed.transactions.length - normalized.transactions.length
+          sourceTransactionCount,
+          importedTransactionCount,
+          skippedTransactionCount,
+          sourceTemplateCount,
+          importedTemplateCount,
+          skippedTemplateCount,
+          sourceCount: sourceTransactionCount,
+          importedCount: importedTransactionCount,
+          skippedCount: skippedTransactionCount
         }
       };
     } catch (err) {
