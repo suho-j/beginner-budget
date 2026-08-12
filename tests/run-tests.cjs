@@ -2205,6 +2205,7 @@ function testAppMarkupProvidesRecurringSectionsAndDialogContracts() {
     assert.ok(match, `missing element: ${id}`);
     return elementFromStart(match);
   };
+  const normalizedText = (element) => element.source.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
   const sectionByLabel = (id) => elementFromStart(source.match(new RegExp(`<(section)\\b[^>]*\\baria-labelledby="${id}"[^>]*>`, 'i')));
 
   const upcomingSection = elementById('recurring-upcoming-section');
@@ -2256,14 +2257,20 @@ function testAppMarkupProvidesRecurringSectionsAndDialogContracts() {
   assert.ok(upcomingSection.end <= transactionInput.start, 'upcoming recurring expenses must precede normal transaction input');
   const upcomingStart = startTagById('recurring-upcoming-section');
   assertAttribute(upcomingStart, 'aria-labelledby', 'recurring-upcoming-heading');
-  assert.strictEqual(startTagById('recurring-upcoming-heading').name, 'h2');
+  const upcomingHeading = startTagById('recurring-upcoming-heading');
+  assert.strictEqual(upcomingHeading.name, 'h2');
+  assertAttribute(upcomingHeading, 'tabindex', '-1');
+  assert.strictEqual(normalizedText(elementById('recurring-upcoming-heading')), '예정된 반복지출');
   const upcomingSummary = startTagById('recurring-upcoming-summary');
   assertAttribute(upcomingSummary, 'role', 'status');
   assertAttribute(upcomingSummary, 'aria-live', 'polite');
   assertAttribute(upcomingSummary, 'aria-atomic', 'true');
   assert.strictEqual(startTagById('recurring-upcoming-list').name, 'ul');
   assert.ok(['div', 'p'].includes(startTagById('recurring-upcoming-empty').name));
-  assert.match(upcomingSection.source, /예정 금액은 실제 사용액에 포함되지 않아요\./);
+  const upcomingHint = upcomingSection.source.match(/<p\b[^>]*\bclass="hint"[^>]*>([\s\S]*?)<\/p>/i);
+  assert.ok(upcomingHint, 'upcoming section needs its beginner-facing accounting hint');
+  assert.strictEqual(upcomingHint[1].replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim(), '예정 금액은 실제 사용액에 포함되지 않아요.');
+  assert.doesNotMatch(upcomingSection.source, /\brecurring-status\b/, 'Task 7 provides an empty render target; Task 8 renderer tests must assert exact visible status labels: 지남/오늘/예정/기록됨');
 
   const categoryBudgets = sectionByLabel('category-budget-title');
   const templateSection = elementById('recurring-template-section');
@@ -2271,7 +2278,10 @@ function testAppMarkupProvidesRecurringSectionsAndDialogContracts() {
   assert.ok(categoryBudgets.end <= templateSection.start, 'recurring settings must follow category budgets');
   assert.ok(templateSection.end <= dataTools.start, 'recurring settings must precede data tools');
   assertAttribute(startTagById('recurring-template-section'), 'aria-labelledby', 'recurring-template-heading');
-  assert.strictEqual(startTagById('recurring-template-heading').name, 'h2');
+  const templateHeading = startTagById('recurring-template-heading');
+  assert.strictEqual(templateHeading.name, 'h2');
+  assertAttribute(templateHeading, 'tabindex', '-1');
+  assert.strictEqual(normalizedText(elementById('recurring-template-heading')), '반복지출 설정');
 
   const templateForm = elementById('recurring-template-form');
   const templateFormStart = startTagById('recurring-template-form');
@@ -2295,11 +2305,13 @@ function testAppMarkupProvidesRecurringSectionsAndDialogContracts() {
   assert.doesNotMatch(templateForm.source, /<(?:input|select|textarea)\b[^>]*\btype="hidden"/i, 'template identity and start date must stay internal');
   assert.doesNotMatch(templateForm.source, /\bname="(?:id|startsOn)"/i, 'template identity and start date must not be user-editable');
   assertAttribute(startTagById('recurring-template-amount'), 'inputmode', 'numeric');
+  assertAttribute(startTagById('recurring-template-day'), 'name', 'dayOfMonth');
   assertAttribute(startTagById('recurring-template-day'), 'min', '1');
   assertAttribute(startTagById('recurring-template-day'), 'max', '31');
   const templateSave = startTagById('recurring-template-save');
   assertAttribute(templateSave, 'type', 'submit');
   assertBooleanAttribute(templateSave, 'data-cloud-write');
+  assert.strictEqual(normalizedText(elementById('recurring-template-save')), '반복지출 등록');
   const templateCancel = startTagById('recurring-template-cancel');
   assertAttribute(templateCancel, 'type', 'button');
   assertBooleanAttribute(templateCancel, 'hidden');
@@ -2310,7 +2322,9 @@ function testAppMarkupProvidesRecurringSectionsAndDialogContracts() {
   assertAttribute(templateMessage, 'tabindex', '-1');
   assert.strictEqual(startTagById('recurring-template-list').name, 'ul');
   assert.ok(['div', 'p'].includes(startTagById('recurring-template-empty').name));
-  assert.match(templateSection.source, /반복 설정을 지워도 이미 기록된 거래는 남아요\./);
+  const templateHelp = normalizedText(elementById('recurring-template-help'));
+  assert.match(templateHelp, /수정하거나 삭제하면 앞으로의 예정 항목에만 반영/);
+  assert.match(templateHelp, /이미 기록된 거래는 남아요\./);
   assert.match(templateSection.source, /확정한 거래를 삭제하면 예정 항목이 다시 나타나요\./);
 
   const confirmDialog = elementById('recurring-confirm-dialog');
@@ -2318,16 +2332,22 @@ function testAppMarkupProvidesRecurringSectionsAndDialogContracts() {
   assert.strictEqual(confirmDialogStart.name, 'dialog');
   assertAttribute(confirmDialogStart, 'aria-labelledby', 'recurring-confirm-heading');
   assert.strictEqual(startTagById('recurring-confirm-heading').name, 'h2');
+  assert.strictEqual(normalizedText(elementById('recurring-confirm-heading')), '반복지출 기록 확인');
   const confirmFormStart = startTagById('recurring-confirm-form');
   assert.strictEqual(confirmFormStart.name, 'form');
   assertAttribute(confirmFormStart, 'method', 'dialog');
   assertBooleanAttribute(confirmFormStart, 'novalidate');
   const scheduledDate = elementById('recurring-confirm-scheduled-date');
-  assert.match(scheduledDate.source, /원래 예정일/);
+  assert.strictEqual(scheduledDate.name, 'strong');
+  assert.strictEqual(normalizedText(scheduledDate), '', 'Task 8 owns the scheduled date value');
+  const scheduledDateParent = confirmDialog.source.match(/<p\b([^>]*)>\s*원래 예정일:\s*(<strong\b[^>]*\bid="recurring-confirm-scheduled-date"[^>]*>\s*<\/strong>)\s*<\/p>/i);
+  assert.ok(scheduledDateParent, 'scheduled date needs a stable prefix with a nested update target');
+  const scheduledDateParentClass = attributeValue(`<p${scheduledDateParent[1]}>`, 'class');
+  assert.deepStrictEqual((scheduledDateParentClass || '').split(/\s+/).sort(), ['full', 'hint']);
   assert.doesNotMatch(startTagById('recurring-confirm-scheduled-date').source, /(?:\s)hidden(?:\s|>)/);
   for (const [id, labelText] of [
-    ['recurring-confirm-date', '날짜'],
-    ['recurring-confirm-amount', '금액'],
+    ['recurring-confirm-date', '사용일'],
+    ['recurring-confirm-amount', '실제 금액'],
     ['recurring-confirm-category', '카테고리'],
     ['recurring-confirm-memo', '메모']
   ]) {
@@ -2347,6 +2367,7 @@ function testAppMarkupProvidesRecurringSectionsAndDialogContracts() {
   const confirmSave = startTagById('recurring-confirm-save');
   assertAttribute(confirmSave, 'type', 'submit');
   assertBooleanAttribute(confirmSave, 'data-cloud-write');
+  assert.strictEqual(normalizedText(elementById('recurring-confirm-save')), '지출로 기록');
   const confirmCancel = startTagById('recurring-confirm-cancel');
   assertAttribute(confirmCancel, 'type', 'button');
   assert.doesNotMatch(confirmCancel.source, /\bdata-cloud-write\b/);
@@ -2383,8 +2404,8 @@ function testAppStylesCoverRecurringCardsDialogAndMobile() {
   assert.match(actions, /(?:^|;)\s*gap\s*:\s*0\.5rem\s*;/);
   assert.match(declarations('.recurring-card-actions button'), /(?:^|;)\s*min-height\s*:\s*44px\s*;/);
 
-  const textBadge = declarations('.recurring-status');
-  assert.match(textBadge, /(?:^|;)\s*font-weight\s*:\s*(?:700|800|900)\s*;/, 'status badges must visibly carry text, not color alone');
+  const badgeTypography = declarations('.recurring-status');
+  assert.match(badgeTypography, /(?:^|;)\s*font-weight\s*:\s*(?:700|800|900)\s*;/, 'Task 7 only styles badge typography; Task 8 renderer tests must assert exact visible labels: 지남/오늘/예정/기록됨');
   for (const selector of [
     '.recurring-status.is-overdue',
     '.recurring-status.is-today',

@@ -125,7 +125,7 @@
 
     <section id="recurring-upcoming-section" class="panel recurring-upcoming-section" aria-labelledby="recurring-upcoming-heading">
       <div class="section-heading section-heading-spread">
-        <h2 id="recurring-upcoming-heading">다가오는 반복 지출</h2>
+        <h2 id="recurring-upcoming-heading" tabindex="-1">예정된 반복지출</h2>
         <p id="recurring-upcoming-summary" class="muted" role="status" aria-live="polite" aria-atomic="true">예정 0건 · 0원</p>
       </div>
       <p class="hint">예정 금액은 실제 사용액에 포함되지 않아요.</p>
@@ -256,10 +256,10 @@
 
     <section id="recurring-template-section" class="panel recurring-template-section" aria-labelledby="recurring-template-heading">
       <div class="section-heading section-heading-spread">
-        <h2 id="recurring-template-heading">반복 지출 설정</h2>
+        <h2 id="recurring-template-heading" tabindex="-1">반복지출 설정</h2>
         <a class="back-to-top" href="#top">위로 ↑</a>
       </div>
-      <p id="recurring-template-help" class="hint">이름, 카테고리, 예상 금액, 매월 결제일을 입력하세요. 반복 설정을 지워도 이미 기록된 거래는 남아요. 확정한 거래를 삭제하면 예정 항목이 다시 나타나요.</p>
+      <p id="recurring-template-help" class="hint">이름, 카테고리, 예상 금액, 매월 결제일을 입력하세요. 반복지출을 수정하거나 삭제하면 앞으로의 예정 항목에만 반영되고, 이미 기록된 거래는 남아요. 확정한 거래를 삭제하면 예정 항목이 다시 나타나요.</p>
       <form id="recurring-template-form" class="recurring-template-form" novalidate>
         <div class="recurring-template-fields">
           <div class="field">
@@ -276,11 +276,11 @@
           </div>
           <div class="field">
             <label for="recurring-template-day">매월 결제일</label>
-            <input id="recurring-template-day" name="day" type="number" inputmode="numeric" min="1" max="31" step="1" required aria-describedby="recurring-template-help recurring-template-message">
+            <input id="recurring-template-day" name="dayOfMonth" type="number" inputmode="numeric" min="1" max="31" step="1" required aria-describedby="recurring-template-help recurring-template-message">
           </div>
         </div>
         <div class="recurring-template-actions">
-          <button id="recurring-template-save" type="submit" data-cloud-write>반복 지출 저장</button>
+          <button id="recurring-template-save" type="submit" data-cloud-write>반복지출 등록</button>
           <button id="recurring-template-cancel" type="button" class="secondary" hidden>수정 취소</button>
         </div>
       </form>
@@ -326,16 +326,16 @@
   <dialog id="recurring-confirm-dialog" aria-labelledby="recurring-confirm-heading">
     <form id="recurring-confirm-form" class="recurring-confirm-form" method="dialog" novalidate>
       <div class="recurring-confirm-heading">
-        <h2 id="recurring-confirm-heading">반복 지출 확정</h2>
+        <h2 id="recurring-confirm-heading">반복지출 기록 확인</h2>
       </div>
-      <p id="recurring-confirm-scheduled-date" class="hint">원래 예정일: 아직 선택되지 않았어요.</p>
+      <p class="hint full">원래 예정일: <strong id="recurring-confirm-scheduled-date"></strong></p>
       <div class="recurring-confirm-fields">
         <div class="field">
-          <label for="recurring-confirm-date">날짜</label>
+          <label for="recurring-confirm-date">사용일</label>
           <input id="recurring-confirm-date" name="date" type="date" required aria-describedby="recurring-confirm-scheduled-date recurring-confirm-message">
         </div>
         <div class="field">
-          <label for="recurring-confirm-amount">금액</label>
+          <label for="recurring-confirm-amount">실제 금액</label>
           <input id="recurring-confirm-amount" name="amount" type="text" inputmode="numeric" pattern="[0-9,]*" required aria-describedby="recurring-confirm-scheduled-date recurring-confirm-message">
         </div>
         <div class="field">
@@ -349,7 +349,7 @@
       </div>
       <p id="recurring-confirm-message" class="message" role="status" aria-live="polite" tabindex="-1"></p>
       <div class="recurring-confirm-actions">
-        <button id="recurring-confirm-save" type="submit" data-cloud-write>거래로 확정</button>
+        <button id="recurring-confirm-save" type="submit" data-cloud-write>지출로 기록</button>
         <button id="recurring-confirm-cancel" type="button" class="secondary">취소</button>
       </div>
     </form>
