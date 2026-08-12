@@ -577,10 +577,13 @@
       if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
         return { ok: false, state: null, errors: [error('importData', '가계부 백업 JSON 객체가 아니에요.')] };
       }
-      const sourceVersion = Object.prototype.hasOwnProperty.call(parsed, 'version')
-        ? Number(parsed.version)
-        : 1;
-      if (!Number.isInteger(sourceVersion) || sourceVersion < 1) {
+      const hasSourceVersion = Object.prototype.hasOwnProperty.call(parsed, 'version');
+      const sourceVersion = hasSourceVersion ? parsed.version : 1;
+      if (
+        (hasSourceVersion && typeof sourceVersion !== 'number')
+        || !Number.isInteger(sourceVersion)
+        || sourceVersion < 1
+      ) {
         return { ok: false, state: null, errors: [error('importData', '백업 버전이 올바르지 않아요.')] };
       }
       if (sourceVersion > window.BudgetStorage.CURRENT_STATE_VERSION) {
@@ -591,10 +594,14 @@
       const rawTemplates = Array.isArray(parsed.recurringExpenseTemplates)
         ? parsed.recurringExpenseTemplates
         : [];
-      if (rawTransactions.length === 0 && rawTemplates.length === 0) {
+      const eligibleTemplates = sourceVersion >= 2 ? rawTemplates : [];
+      if (rawTransactions.length === 0 && eligibleTemplates.length === 0) {
         return { ok: false, state: null, errors: [error('importData', '가져올 거래나 반복 지출이 없어요. 현재 데이터는 그대로 둡니다.')] };
       }
-      const normalized = window.BudgetStorage.normalizeState(parsed);
+      const normalized = window.BudgetStorage.normalizeState({
+        ...parsed,
+        recurringExpenseTemplates: eligibleTemplates
+      });
       if (normalized.transactions.length === 0 && normalized.recurringExpenseTemplates.length === 0) {
         return { ok: false, state: null, errors: [error('importData', '유효한 거래나 반복 지출이 없어 가져오기를 중단했어요.')] };
       }

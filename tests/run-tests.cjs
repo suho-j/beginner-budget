@@ -1469,16 +1469,38 @@ function testRecurringImportExportAllowsTemplateOnlyAndRejectsFutureVersion() {
   };
   const explicitV1 = transactions.importState(JSON.stringify({
     version: 1,
-    transactions: [legacyTransaction]
+    transactions: [legacyTransaction],
+    recurringExpenseTemplates: [template]
   }));
   const missingVersion = transactions.importState(JSON.stringify({
-    transactions: [{ ...legacyTransaction, id: 'legacy-missing-version' }]
+    transactions: [{ ...legacyTransaction, id: 'legacy-missing-version' }],
+    recurringExpenseTemplates: [template]
   }));
 
   [explicitV1, missingVersion].forEach((result) => {
     assert.strictEqual(result.ok, true);
     assert.strictEqual(result.state.version, 2);
     assert.deepStrictEqual(plain(result.state.recurringExpenseTemplates), []);
+    assert.deepStrictEqual(plain(result.summary), {
+      sourceTransactionCount: 1,
+      importedTransactionCount: 1,
+      skippedTransactionCount: 0,
+      sourceTemplateCount: 1,
+      importedTemplateCount: 0,
+      skippedTemplateCount: 1,
+      sourceCount: 1,
+      importedCount: 1,
+      skippedCount: 0
+    });
+  });
+
+  [
+    { version: 1, transactions: [], recurringExpenseTemplates: [template] },
+    { transactions: [], recurringExpenseTemplates: [template] }
+  ].forEach((legacyTemplateOnlyBackup) => {
+    const result = transactions.importState(JSON.stringify(legacyTemplateOnlyBackup));
+    assert.strictEqual(result.ok, false);
+    assert.strictEqual(result.state, null);
   });
 
   const templateOnly = transactions.importState(JSON.stringify({
@@ -1530,7 +1552,7 @@ function testRecurringImportExportAllowsTemplateOnlyAndRejectsFutureVersion() {
   assert.match(futureVersion.errors[0].message, /새로운 버전/);
   assert.strictEqual(normalizeCalls, 0);
 
-  [0, -1, 1.5, 'not-a-version'].forEach((version) => {
+  [0, -1, 1.5, 'not-a-version', '2', true, false, [2], ['2'], null, {}].forEach((version) => {
     const invalidVersion = transactions.importState(JSON.stringify({
       version,
       transactions: [legacyTransaction]
