@@ -10,7 +10,8 @@ param(
   [Parameter(ParameterSetName = 'Build', DontShow)]
   [ValidateSet(
     'None', 'DeployReadmeBeforePublish', 'CleanupFailureAfterSuccess',
-    'HoldPublishLock', 'ExternalBeforeFirstWrite', 'ExternalAfterV2Swap'
+    'HoldPublishLock', 'ExternalBeforeFirstWrite', 'ExternalAfterV2Swap',
+    'ExternalAfterPublishV2Write', 'ExternalAfterRollbackV2Write'
   )]
   [string]$SelfTestScenario = 'None',
   [Parameter(Mandatory, ParameterSetName = 'SelfTest')][switch]$SelfTest,
@@ -152,6 +153,62 @@ function Get-MutableDeploySnapshot {
     $snapshot.Add('v2 <missing>')
   }
   return @($snapshot | Sort-Object)
+}
+
+function Set-ExpectedMutableEntry {
+  param(
+    [Parameter(Mandatory)][string[]]$Expected,
+    [Parameter(Mandatory)][ValidateSet('index.html', 'README.md')][string]$RelativePath,
+    [string]$SourcePath,
+    [switch]$Missing
+  )
+
+  if (-not $Missing -and (-not $SourcePath -or -not (Test-Path -LiteralPath $SourcePath -PathType Leaf))) {
+    throw "Expected mutable entry source is missing: $RelativePath"
+  }
+  $next = [System.Collections.Generic.List[string]]::new()
+  foreach ($entry in $Expected) {
+    if (-not $entry.StartsWith($RelativePath + ' ', [System.StringComparison]::Ordinal)) {
+      $next.Add($entry)
+    }
+  }
+  if ($Missing) {
+    $next.Add("$RelativePath <missing>")
+  } else {
+    $next.Add("$RelativePath $((Get-FileHash -Algorithm SHA256 -LiteralPath $SourcePath).Hash)")
+  }
+  return @($next | Sort-Object)
+}
+
+function Set-ExpectedMutableTree {
+  param(
+    [Parameter(Mandatory)][string[]]$Expected,
+    [Parameter(Mandatory)][ValidateSet('v2')][string]$TreeName,
+    [string]$SourceRoot,
+    [switch]$Missing
+  )
+
+  if (-not $Missing -and (-not $SourceRoot -or -not (Test-Path -LiteralPath $SourceRoot -PathType Container))) {
+    throw "Expected mutable tree source is missing: $TreeName"
+  }
+  $treePrefix = "/$TreeName/"
+  $next = [System.Collections.Generic.List[string]]::new()
+  foreach ($entry in $Expected) {
+    if (-not $entry.StartsWith($TreeName + ' ', [System.StringComparison]::Ordinal) `
+      -and -not $entry.StartsWith($treePrefix, [System.StringComparison]::Ordinal)) {
+      $next.Add($entry)
+    }
+  }
+  if ($Missing) {
+    $next.Add("$TreeName <missing>")
+  } else {
+    $next.Add("$TreeName <present>")
+    Get-ChildItem -LiteralPath $SourceRoot -Recurse -File | Sort-Object FullName | ForEach-Object {
+      $relative = $_.FullName.Substring($SourceRoot.Length + 1).Replace('\', '/')
+      $next.Add("/$TreeName/$relative $((Get-FileHash -Algorithm SHA256 -LiteralPath $_.FullName).Hash)")
+    }
+  }
+  return @($next | Sort-Object)
 }
 
 function Get-RelativeFiles {
@@ -471,21 +528,29 @@ function Restore-DeployState {
     [Parameter(Mandatory)][bool]$HadIndex,
     [Parameter(Mandatory)][bool]$HadReadme,
     [Parameter(Mandatory)][bool]$HadV2,
-    [Parameter(Mandatory)][string[]]$ExpectedMutable
+    [Parameter(Mandatory)][string[]]$ExpectedMutable,
+    [Parameter(Mandatory)][string]$SelfTestScenario
   )
 
   $restoreExpected = @($ExpectedMutable)
   $deployV2 = Join-Path $Root 'v2'
   Assert-DirectDeployTarget -Root $Root -Path $deployV2 -AllowedNames @('v2')
-  if (Test-Path -LiteralPath $deployV2) {
+  $expectedV2Present = $restoreExpected -contains 'v2 <present>'
+  if ($expectedV2Present) {
     Assert-MutableSnapshotCas -Root $Root -Expected $restoreExpected -Phase 'rollback V2 removal'
+    $restoreExpected = Set-ExpectedMutableTree -Expected $restoreExpected -TreeName 'v2' -Missing
     Remove-Item -LiteralPath $deployV2 -Recurse -Force
-    $restoreExpected = Get-MutableDeploySnapshot -Root $Root
+    Assert-MutableSnapshotCas -Root $Root -Expected $restoreExpected -Phase 'rollback V2 removal validation'
   }
   if ($HadV2) {
     Assert-MutableSnapshotCas -Root $Root -Expected $restoreExpected -Phase 'rollback V2 restoration'
+    $restoreExpected = Set-ExpectedMutableTree -Expected $restoreExpected -TreeName 'v2' `
+      -SourceRoot (Join-Path $BackupRoot 'v2')
     Copy-Item -LiteralPath (Join-Path $BackupRoot 'v2') -Destination $deployV2 -Recurse
-    $restoreExpected = Get-MutableDeploySnapshot -Root $Root
+    if ($SelfTestScenario -eq 'ExternalAfterRollbackV2Write') {
+      Write-Utf8NoBom -Path (Join-Path $Root 'README.md') -Content 'external bytes after rollback V2 write'
+    }
+    Assert-MutableSnapshotCas -Root $Root -Expected $restoreExpected -Phase 'rollback V2 restoration validation'
   }
 
   foreach ($item in @(
@@ -496,12 +561,17 @@ function Restore-DeployState {
     Assert-DirectDeployTarget -Root $Root -Path $target -AllowedNames @('index.html', 'README.md')
     if ($item.HadFile) {
       Assert-MutableSnapshotCas -Root $Root -Expected $restoreExpected -Phase "rollback $($item.Name) restoration"
+      $restoreExpected = Set-ExpectedMutableEntry -Expected $restoreExpected -RelativePath $item.Name `
+        -SourcePath (Join-Path $BackupRoot $item.Name)
       Copy-Item -LiteralPath (Join-Path $BackupRoot $item.Name) -Destination $target -Force
-      $restoreExpected = Get-MutableDeploySnapshot -Root $Root
+      Assert-MutableSnapshotCas -Root $Root -Expected $restoreExpected `
+        -Phase "rollback $($item.Name) restoration validation"
     } elseif (Test-Path -LiteralPath $target) {
       Assert-MutableSnapshotCas -Root $Root -Expected $restoreExpected -Phase "rollback $($item.Name) removal"
+      $restoreExpected = Set-ExpectedMutableEntry -Expected $restoreExpected -RelativePath $item.Name -Missing
       Remove-Item -LiteralPath $target -Force
-      $restoreExpected = Get-MutableDeploySnapshot -Root $Root
+      Assert-MutableSnapshotCas -Root $Root -Expected $restoreExpected `
+        -Phase "rollback $($item.Name) removal validation"
     }
   }
   return @($restoreExpected)
@@ -827,10 +897,77 @@ function Invoke-ArtifactSelfTest {
       throw 'Rollback-conflict self-test unexpectedly changed the root index.'
     }
 
+    $afterPublishWrite = New-SelfTestFixture 'external-after-publish-v2-write'
+    $afterPublishResult = Invoke-SelfTestBuild $afterPublishWrite @(
+      '-SelfTestScenario', 'ExternalAfterPublishV2Write'
+    )
+    if ($afterPublishResult.ExitCode -eq 0 `
+      -or -not $afterPublishResult.Output.Contains('CAS conflict before V2 publish validation') `
+      -or -not $afterPublishResult.Output.Contains('CAS conflict before rollback eligibility')) {
+      throw "Post-publish V2 deterministic CAS self-test did not reject live drift: $($afterPublishResult.Output)"
+    }
+    if ((Get-Content -Raw -LiteralPath (Join-Path $afterPublishWrite.Deploy 'README.md')) -ne 'external bytes after V2 swap') {
+      throw 'Post-publish V2 deterministic CAS self-test erased concurrent README bytes.'
+    }
+    if (-not (Test-Path -LiteralPath (Join-Path $afterPublishWrite.Deploy 'v2/version.json'))) {
+      throw 'Post-publish V2 deterministic CAS self-test did not leave explicit partial V2 state.'
+    }
+
+    $afterRollbackWrite = New-SelfTestFixture 'external-after-rollback-v2-write'
+    $afterRollbackResult = Invoke-SelfTestBuild $afterRollbackWrite @(
+      '-SelfTestScenario', 'ExternalAfterRollbackV2Write', '-FailureInjection', 'AfterIndexWrite'
+    )
+    if ($afterRollbackResult.ExitCode -eq 0 `
+      -or -not $afterRollbackResult.Output.Contains('CAS conflict before rollback V2 restoration validation')) {
+      throw "Post-rollback V2 deterministic CAS self-test did not reject live drift: $($afterRollbackResult.Output)"
+    }
+    if ((Get-Content -Raw -LiteralPath (Join-Path $afterRollbackWrite.Deploy 'README.md')) -ne 'external bytes after rollback V2 write') {
+      throw 'Post-rollback V2 deterministic CAS self-test erased concurrent README bytes.'
+    }
+    if (-not (Test-Path -LiteralPath (Join-Path $afterRollbackWrite.Deploy 'v2/old.txt')) `
+      -or (Test-Path -LiteralPath (Join-Path $afterRollbackWrite.Deploy 'v2/version.json'))) {
+      throw 'Post-rollback V2 deterministic CAS self-test did not leave the planned restored V2 tree.'
+    }
+    if ((Get-Content -Raw -LiteralPath (Join-Path $afterRollbackWrite.Deploy 'index.html')) -eq 'original root') {
+      throw 'Post-rollback V2 deterministic CAS self-test unexpectedly completed the index rollback.'
+    }
+
+    $fileLockFixture = New-SelfTestFixture 'file-lock-only'
+    $fileLockPath = Join-Path $fileLockFixture.Deploy '.git/codex-preview-v2-artifact.lock'
+    $fileLockStream = [System.IO.File]::Open(
+      $fileLockPath,
+      [System.IO.FileMode]::OpenOrCreate,
+      [System.IO.FileAccess]::ReadWrite,
+      [System.IO.FileShare]::None
+    )
+    try {
+      $fileLockBefore = Get-SelfTestSnapshot $fileLockFixture.Deploy
+      $fileLockStatusBefore = ((& git -c core.excludesFile= -C $fileLockFixture.Deploy status --porcelain) -join "`n")
+      $fileLockResult = Invoke-SelfTestBuild $fileLockFixture
+      if ($fileLockResult.ExitCode -eq 0 -or -not $fileLockResult.Output.Contains('holds the deploy-root file lock')) {
+        throw "Exclusive file-lock branch self-test did not reject the child: $($fileLockResult.Output)"
+      }
+      if (Compare-Object $fileLockBefore (Get-SelfTestSnapshot $fileLockFixture.Deploy)) {
+        throw 'Exclusive file-lock branch self-test allowed deploy byte mutations.'
+      }
+      $fileLockStatusAfter = ((& git -c core.excludesFile= -C $fileLockFixture.Deploy status --porcelain) -join "`n")
+      if ($fileLockStatusAfter -ne $fileLockStatusBefore) {
+        throw 'Exclusive file-lock branch self-test changed deploy git status.'
+      }
+    } finally {
+      $fileLockStream.Dispose()
+      if (Test-Path -LiteralPath $fileLockPath -PathType Leaf) {
+        Remove-Item -LiteralPath $fileLockPath -Force
+      }
+    }
+    if (Test-Path -LiteralPath $fileLockPath -PathType Leaf) {
+      throw 'Exclusive file-lock branch self-test left a residual lock file.'
+    }
+
     if ($Filter -eq 'Concurrency') {
-      Write-Output 'V2 artifact concurrency self-tests passed: publish-lock, CAS-conflicts'
+      Write-Output 'V2 artifact concurrency self-tests passed: mutex, file-lock, deterministic publish and rollback CAS'
     } else {
-      Write-Output 'V2 artifact self-tests passed: happy, dirty, subdir, branch, stale, rollback, commit-bytes, prepublish, cleanup-warning, publish-lock, CAS-conflicts'
+      Write-Output 'V2 artifact self-tests passed: 15 scenarios including deterministic publish and rollback CAS'
     }
   } finally {
     if (Test-Path -LiteralPath $selfTestRoot) {
@@ -955,7 +1092,13 @@ try {
   if (Compare-Object $expectedPayloadFiles (Get-RelativeFiles -Root $payloadRoot)) {
     throw 'Staged deploy payload contains unexpected paths.'
   }
-  $expectedMutableAfter = Get-MutableDeploySnapshot -Root $payloadRoot
+  $expectedAfterV2Removal = Set-ExpectedMutableTree -Expected $mutableBefore -TreeName 'v2' -Missing
+  $expectedAfterV2Publish = Set-ExpectedMutableTree -Expected $expectedAfterV2Removal -TreeName 'v2' `
+    -SourceRoot $stagedV2Root
+  $expectedAfterIndexWrite = Set-ExpectedMutableEntry -Expected $expectedAfterV2Publish `
+    -RelativePath 'index.html' -SourcePath (Join-Path $payloadRoot 'index.html')
+  $expectedMutableAfter = Set-ExpectedMutableEntry -Expected $expectedAfterIndexWrite `
+    -RelativePath 'README.md' -SourcePath (Join-Path $payloadRoot 'README.md')
   Assert-SourceStable -Root $sourceRoot -ExpectedCommit $sourceCommitNormalized
 
   $publishLock = Enter-DeployPublishLock -Root $deployRoot
@@ -965,11 +1108,14 @@ try {
   }
   Assert-DeployStableBeforePublish -Root $deployRoot -ExpectedHead $deployHeadBefore `
     -V1Root $v1Root -ExpectedV1 $v1Before -ExpectedMutable $mutableBefore
-  $lastWrittenExpected = Get-MutableDeploySnapshot -Root $deployRoot
+  $lastWrittenExpected = @($mutableBefore)
 
   if ($hadIndex) { Copy-Item -LiteralPath (Join-Path $deployRoot 'index.html') -Destination (Join-Path $backupRoot 'index.html') }
   if ($hadReadme) { Copy-Item -LiteralPath (Join-Path $deployRoot 'README.md') -Destination (Join-Path $backupRoot 'README.md') }
   if ($hadV2) { Copy-Item -LiteralPath (Join-Path $deployRoot 'v2') -Destination (Join-Path $backupRoot 'v2') -Recurse }
+  if (Compare-Object $mutableBefore (Get-MutableDeploySnapshot -Root $backupRoot)) {
+    throw 'Recovery backup bytes do not match the pre-run mutable snapshot.'
+  }
 
   if ($SelfTestScenario -eq 'ExternalBeforeFirstWrite') {
     Write-Utf8NoBom -Path (Join-Path $deployRoot 'README.md') -Content 'external bytes before first write'
@@ -979,26 +1125,32 @@ try {
   Assert-DirectDeployTarget -Root $deployRoot -Path $deployV2 -AllowedNames @('v2')
   if ($hadV2) {
     Assert-MutableSnapshotCas -Root $deployRoot -Expected $lastWrittenExpected -Phase 'V2 removal'
+    $lastWrittenExpected = @($expectedAfterV2Removal)
     $deployMutationStarted = $true
     Remove-Item -LiteralPath $deployV2 -Recurse -Force
-    $lastWrittenExpected = Get-MutableDeploySnapshot -Root $deployRoot
+    Assert-MutableSnapshotCas -Root $deployRoot -Expected $lastWrittenExpected -Phase 'V2 removal validation'
+  } else {
+    $lastWrittenExpected = @($expectedAfterV2Removal)
   }
   Assert-MutableSnapshotCas -Root $deployRoot -Expected $lastWrittenExpected -Phase 'V2 publish'
+  $lastWrittenExpected = @($expectedAfterV2Publish)
   $deployMutationStarted = $true
   Move-Item -LiteralPath $stagedV2Root -Destination $deployV2
-  $lastWrittenExpected = Get-MutableDeploySnapshot -Root $deployRoot
-  if ($SelfTestScenario -eq 'ExternalAfterV2Swap') {
+  if ($SelfTestScenario -in @('ExternalAfterV2Swap', 'ExternalAfterPublishV2Write')) {
     Write-Utf8NoBom -Path (Join-Path $deployRoot 'README.md') -Content 'external bytes after V2 swap'
   }
+  Assert-MutableSnapshotCas -Root $deployRoot -Expected $lastWrittenExpected -Phase 'V2 publish validation'
   if ($FailureInjection -eq 'AfterV2Swap') { throw 'Injected artifact failure after V2 swap.' }
 
   Assert-MutableSnapshotCas -Root $deployRoot -Expected $lastWrittenExpected -Phase 'root index publish'
+  $lastWrittenExpected = @($expectedAfterIndexWrite)
   Copy-Item -LiteralPath (Join-Path $payloadRoot 'index.html') -Destination (Join-Path $deployRoot 'index.html') -Force
-  $lastWrittenExpected = Get-MutableDeploySnapshot -Root $deployRoot
+  Assert-MutableSnapshotCas -Root $deployRoot -Expected $lastWrittenExpected -Phase 'root index publish validation'
   if ($FailureInjection -eq 'AfterIndexWrite') { throw 'Injected artifact failure after index write.' }
   Assert-MutableSnapshotCas -Root $deployRoot -Expected $lastWrittenExpected -Phase 'README publish'
+  $lastWrittenExpected = @($expectedMutableAfter)
   Copy-Item -LiteralPath (Join-Path $payloadRoot 'README.md') -Destination (Join-Path $deployRoot 'README.md') -Force
-  $lastWrittenExpected = Get-MutableDeploySnapshot -Root $deployRoot
+  Assert-MutableSnapshotCas -Root $deployRoot -Expected $lastWrittenExpected -Phase 'README publish validation'
   if ($FailureInjection -eq 'AfterReadmeWrite') { throw 'Injected artifact failure after README write.' }
 
   Assert-MutableSnapshotCas -Root $deployRoot -Expected $lastWrittenExpected -Phase 'final validation'
@@ -1022,7 +1174,8 @@ try {
     try {
       Assert-MutableSnapshotCas -Root $deployRoot -Expected $lastWrittenExpected -Phase 'rollback eligibility'
       $null = Restore-DeployState -Root $deployRoot -BackupRoot $backupRoot -HadIndex $hadIndex `
-        -HadReadme $hadReadme -HadV2 $hadV2 -ExpectedMutable $lastWrittenExpected
+        -HadReadme $hadReadme -HadV2 $hadV2 -ExpectedMutable $lastWrittenExpected `
+        -SelfTestScenario $SelfTestScenario
       if (Compare-Object $mutableBefore (Get-MutableDeploySnapshot -Root $deployRoot)) {
         throw 'Restored deploy files do not match their pre-run hashes.'
       }
