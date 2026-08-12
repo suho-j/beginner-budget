@@ -3246,6 +3246,90 @@ function testPreviewV2SupabaseSetupCreatesIsolatedRlsObjects() {
   assert.match(source, /create table if not exists public\.preview_v2_seed_metadata\s*\(/i);
   assert.match(source, /seed_key\s*=\s*'production_snapshot_v2'/i);
 
+  const settingsCreate = source.indexOf('create table if not exists public.preview_v2_budget_settings');
+  const transactionsCreate = source.indexOf('create table if not exists public.preview_v2_transactions');
+  const metadataCreate = source.indexOf('create table if not exists public.preview_v2_seed_metadata');
+  const schemaGuardStart = source.indexOf('do $schema_guard$');
+  const schemaGuardEnd = source.indexOf('$schema_guard$;', schemaGuardStart);
+  const firstPreflight = source.indexOf('-- Preflight 1:');
+  const firstPrivilegeChange = source.search(/(?:revoke|grant) all on/i);
+  const firstSeed = source.indexOf('-- Atomic one-time V2 production snapshot.');
+  assert.ok(
+    settingsCreate >= 0 && settingsCreate < transactionsCreate && transactionsCreate < metadataCreate,
+    'all three V2 tables must be declared before schema validation'
+  );
+  assert.ok(
+    metadataCreate < schemaGuardStart && schemaGuardStart < schemaGuardEnd,
+    'catalog drift guard must run immediately after the table declarations'
+  );
+  assert.ok(
+    schemaGuardEnd < firstPreflight
+      && schemaGuardEnd < firstPrivilegeChange
+      && schemaGuardEnd < firstSeed,
+    'schema drift must fail before reads, privileges, or seed mutations'
+  );
+  const schemaGuard = source.slice(schemaGuardStart, schemaGuardEnd).toLowerCase();
+  const compactSchemaGuard = schemaGuard.replace(/\s+/g, ' ');
+  assert.match(schemaGuard, /from pg_catalog\.pg_attribute/i);
+  assert.match(schemaGuard, /from pg_catalog\.pg_constraint/i);
+  assert.match(schemaGuard, /pg_catalog\.format_type\(/i);
+  assert.match(schemaGuard, /pg_catalog\.pg_get_constraintdef\(/i);
+  assert.match(schemaGuard, /using errcode = '55000'/i);
+  assert.doesNotMatch(
+    schemaGuard,
+    /\b(?:insert\s+into|update|delete\s+from|alter\s+table|grant|revoke)\b/i,
+    'catalog validation must be read-only and fail closed'
+  );
+
+  for (const expectedColumns of [
+    "array['user_id:uuid:true', 'monthly_budget:integer:true', 'category_budgets:jsonb:true', 'updated_at:timestamp with time zone:true']::text[]",
+    "array['id:text:true', 'user_id:uuid:true', 'date:date:true', 'type:text:true', 'category:text:true', 'amount:integer:true', 'memo:text:true', 'source:text:true', 'created_at:timestamp with time zone:true']::text[]",
+    "array['seed_key:text:true', 'completed_at:timestamp with time zone:true', 'source_settings_count:bigint:true', 'source_transactions_count:bigint:true']::text[]"
+  ]) {
+    assert.ok(compactSchemaGuard.includes(expectedColumns), `schema guard must compare exact columns: ${expectedColumns}`);
+  }
+  assert.match(
+    schemaGuard,
+    /v_primary_key_columns is distinct from array\['user_id'\]::text\[\][\s\S]*preview_v2_budget_settings/i
+  );
+  assert.match(
+    schemaGuard,
+    /v_primary_key_columns is distinct from array\['user_id', 'id'\]::text\[\][\s\S]*preview_v2_transactions/i
+  );
+  assert.match(
+    schemaGuard,
+    /v_primary_key_columns is distinct from array\['seed_key'\]::text\[\][\s\S]*preview_v2_seed_metadata/i
+  );
+  assert.doesNotMatch(
+    schemaGuard,
+    /v_primary_key_columns is distinct from array\['id'\]::text\[\]/i,
+    'an id-only global primary key must never be accepted'
+  );
+  for (const table of ['preview_v2_budget_settings', 'preview_v2_transactions']) {
+    assert.match(
+      schemaGuard,
+      new RegExp(`conrelid = 'public\\.${table}'::regclass[\\s\\S]*?contype = 'f'[\\s\\S]*?convalidated[\\s\\S]*?confrelid = 'auth\\.users'::regclass[\\s\\S]*?confdeltype = 'c'`, 'i')
+    );
+  }
+  assert.strictEqual((schemaGuard.match(/confrelid = 'auth\.users'::regclass/g) || []).length, 2);
+  assert.strictEqual((schemaGuard.match(/confdeltype = 'c'/g) || []).length, 2);
+  assert.strictEqual(
+    (schemaGuard.match(/array\['user_id'\]::text\[\]/g) || []).length >= 3,
+    true,
+    'settings PK and both user foreign keys must resolve the user_id column exactly'
+  );
+  for (const constraintName of [
+    'preview_v2_budget_settings_monthly_budget_positive',
+    'preview_v2_transactions_id_canonical',
+    'preview_v2_transactions_type_allowed',
+    'preview_v2_transactions_amount_positive',
+    'preview_v2_seed_metadata_source_settings_nonnegative',
+    'preview_v2_seed_metadata_source_transactions_nonnegative'
+  ]) {
+    assert.match(source, new RegExp(`constraint ${constraintName}\\b`, 'i'));
+    assert.match(schemaGuard, new RegExp(`conname = '${constraintName}'[\\s\\S]*pg_catalog\\.pg_get_constraintdef`, 'i'));
+  }
+
   const transactionsTable = source.match(
     /create table if not exists public\.preview_v2_transactions\s*\(([\s\S]*?)\n\);/i
   );

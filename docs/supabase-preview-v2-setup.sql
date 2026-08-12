@@ -4,23 +4,29 @@
 
 create table if not exists public.preview_v2_budget_settings (
   user_id uuid primary key references auth.users(id) on delete cascade,
-  monthly_budget integer not null default 500000 check (monthly_budget > 0),
+  monthly_budget integer not null default 500000,
   category_budgets jsonb not null default '{}'::jsonb,
-  updated_at timestamptz not null default now()
+  updated_at timestamptz not null default now(),
+  constraint preview_v2_budget_settings_monthly_budget_positive
+    check (monthly_budget > 0)
 );
 
 create table if not exists public.preview_v2_transactions (
   id text not null,
   user_id uuid not null references auth.users(id) on delete cascade,
   date date not null,
-  type text not null check (type in ('income', 'expense')),
+  type text not null,
   category text not null,
-  amount integer not null check (amount > 0),
+  amount integer not null,
   memo text not null default '',
   source text not null default 'user',
   created_at timestamptz not null default now(),
   constraint preview_v2_transactions_id_canonical
     check (id ~ '^[A-Za-z0-9._:-]+$'),
+  constraint preview_v2_transactions_type_allowed
+    check (type in ('income', 'expense')),
+  constraint preview_v2_transactions_amount_positive
+    check (amount > 0),
   constraint preview_v2_transactions_user_id_id_pkey
     primary key (user_id, id)
 );
@@ -28,9 +34,303 @@ create table if not exists public.preview_v2_transactions (
 create table if not exists public.preview_v2_seed_metadata (
   seed_key text primary key,
   completed_at timestamptz not null default clock_timestamp(),
-  source_settings_count bigint not null check (source_settings_count >= 0),
-  source_transactions_count bigint not null check (source_transactions_count >= 0)
+  source_settings_count bigint not null,
+  source_transactions_count bigint not null,
+  constraint preview_v2_seed_metadata_source_settings_nonnegative
+    check (source_settings_count >= 0),
+  constraint preview_v2_seed_metadata_source_transactions_nonnegative
+    check (source_transactions_count >= 0)
 );
+
+-- CREATE TABLE IF NOT EXISTS does not repair an older or partial table. Fail closed
+-- before preflight reads, privileges, or seed work if any critical V2 shape drifted.
+do $schema_guard$
+declare
+  v_columns text[];
+  v_primary_key_columns text[];
+begin
+  select array_agg(
+    attribute_record.attname
+      || ':' || pg_catalog.format_type(attribute_record.atttypid, attribute_record.atttypmod)
+      || ':' || case when attribute_record.attnotnull then 'true' else 'false' end
+    order by attribute_record.attnum
+  )
+  into v_columns
+  from pg_catalog.pg_attribute as attribute_record
+  join pg_catalog.pg_class as class_record
+    on class_record.oid = attribute_record.attrelid
+  join pg_catalog.pg_namespace as namespace_record
+    on namespace_record.oid = class_record.relnamespace
+  where namespace_record.nspname = 'public'
+    and class_record.relname = 'preview_v2_budget_settings'
+    and class_record.relkind = 'r'
+    and attribute_record.attnum > 0
+    and not attribute_record.attisdropped;
+
+  if v_columns is distinct from array['user_id:uuid:true', 'monthly_budget:integer:true', 'category_budgets:jsonb:true', 'updated_at:timestamp with time zone:true']::text[] then
+    raise exception 'preview_v2_budget_settings column contract drifted' using errcode = '55000';
+  end if;
+
+  select array_agg(attribute_record.attname order by key_column.ordinality)
+  into v_primary_key_columns
+  from pg_catalog.pg_constraint as constraint_record
+  cross join lateral unnest(constraint_record.conkey)
+    with ordinality as key_column(attnum, ordinality)
+  join pg_catalog.pg_attribute as attribute_record
+    on attribute_record.attrelid = constraint_record.conrelid
+    and attribute_record.attnum = key_column.attnum
+  where constraint_record.conrelid = 'public.preview_v2_budget_settings'::regclass
+    and constraint_record.contype = 'p';
+
+  if v_primary_key_columns is distinct from array['user_id']::text[] then
+    raise exception 'preview_v2_budget_settings primary key contract drifted' using errcode = '55000';
+  end if;
+
+  if not exists (
+    select 1
+    from pg_catalog.pg_constraint as constraint_record
+    where constraint_record.conrelid = 'public.preview_v2_budget_settings'::regclass
+      and constraint_record.contype = 'f'
+      and constraint_record.convalidated
+      and constraint_record.confrelid = 'auth.users'::regclass
+      and constraint_record.confdeltype = 'c'
+      and (
+        select array_agg(attribute_record.attname order by key_column.ordinality)
+        from unnest(constraint_record.conkey)
+          with ordinality as key_column(attnum, ordinality)
+        join pg_catalog.pg_attribute as attribute_record
+          on attribute_record.attrelid = constraint_record.conrelid
+          and attribute_record.attnum = key_column.attnum
+      ) = array['user_id']::text[]
+      and (
+        select array_agg(attribute_record.attname order by key_column.ordinality)
+        from unnest(constraint_record.confkey)
+          with ordinality as key_column(attnum, ordinality)
+        join pg_catalog.pg_attribute as attribute_record
+          on attribute_record.attrelid = constraint_record.confrelid
+          and attribute_record.attnum = key_column.attnum
+      ) = array['id']::text[]
+  ) then
+    raise exception 'preview_v2_budget_settings auth.users foreign key drifted' using errcode = '55000';
+  end if;
+
+  if not exists (
+    select 1
+    from pg_catalog.pg_constraint as constraint_record
+    where constraint_record.conrelid = 'public.preview_v2_budget_settings'::regclass
+      and constraint_record.contype = 'c'
+      and constraint_record.convalidated
+      and constraint_record.conname = 'preview_v2_budget_settings_monthly_budget_positive'
+      and regexp_replace(
+        pg_catalog.pg_get_constraintdef(constraint_record.oid, true),
+        '\s+',
+        '',
+        'g'
+      ) in ('CHECK(monthly_budget>0)', 'CHECK((monthly_budget>0))')
+  ) then
+    raise exception 'preview_v2_budget_settings budget check drifted' using errcode = '55000';
+  end if;
+
+  select array_agg(
+    attribute_record.attname
+      || ':' || pg_catalog.format_type(attribute_record.atttypid, attribute_record.atttypmod)
+      || ':' || case when attribute_record.attnotnull then 'true' else 'false' end
+    order by attribute_record.attnum
+  )
+  into v_columns
+  from pg_catalog.pg_attribute as attribute_record
+  join pg_catalog.pg_class as class_record
+    on class_record.oid = attribute_record.attrelid
+  join pg_catalog.pg_namespace as namespace_record
+    on namespace_record.oid = class_record.relnamespace
+  where namespace_record.nspname = 'public'
+    and class_record.relname = 'preview_v2_transactions'
+    and class_record.relkind = 'r'
+    and attribute_record.attnum > 0
+    and not attribute_record.attisdropped;
+
+  if v_columns is distinct from array['id:text:true', 'user_id:uuid:true', 'date:date:true', 'type:text:true', 'category:text:true', 'amount:integer:true', 'memo:text:true', 'source:text:true', 'created_at:timestamp with time zone:true']::text[] then
+    raise exception 'preview_v2_transactions column contract drifted' using errcode = '55000';
+  end if;
+
+  select array_agg(attribute_record.attname order by key_column.ordinality)
+  into v_primary_key_columns
+  from pg_catalog.pg_constraint as constraint_record
+  cross join lateral unnest(constraint_record.conkey)
+    with ordinality as key_column(attnum, ordinality)
+  join pg_catalog.pg_attribute as attribute_record
+    on attribute_record.attrelid = constraint_record.conrelid
+    and attribute_record.attnum = key_column.attnum
+  where constraint_record.conrelid = 'public.preview_v2_transactions'::regclass
+    and constraint_record.contype = 'p';
+
+  if v_primary_key_columns is distinct from array['user_id', 'id']::text[] then
+    raise exception 'preview_v2_transactions primary key must be (user_id, id)' using errcode = '55000';
+  end if;
+
+  if not exists (
+    select 1
+    from pg_catalog.pg_constraint as constraint_record
+    where constraint_record.conrelid = 'public.preview_v2_transactions'::regclass
+      and constraint_record.contype = 'f'
+      and constraint_record.convalidated
+      and constraint_record.confrelid = 'auth.users'::regclass
+      and constraint_record.confdeltype = 'c'
+      and (
+        select array_agg(attribute_record.attname order by key_column.ordinality)
+        from unnest(constraint_record.conkey)
+          with ordinality as key_column(attnum, ordinality)
+        join pg_catalog.pg_attribute as attribute_record
+          on attribute_record.attrelid = constraint_record.conrelid
+          and attribute_record.attnum = key_column.attnum
+      ) = array['user_id']::text[]
+      and (
+        select array_agg(attribute_record.attname order by key_column.ordinality)
+        from unnest(constraint_record.confkey)
+          with ordinality as key_column(attnum, ordinality)
+        join pg_catalog.pg_attribute as attribute_record
+          on attribute_record.attrelid = constraint_record.confrelid
+          and attribute_record.attnum = key_column.attnum
+      ) = array['id']::text[]
+  ) then
+    raise exception 'preview_v2_transactions auth.users foreign key drifted' using errcode = '55000';
+  end if;
+
+  if not exists (
+    select 1
+    from pg_catalog.pg_constraint as constraint_record
+    where constraint_record.conrelid = 'public.preview_v2_transactions'::regclass
+      and constraint_record.contype = 'c'
+      and constraint_record.convalidated
+      and constraint_record.conname = 'preview_v2_transactions_id_canonical'
+      and regexp_replace(
+        replace(pg_catalog.pg_get_constraintdef(constraint_record.oid, true), '::text', ''),
+        '\s+',
+        '',
+        'g'
+      ) in (
+        'CHECK(id~''^[A-Za-z0-9._:-]+$'')',
+        'CHECK((id~''^[A-Za-z0-9._:-]+$''))'
+      )
+  ) then
+    raise exception 'preview_v2_transactions canonical ID check drifted' using errcode = '55000';
+  end if;
+
+  if not exists (
+    select 1
+    from pg_catalog.pg_constraint as constraint_record
+    where constraint_record.conrelid = 'public.preview_v2_transactions'::regclass
+      and constraint_record.contype = 'c'
+      and constraint_record.convalidated
+      and constraint_record.conname = 'preview_v2_transactions_type_allowed'
+      and regexp_replace(
+        replace(pg_catalog.pg_get_constraintdef(constraint_record.oid, true), '::text', ''),
+        '\s+',
+        '',
+        'g'
+      ) in (
+        'CHECK(type=ANY(ARRAY[''income'',''expense'']))',
+        'CHECK((type=ANY(ARRAY[''income'',''expense''])))'
+      )
+  ) then
+    raise exception 'preview_v2_transactions type check drifted' using errcode = '55000';
+  end if;
+
+  if not exists (
+    select 1
+    from pg_catalog.pg_constraint as constraint_record
+    where constraint_record.conrelid = 'public.preview_v2_transactions'::regclass
+      and constraint_record.contype = 'c'
+      and constraint_record.convalidated
+      and constraint_record.conname = 'preview_v2_transactions_amount_positive'
+      and regexp_replace(
+        pg_catalog.pg_get_constraintdef(constraint_record.oid, true),
+        '\s+',
+        '',
+        'g'
+      ) in ('CHECK(amount>0)', 'CHECK((amount>0))')
+  ) then
+    raise exception 'preview_v2_transactions amount check drifted' using errcode = '55000';
+  end if;
+
+  select array_agg(
+    attribute_record.attname
+      || ':' || pg_catalog.format_type(attribute_record.atttypid, attribute_record.atttypmod)
+      || ':' || case when attribute_record.attnotnull then 'true' else 'false' end
+    order by attribute_record.attnum
+  )
+  into v_columns
+  from pg_catalog.pg_attribute as attribute_record
+  join pg_catalog.pg_class as class_record
+    on class_record.oid = attribute_record.attrelid
+  join pg_catalog.pg_namespace as namespace_record
+    on namespace_record.oid = class_record.relnamespace
+  where namespace_record.nspname = 'public'
+    and class_record.relname = 'preview_v2_seed_metadata'
+    and class_record.relkind = 'r'
+    and attribute_record.attnum > 0
+    and not attribute_record.attisdropped;
+
+  if v_columns is distinct from array['seed_key:text:true', 'completed_at:timestamp with time zone:true', 'source_settings_count:bigint:true', 'source_transactions_count:bigint:true']::text[] then
+    raise exception 'preview_v2_seed_metadata column contract drifted' using errcode = '55000';
+  end if;
+
+  select array_agg(attribute_record.attname order by key_column.ordinality)
+  into v_primary_key_columns
+  from pg_catalog.pg_constraint as constraint_record
+  cross join lateral unnest(constraint_record.conkey)
+    with ordinality as key_column(attnum, ordinality)
+  join pg_catalog.pg_attribute as attribute_record
+    on attribute_record.attrelid = constraint_record.conrelid
+    and attribute_record.attnum = key_column.attnum
+  where constraint_record.conrelid = 'public.preview_v2_seed_metadata'::regclass
+    and constraint_record.contype = 'p';
+
+  if v_primary_key_columns is distinct from array['seed_key']::text[] then
+    raise exception 'preview_v2_seed_metadata primary key contract drifted' using errcode = '55000';
+  end if;
+
+  if not exists (
+    select 1
+    from pg_catalog.pg_constraint as constraint_record
+    where constraint_record.conrelid = 'public.preview_v2_seed_metadata'::regclass
+      and constraint_record.contype = 'c'
+      and constraint_record.convalidated
+      and constraint_record.conname = 'preview_v2_seed_metadata_source_settings_nonnegative'
+      and regexp_replace(
+        pg_catalog.pg_get_constraintdef(constraint_record.oid, true),
+        '\s+',
+        '',
+        'g'
+      ) in (
+        'CHECK(source_settings_count>=0)',
+        'CHECK((source_settings_count>=0))'
+      )
+  ) then
+    raise exception 'preview_v2_seed_metadata settings count check drifted' using errcode = '55000';
+  end if;
+
+  if not exists (
+    select 1
+    from pg_catalog.pg_constraint as constraint_record
+    where constraint_record.conrelid = 'public.preview_v2_seed_metadata'::regclass
+      and constraint_record.contype = 'c'
+      and constraint_record.convalidated
+      and constraint_record.conname = 'preview_v2_seed_metadata_source_transactions_nonnegative'
+      and regexp_replace(
+        pg_catalog.pg_get_constraintdef(constraint_record.oid, true),
+        '\s+',
+        '',
+        'g'
+      ) in (
+        'CHECK(source_transactions_count>=0)',
+        'CHECK((source_transactions_count>=0))'
+      )
+  ) then
+    raise exception 'preview_v2_seed_metadata transaction count check drifted' using errcode = '55000';
+  end if;
+end;
+$schema_guard$;
 
 -- Preflight 1: deterministic legacy ID mapping.
 select
