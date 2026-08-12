@@ -389,6 +389,93 @@
     window.BudgetUI.clearRecurringTemplateEdit(elements);
   }
 
+  function handleRecurringOccurrenceAction(event) {
+    const button = event.target.closest(
+      '[data-action="record-recurring-expense"][data-recurring-transaction-id]'
+    );
+    if (!button || button.disabled) return;
+    const occurrence = recurringOccurrences.find(
+      (item) => item.transactionId === button.dataset.recurringTransactionId
+    );
+    if (!occurrence) return;
+    window.BudgetUI.openRecurringConfirmDialog(elements, occurrence, button);
+  }
+
+  async function handleRecurringConfirmSubmit(event) {
+    event.preventDefault();
+    window.BudgetUI.clearFieldErrors(elements.recurringConfirmForm);
+    const transactionId = elements.recurringConfirmDialog.dataset.transactionId || '';
+    const occurrence = recurringOccurrences.find((item) => item.transactionId === transactionId);
+    const input = {
+      date: elements.recurringConfirmDate.value,
+      amount: elements.recurringConfirmAmount.value,
+      category: elements.recurringConfirmCategory.value,
+      memo: elements.recurringConfirmMemo.value
+    };
+    const result = window.BudgetTransactions.addRecurringExpenseTransaction(state, occurrence, input);
+    if (!result.ok) {
+      window.BudgetUI.showValidationErrors(
+        elements.recurringConfirmForm,
+        elements.recurringConfirmMessage,
+        result.errors
+      );
+      return;
+    }
+
+    const movedOutsideSelectedMonth = !window.BudgetStorage.isDateInBudgetMonth(
+      result.transaction.date,
+      viewState.month,
+      state.monthStartDay || 1
+    );
+    const mutation = await runExclusiveMutation(async () => {
+      try {
+        await window.BudgetCloud.insertTransaction(result.transaction);
+        return { kind: 'created', state: result.state };
+      } catch (error) {
+        if (!window.BudgetCloud.isDuplicateTransactionError(error)) throw error;
+        let latest;
+        try {
+          latest = await window.BudgetCloud.downloadState();
+        } catch (downloadError) {
+          const conflict = new Error('최신 클라우드 거래를 확인하지 못했어요. 다시 불러와 주세요.');
+          conflict.code = '40001';
+          throw conflict;
+        }
+        if (
+          latest
+          && Array.isArray(latest.transactions)
+          && latest.transactions.some((transaction) => transaction.id === result.transaction.id)
+        ) {
+          return { kind: 'already-recorded', state: latest };
+        }
+        const conflict = new Error('클라우드 거래 상태가 달라졌어요. 다시 불러와 주세요.');
+        conflict.code = '40001';
+        throw conflict;
+      }
+    }, elements.recurringConfirmMessage, '반복지출 저장 실패');
+
+    if (!mutation.ok) {
+      if (!mutation.blocked) elements.recurringConfirmMessage.focus();
+      return;
+    }
+
+    const outcome = mutation.value;
+    state = window.BudgetStorage.saveState(outcome.state).state;
+    render();
+    window.BudgetUI.closeRecurringConfirmDialog(elements, { reason: 'saved' });
+    const successMessage = outcome.kind === 'already-recorded'
+      ? '이미 기록된 항목이에요. 최신 내용을 다시 불러와 주세요.'
+      : movedOutsideSelectedMonth
+        ? '기록했어요. 입력한 날짜가 현재 예산기간 밖이라 내역과 캘린더에는 보이지 않아요.'
+        : '기록했어요.';
+    setGlobalMessage(successMessage, 'ok');
+  }
+
+  function handleRecurringConfirmCancel(event) {
+    event.preventDefault();
+    window.BudgetUI.closeRecurringConfirmDialog(elements, { reason: 'cancel' });
+  }
+
   async function handleTransactionAction(event) {
     const button = event.target.closest('[data-action][data-id]');
     if (!button) return;
@@ -402,7 +489,10 @@
     if (button.dataset.action !== 'delete') return;
 
     const label = `${transaction.date} ${transaction.category} ${window.BudgetUI.formatWon(transaction.amount)}`;
-    if (!window.confirm(`${label} 내역을 삭제할까요?`)) return;
+    const recurringWarning = transaction.id.startsWith('tx-recurring-')
+      ? '\n삭제하면 해당 예정 항목이 다시 나타나요.'
+      : '';
+    if (!window.confirm(`${label} 내역을 삭제할까요?${recurringWarning}`)) return;
     const nextState = window.BudgetTransactions.deleteTransaction(state, transaction.id);
     const saved = await persistRemoteFirst(
       nextState,
@@ -764,6 +854,10 @@
     elements.recurringTemplateForm.addEventListener('submit', handleRecurringTemplateSubmit);
     elements.recurringTemplateList.addEventListener('click', handleRecurringTemplateAction);
     elements.recurringTemplateCancel.addEventListener('click', handleRecurringTemplateCancel);
+    elements.recurringUpcomingList.addEventListener('click', handleRecurringOccurrenceAction);
+    elements.recurringConfirmForm.addEventListener('submit', handleRecurringConfirmSubmit);
+    elements.recurringConfirmCancel.addEventListener('click', handleRecurringConfirmCancel);
+    elements.recurringConfirmDialog.addEventListener('cancel', handleRecurringConfirmCancel);
     elements.typeSelect.addEventListener('change', handleTypeChange);
     elements.list.addEventListener('click', handleTransactionAction);
     elements.calendarDetailList.addEventListener('click', handleTransactionAction);

@@ -671,12 +671,13 @@ function createAppHarness(options = {}) {
     recurringConfirmOpens: [],
     recurringConfirmCloses: [],
     recurringCategoryFillCount: 0,
-    recurringDomainCalls: { add: [], update: [], delete: [], derive: [] },
+    recurringDomainCalls: { add: [], update: [], delete: [], derive: [], confirm: [] },
     validationErrors: [],
     availabilitySnapshots,
     confirmCalls,
     activeTabs: [],
     downloads: [],
+    savedStates: [],
     closeEditCount: 0
   };
 
@@ -687,12 +688,18 @@ function createAppHarness(options = {}) {
     }
     controls.forEach((control) => {
       control.dynamicGroup = group;
-      control.closest = (selector) => (
-        selector.includes('[data-action]')
-        && (!selector.includes('[data-template-id]') || Boolean(control.dataset.templateId))
+      control.closest = (selector) => {
+        if (selector === '[data-action="record-recurring-expense"][data-recurring-transaction-id]') {
+          return control.dataset.action === 'record-recurring-expense'
+            && Boolean(control.dataset.recurringTransactionId)
+            ? control
+            : null;
+        }
+        return selector.includes('[data-action]')
+          && (!selector.includes('[data-template-id]') || Boolean(control.dataset.templateId))
           ? control
-          : null
-      );
+          : null;
+      };
       dynamicControls.push(control);
     });
   }
@@ -701,7 +708,8 @@ function createAppHarness(options = {}) {
     add: window.BudgetTransactions.addRecurringExpenseTemplate,
     update: window.BudgetTransactions.updateRecurringExpenseTemplate,
     delete: window.BudgetTransactions.deleteRecurringExpenseTemplate,
-    derive: window.BudgetTransactions.deriveRecurringExpenseOccurrences
+    derive: window.BudgetTransactions.deriveRecurringExpenseOccurrences,
+    confirm: window.BudgetTransactions.addRecurringExpenseTransaction
   };
   window.BudgetTransactions.addRecurringExpenseTemplate = (currentState, input, ...rest) => {
     records.recurringDomainCalls.add.push({ state: copyRecord(currentState), input: copyRecord(input) });
@@ -723,6 +731,23 @@ function createAppHarness(options = {}) {
     });
     return recurringDomain.derive(currentState, month, today, ...rest);
   };
+
+  window.BudgetTransactions.addRecurringExpenseTransaction = (currentState, occurrence, input, ...rest) => {
+    records.recurringDomainCalls.confirm.push({
+      state: copyRecord(currentState),
+      occurrence: copyRecord(occurrence),
+      input: copyRecord(input)
+    });
+    return recurringDomain.confirm(currentState, occurrence, input, ...rest);
+  };
+
+  const originalSaveState = window.BudgetStorage.saveState;
+  window.BudgetStorage.saveState = (nextState) => {
+    records.savedStates.push(copyRecord(nextState));
+    return originalSaveState(nextState);
+  };
+
+  let recurringConfirmReturnFocus = null;
 
   window.BudgetUI = {
     getElements: () => elements,
@@ -812,25 +837,50 @@ function createAppHarness(options = {}) {
     },
     openRecurringConfirmDialog(target, occurrence, trigger) {
       records.recurringConfirmOpens.push({ occurrence: copyRecord(occurrence), trigger });
+      recurringConfirmReturnFocus = trigger || null;
+      target.recurringConfirmScheduledDate.textContent = occurrence.scheduledDate || '';
+      target.recurringConfirmDate.value = occurrence.scheduledDate || '';
+      target.recurringConfirmAmount.value = String(occurrence.amount || '');
+      target.recurringConfirmCategory.value = occurrence.category || '';
+      target.recurringConfirmMemo.value = occurrence.memo || '';
       target.recurringConfirmDialog.dataset.transactionId = occurrence.transactionId;
+      this.setMessage(target.recurringConfirmMessage, '', null);
       target.recurringConfirmDialog.open = true;
+      target.recurringConfirmDate.focus();
     },
     closeRecurringConfirmDialog(target, optionsValue = {}) {
       records.recurringConfirmCloses.push(copyRecord(optionsValue));
+      target.recurringConfirmScheduledDate.textContent = '';
+      target.recurringConfirmDate.value = '';
+      target.recurringConfirmAmount.value = '';
+      target.recurringConfirmCategory.value = '';
+      target.recurringConfirmMemo.value = '';
       delete target.recurringConfirmDialog.dataset.transactionId;
+      this.setMessage(target.recurringConfirmMessage, '', null);
       target.recurringConfirmDialog.open = false;
+      if (optionsValue.reason === 'saved') target.recurringUpcomingHeading.focus();
+      else if (recurringConfirmReturnFocus && !recurringConfirmReturnFocus.disabled) recurringConfirmReturnFocus.focus();
+      else target.recurringUpcomingHeading.focus();
+      recurringConfirmReturnFocus = null;
     },
     setActiveTab(target, tab) { records.activeTabs.push(tab); },
     clearFieldErrors() {},
     showValidationErrors(scope, messageElement, errors) {
       records.validationErrors.push(copyRecord(errors));
       this.setMessage(messageElement, errors.map((item) => item.message).join(' '), 'error');
-      const fields = {
-        memo: elements.recurringTemplateMemo,
-        category: elements.recurringTemplateCategory,
-        amount: elements.recurringTemplateAmount,
-        dayOfMonth: elements.recurringTemplateDay
-      };
+      const fields = scope === elements.recurringConfirmForm
+        ? {
+            date: elements.recurringConfirmDate,
+            category: elements.recurringConfirmCategory,
+            amount: elements.recurringConfirmAmount,
+            memo: elements.recurringConfirmMemo
+          }
+        : {
+            memo: elements.recurringTemplateMemo,
+            category: elements.recurringTemplateCategory,
+            amount: elements.recurringTemplateAmount,
+            dayOfMonth: elements.recurringTemplateDay
+          };
       const first = errors.find((item) => fields[item.field]);
       if (first) fields[first.field].focus();
     },
@@ -855,7 +905,7 @@ function createAppHarness(options = {}) {
 
   const cloudCalls = {
     currentUser: [], downloadState: [], signInWithPassword: [], signOut: [],
-    saveSettings: [], insertTransaction: [], updateTransaction: [], deleteTransaction: [],
+    saveSettings: [], insertTransaction: [], updateTransaction: [], upsertTransaction: [], deleteTransaction: [],
     uploadState: []
   };
   const cloudBehaviors = options.cloud || {};
@@ -878,12 +928,14 @@ function createAppHarness(options = {}) {
     saveSettings: (nextState) => runCloudBehavior('saveSettings', [nextState], { ok: true }),
     insertTransaction: (transaction) => runCloudBehavior('insertTransaction', [transaction], { ok: true }),
     updateTransaction: (transaction, expected) => runCloudBehavior('updateTransaction', [transaction, expected], { ok: true }),
+    upsertTransaction: (transaction) => runCloudBehavior('upsertTransaction', [transaction], { ok: true }),
     deleteTransaction: (id, expected) => runCloudBehavior('deleteTransaction', [id, expected], { ok: true }),
     uploadState: (nextState, expectedState) => runCloudBehavior(
       'uploadState',
       [nextState, expectedState],
       { ok: true, uploadedCount: nextState.transactions.length }
-    )
+    ),
+    isDuplicateTransactionError: (error) => Boolean(error && error.code === '23505')
   };
 
   vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'js/app.js'), 'utf8'), context, { filename: 'js/app.js' });
@@ -5323,6 +5375,465 @@ async function testAppRecurringTemplateCrudIsRemoteFirst() {
   assertEveryRenderUsesRecurringDomain(conflictHarness);
 }
 
+async function testAppRecurringConfirmationSerializesAndPreservesFailureInput() {
+  const baseWindow = createContext();
+  const storage = baseWindow.BudgetStorage;
+  const transactions = baseWindow.BudgetTransactions;
+  const selectedMonth = storage.monthKeyForDate(storage.localDateString(), 1);
+  const scheduledDate = storage.scheduledDateForMonth(selectedMonth, 20);
+  const editedDate = storage.scheduledDateForMonth(selectedMonth, 21);
+  const template = {
+    id: 'rt-confirm-rent',
+    memo: '월세',
+    category: '생활비',
+    amount: 550000,
+    dayOfMonth: 20,
+    startsOn: `${selectedMonth}-01`
+  };
+  const initialState = storage.normalizeState({
+    ...storage.defaultState(),
+    monthlyBudget: 1500000,
+    recurringExpenseTemplates: [template]
+  });
+  const deterministicId = transactions.recurringTransactionId(template.id, selectedMonth);
+  const exportState = async (target) => {
+    await target.elements.exportButton.dispatch('click');
+    return JSON.parse(target.records.downloads.at(-1).content);
+  };
+  const confirmValues = (target) => ({
+    date: target.elements.recurringConfirmDate.value,
+    amount: target.elements.recurringConfirmAmount.value,
+    category: target.elements.recurringConfirmCategory.value,
+    memo: target.elements.recurringConfirmMemo.value
+  });
+  const currentRecordButton = (target) => target.dynamicControls.find((control) => (
+    control.dataset.action === 'record-recurring-expense'
+    && control.dataset.recurringTransactionId === deterministicId
+  ));
+  const writeCounts = (target) => ({
+    insert: target.cloudCalls.insertTransaction.length,
+    update: target.cloudCalls.updateTransaction.length,
+    upsert: target.cloudCalls.upsertTransaction.length,
+    upload: target.cloudCalls.uploadState.length,
+    delete: target.cloudCalls.deleteTransaction.length
+  });
+
+  const insertGate = createDeferred();
+  const harness = createAppHarness({
+    cloudState: initialState,
+    cloud: { insertTransaction: () => insertGate.promise }
+  });
+  await harness.init();
+  const recordButton = currentRecordButton(harness);
+  assert.ok(recordButton, 'the current derived occurrence must expose a record action');
+
+  recordButton.disabled = true;
+  await harness.elements.recurringUpcomingList.dispatch('click', { target: recordButton });
+  const opensAfterDisabledClick = harness.records.recurringConfirmOpens.length;
+  recordButton.disabled = false;
+  const writesBeforeOpen = writeCounts(harness);
+  await harness.elements.recurringUpcomingList.dispatch('click', { target: recordButton });
+  const occurrence = harness.records.recurringUpcomingRenders.at(-1)
+    .find((item) => item.transactionId === deterministicId);
+  const summaryBefore = plain(harness.records.renderedSummaries.at(-1));
+  const summaryRenderCountBefore = harness.records.renderedSummaries.length;
+  const occurrenceRenderCountBefore = harness.records.recurringUpcomingRenders.length;
+  const savedStateCountBefore = harness.records.savedStates.length;
+  const exportedBefore = await exportState(harness);
+
+  harness.elements.recurringConfirmDate.value = editedDate;
+  harness.elements.recurringConfirmAmount.value = '123,456';
+  harness.elements.recurringConfirmCategory.value = '배달비';
+  harness.elements.recurringConfirmMemo.value = '날짜와 금액 수정';
+  const editedValues = confirmValues(harness);
+  harness.elements.recurringConfirmMemo.focus();
+  const saving = harness.elements.recurringConfirmForm.dispatch('submit', {
+    submitter: harness.elements.recurringConfirmSave
+  });
+  await Promise.resolve();
+
+  assert.strictEqual(
+    harness.cloudCalls.insertTransaction.length,
+    1,
+    'valid recurring confirmation must begin one insert'
+  );
+  assert.strictEqual(opensAfterDisabledClick, 0);
+  assert.strictEqual(harness.records.recurringConfirmOpens.length, 1);
+  assert.deepStrictEqual(writesBeforeOpen, { insert: 0, update: 0, upsert: 0, upload: 0, delete: 0 });
+  assert.deepStrictEqual(harness.records.recurringConfirmOpens[0].occurrence, occurrence);
+  assert.strictEqual(harness.records.recurringConfirmOpens[0].trigger, recordButton);
+  assert.strictEqual(harness.elements.recurringConfirmScheduledDate.textContent, scheduledDate);
+  assert.strictEqual(harness.elements.recurringConfirmDialog.dataset.transactionId, deterministicId);
+  assert.deepStrictEqual(harness.records.recurringDomainCalls.confirm.at(-1).input, editedValues);
+  assert.strictEqual(harness.records.recurringDomainCalls.confirm.at(-1).occurrence.transactionId, deterministicId);
+  const inserted = plain(harness.cloudCalls.insertTransaction[0][0]);
+  assert.deepStrictEqual(inserted, {
+    id: deterministicId,
+    date: editedDate,
+    type: 'expense',
+    category: '배달비',
+    amount: 123456,
+    memo: '날짜와 금액 수정',
+    source: 'user'
+  });
+  assert.strictEqual(inserted.id, deterministicId, 'editing the actual date must retain the scheduled-month ID');
+  assert.deepStrictEqual(writeCounts(harness), { insert: 1, update: 0, upsert: 0, upload: 0, delete: 0 });
+  assert.strictEqual(harness.document.querySelectorAll('[data-cloud-write]').every((control) => control.disabled), true);
+
+  const secondSubmit = await harness.elements.recurringConfirmForm.dispatch('submit', {
+    submitter: harness.elements.recurringConfirmSave
+  });
+  assert.strictEqual(secondSubmit.defaultPrevented, true);
+  assert.strictEqual(harness.cloudCalls.insertTransaction.length, 1, 'the shared mutation lock must refuse a second submit');
+  assert.strictEqual(harness.document.activeElement, harness.elements.recurringConfirmMemo);
+  assert.deepStrictEqual(confirmValues(harness), editedValues);
+  assert.strictEqual(harness.elements.recurringConfirmDialog.open, true);
+  assert.strictEqual(harness.records.recurringConfirmCloses.length, 0);
+  assert.strictEqual(harness.records.savedStates.length, savedStateCountBefore);
+  assert.strictEqual(harness.records.renderedSummaries.length, summaryRenderCountBefore);
+  assert.strictEqual(harness.records.recurringUpcomingRenders.length, occurrenceRenderCountBefore);
+  assert.deepStrictEqual(await exportState(harness), exportedBefore);
+  assert.deepStrictEqual(plain(harness.records.renderedSummaries.at(-1)), summaryBefore);
+
+  insertGate.resolve({ ok: true });
+  await saving;
+  const exportedAfter = await exportState(harness);
+  const summaryAfter = plain(harness.records.renderedSummaries.at(-1));
+  const savedTransaction = exportedAfter.transactions.find((item) => item.id === deterministicId);
+  assert.deepStrictEqual(savedTransaction, inserted);
+  assert.strictEqual(summaryAfter.income, summaryBefore.income);
+  assert.strictEqual(summaryAfter.expense - summaryBefore.expense, inserted.amount);
+  assert.strictEqual(summaryAfter.count - summaryBefore.count, 1);
+  assert.strictEqual(summaryAfter.balance - summaryBefore.balance, -inserted.amount);
+  assert.strictEqual(summaryAfter.budgetRemaining - summaryBefore.budgetRemaining, -inserted.amount);
+  assert.strictEqual(harness.records.savedStates.length, savedStateCountBefore + 1);
+  assert.deepStrictEqual(harness.records.recurringConfirmCloses.at(-1), { reason: 'saved' });
+  assert.strictEqual(harness.elements.recurringConfirmDialog.open, false);
+  assert.deepStrictEqual(confirmValues(harness), { date: '', amount: '', category: '', memo: '' });
+  assert.strictEqual(harness.document.activeElement, harness.elements.recurringUpcomingHeading);
+  assert.strictEqual(harness.elements.globalMessage.textContent, '기록했어요.');
+  assert.strictEqual(harness.document.querySelectorAll('[data-cloud-write]').every((control) => !control.disabled), true);
+  assert.deepStrictEqual(writeCounts(harness), { insert: 1, update: 0, upsert: 0, upload: 0, delete: 0 });
+
+  const validationHarness = createAppHarness({ cloudState: initialState });
+  await validationHarness.init();
+  const validationButton = currentRecordButton(validationHarness);
+  await validationHarness.elements.recurringUpcomingList.dispatch('click', { target: validationButton });
+  validationHarness.elements.recurringConfirmDate.value = 'invalid-date';
+  validationHarness.elements.recurringConfirmAmount.value = '12,345';
+  validationHarness.elements.recurringConfirmCategory.value = '생활비';
+  validationHarness.elements.recurringConfirmMemo.value = '입력은 그대로';
+  const invalidValues = confirmValues(validationHarness);
+  const invalidEvent = await validationHarness.elements.recurringConfirmForm.dispatch('submit', {
+    submitter: validationHarness.elements.recurringConfirmSave
+  });
+  assert.strictEqual(invalidEvent.defaultPrevented, true);
+  assert.strictEqual(validationHarness.records.recurringDomainCalls.confirm.length, 1);
+  assert.strictEqual(validationHarness.cloudCalls.insertTransaction.length, 0);
+  assert.match(validationHarness.elements.recurringConfirmMessage.textContent, /날짜를 올바르게/);
+  assert.strictEqual(validationHarness.document.activeElement, validationHarness.elements.recurringConfirmDate);
+  assert.deepStrictEqual(confirmValues(validationHarness), invalidValues);
+  assert.strictEqual(validationHarness.elements.recurringConfirmDialog.open, true);
+  assert.strictEqual(validationHarness.records.cloudStatuses.at(-1).readiness, 'ready');
+  assert.strictEqual(validationHarness.document.querySelectorAll('[data-cloud-write]').every((control) => !control.disabled), true);
+
+  const outsideMonth = storage.addMonthsToMonth(selectedMonth, 1);
+  const outsideDate = storage.scheduledDateForMonth(outsideMonth, 1);
+  const outsideHarness = createAppHarness({ cloudState: initialState });
+  await outsideHarness.init();
+  const outsideButton = currentRecordButton(outsideHarness);
+  const outsideSummaryBefore = plain(outsideHarness.records.renderedSummaries.at(-1));
+  await outsideHarness.elements.recurringUpcomingList.dispatch('click', { target: outsideButton });
+  outsideHarness.elements.recurringConfirmDate.value = outsideDate;
+  outsideHarness.elements.recurringConfirmAmount.value = '550000';
+  outsideHarness.elements.recurringConfirmCategory.value = '생활비';
+  outsideHarness.elements.recurringConfirmMemo.value = '다음 기간에 실제 결제';
+  await outsideHarness.elements.recurringConfirmForm.dispatch('submit', {
+    submitter: outsideHarness.elements.recurringConfirmSave
+  });
+  assert.strictEqual(
+    outsideHarness.elements.globalMessage.textContent,
+    '기록했어요. 입력한 날짜가 현재 예산기간 밖이라 내역과 캘린더에는 보이지 않아요.'
+  );
+  assert.strictEqual(outsideHarness.cloudCalls.insertTransaction.length, 1);
+  const outsideExport = await exportState(outsideHarness);
+  assert.strictEqual(outsideExport.transactions[0].id, deterministicId);
+  assert.strictEqual(outsideExport.transactions[0].date, outsideDate);
+  assert.deepStrictEqual(plain(outsideHarness.records.renderedSummaries.at(-1)), outsideSummaryBefore);
+  assert.strictEqual(
+    outsideHarness.records.recurringUpcomingRenders.at(-1).find((item) => item.transactionId === deterministicId).status,
+    'recorded'
+  );
+
+  const remoteError = new Error('network offline');
+  const failureHarness = createAppHarness({
+    cloudState: initialState,
+    cloud: { insertTransaction: async () => { throw remoteError; } }
+  });
+  await failureHarness.init();
+  const failureButton = currentRecordButton(failureHarness);
+  await failureHarness.elements.recurringUpcomingList.dispatch('click', { target: failureButton });
+  failureHarness.elements.recurringConfirmDate.value = editedDate;
+  failureHarness.elements.recurringConfirmAmount.value = '77,000';
+  failureHarness.elements.recurringConfirmCategory.value = '비상금';
+  failureHarness.elements.recurringConfirmMemo.value = '실패해도 보존';
+  const failedValues = confirmValues(failureHarness);
+  const failedState = await exportState(failureHarness);
+  const failedRenderCount = failureHarness.records.renderedSummaries.length;
+  await failureHarness.elements.recurringConfirmForm.dispatch('submit', {
+    submitter: failureHarness.elements.recurringConfirmSave
+  });
+  assert.strictEqual(failureHarness.cloudCalls.insertTransaction.length, 1);
+  assert.deepStrictEqual(writeCounts(failureHarness), { insert: 1, update: 0, upsert: 0, upload: 0, delete: 0 });
+  assert.deepStrictEqual(await exportState(failureHarness), failedState);
+  assert.strictEqual(failureHarness.records.renderedSummaries.length, failedRenderCount);
+  assert.deepStrictEqual(confirmValues(failureHarness), failedValues);
+  assert.strictEqual(failureHarness.elements.recurringConfirmDialog.open, true);
+  assert.match(failureHarness.elements.recurringConfirmMessage.textContent, /반복지출 저장 실패: network offline/);
+  assert.strictEqual(failureHarness.document.activeElement, failureHarness.elements.recurringConfirmMessage);
+  assert.strictEqual(failureHarness.records.cloudStatuses.at(-1).readiness, 'ready');
+  assert.strictEqual(failureHarness.document.querySelectorAll('[data-cloud-write]').every((control) => !control.disabled), true);
+
+  const nativeCancel = await failureHarness.elements.recurringConfirmDialog.dispatch('cancel');
+  assert.strictEqual(nativeCancel.defaultPrevented, true);
+  assert.deepStrictEqual(failureHarness.records.recurringConfirmCloses.at(-1), { reason: 'cancel' });
+  assert.strictEqual(failureHarness.elements.recurringConfirmDialog.open, false);
+  assert.deepStrictEqual(confirmValues(failureHarness), { date: '', amount: '', category: '', memo: '' });
+  assert.strictEqual(failureHarness.document.activeElement, failureButton);
+  assert.strictEqual(failureHarness.cloudCalls.insertTransaction.length, 1);
+
+  await failureHarness.elements.recurringUpcomingList.dispatch('click', { target: failureButton });
+  failureHarness.elements.recurringConfirmMemo.value = '명시 취소';
+  await failureHarness.elements.recurringConfirmCancel.dispatch('click');
+  assert.deepStrictEqual(failureHarness.records.recurringConfirmCloses.at(-1), { reason: 'cancel' });
+  assert.strictEqual(failureHarness.elements.recurringConfirmDialog.open, false);
+  assert.deepStrictEqual(confirmValues(failureHarness), { date: '', amount: '', category: '', memo: '' });
+  assert.strictEqual(failureHarness.document.activeElement, failureButton);
+  assert.strictEqual(failureHarness.cloudCalls.insertTransaction.length, 1);
+
+  const confirmedTransaction = {
+    id: deterministicId,
+    date: scheduledDate,
+    type: 'expense',
+    category: template.category,
+    amount: template.amount,
+    memo: template.memo,
+    source: 'user'
+  };
+  const deleteHarness = createAppHarness({
+    cloudState: storage.normalizeState({ ...initialState, transactions: [confirmedTransaction] }),
+    confirm: () => false
+  });
+  await deleteHarness.init();
+  const deleteButton = deleteHarness.createElement('button');
+  deleteButton.dataset.action = 'delete';
+  deleteButton.dataset.id = deterministicId;
+  deleteButton.closest = () => deleteButton;
+  await deleteHarness.elements.list.dispatch('click', { target: deleteButton });
+  assert.match(deleteHarness.records.confirmCalls.at(-1), /삭제하면 해당 예정 항목이 다시 나타나요\./);
+  assert.strictEqual(deleteHarness.cloudCalls.deleteTransaction.length, 0);
+}
+
+async function testAppRecurringDuplicateReloadsWithoutUpsert() {
+  const baseWindow = createContext();
+  const storage = baseWindow.BudgetStorage;
+  const transactions = baseWindow.BudgetTransactions;
+  const selectedMonth = storage.monthKeyForDate(storage.localDateString(), 1);
+  const scheduledDate = storage.scheduledDateForMonth(selectedMonth, 9);
+  const template = {
+    id: 'rt-duplicate-rent',
+    memo: '월세',
+    category: '생활비',
+    amount: 500000,
+    dayOfMonth: 9,
+    startsOn: `${selectedMonth}-01`
+  };
+  const initialState = storage.normalizeState({
+    ...storage.defaultState(),
+    recurringExpenseTemplates: [template]
+  });
+  const deterministicId = transactions.recurringTransactionId(template.id, selectedMonth);
+  const duplicateError = () => Object.assign(new Error('duplicate key value'), { code: '23505' });
+  const exportState = async (target) => {
+    await target.elements.exportButton.dispatch('click');
+    return JSON.parse(target.records.downloads.at(-1).content);
+  };
+  const confirmValues = (target) => ({
+    date: target.elements.recurringConfirmDate.value,
+    amount: target.elements.recurringConfirmAmount.value,
+    category: target.elements.recurringConfirmCategory.value,
+    memo: target.elements.recurringConfirmMemo.value
+  });
+  const openAndEdit = async (target, suffix) => {
+    const button = target.dynamicControls.find((control) => (
+      control.dataset.action === 'record-recurring-expense'
+      && control.dataset.recurringTransactionId === deterministicId
+    ));
+    await target.elements.recurringUpcomingList.dispatch('click', { target: button });
+    target.elements.recurringConfirmDate.value = storage.scheduledDateForMonth(selectedMonth, 10);
+    target.elements.recurringConfirmAmount.value = '777,777';
+    target.elements.recurringConfirmCategory.value = '배달비';
+    target.elements.recurringConfirmMemo.value = `대화상자 값 ${suffix}`;
+    return { button, values: confirmValues(target) };
+  };
+  const assertNoOverwriteWrites = (target) => {
+    assert.strictEqual(target.cloudCalls.updateTransaction.length, 0);
+    assert.strictEqual(target.cloudCalls.upsertTransaction.length, 0);
+    assert.strictEqual(target.cloudCalls.uploadState.length, 0);
+    assert.strictEqual(target.cloudCalls.deleteTransaction.length, 0);
+  };
+  const latestTransaction = {
+    id: deterministicId,
+    date: scheduledDate,
+    type: 'expense',
+    category: '비상금',
+    amount: 654321,
+    memo: '다른 브라우저에 저장된 원본',
+    source: 'user'
+  };
+  const latestState = storage.normalizeState({ ...initialState, transactions: [latestTransaction] });
+  let successfulDownloadCount = 0;
+  const duplicateHarness = createAppHarness({
+    cloud: {
+      downloadState: async () => {
+        successfulDownloadCount += 1;
+        return successfulDownloadCount === 1 ? initialState : latestState;
+      },
+      insertTransaction: async () => { throw duplicateError(); }
+    }
+  });
+  await duplicateHarness.init();
+  const duplicateDownloadBaseline = duplicateHarness.cloudCalls.downloadState.length;
+  await openAndEdit(duplicateHarness, '성공 재조회');
+  await duplicateHarness.elements.recurringConfirmForm.dispatch('submit', {
+    submitter: duplicateHarness.elements.recurringConfirmSave
+  });
+  assert.strictEqual(duplicateHarness.cloudCalls.insertTransaction.length, 1);
+  assert.strictEqual(duplicateHarness.cloudCalls.downloadState.length - duplicateDownloadBaseline, 1);
+  assertNoOverwriteWrites(duplicateHarness);
+  const duplicateExport = await exportState(duplicateHarness);
+  assert.deepStrictEqual(duplicateExport.transactions.find((item) => item.id === deterministicId), latestTransaction);
+  assert.notStrictEqual(duplicateExport.transactions[0].memo, '대화상자 값 성공 재조회');
+  assert.deepStrictEqual(duplicateHarness.records.recurringConfirmCloses.at(-1), { reason: 'saved' });
+  assert.strictEqual(duplicateHarness.elements.recurringConfirmDialog.open, false);
+  assert.strictEqual(duplicateHarness.document.activeElement, duplicateHarness.elements.recurringUpcomingHeading);
+  assert.strictEqual(
+    duplicateHarness.elements.globalMessage.textContent,
+    '이미 기록된 항목이에요. 최신 내용을 다시 불러와 주세요.'
+  );
+  assert.strictEqual(duplicateHarness.records.cloudStatuses.at(-1).readiness, 'ready');
+
+  const missingLatest = storage.normalizeState({
+    ...initialState,
+    transactions: [{
+      id: 'tx-unrelated',
+      date: scheduledDate,
+      type: 'expense',
+      category: '생활비',
+      amount: 1,
+      memo: '관계없는 최신 거래',
+      source: 'user'
+    }]
+  });
+  let missingDownloadCount = 0;
+  const missingHarness = createAppHarness({
+    cloud: {
+      downloadState: async () => {
+        missingDownloadCount += 1;
+        return missingDownloadCount === 1 ? initialState : missingLatest;
+      },
+      insertTransaction: async () => { throw duplicateError(); }
+    }
+  });
+  await missingHarness.init();
+  const missingDownloadBaseline = missingHarness.cloudCalls.downloadState.length;
+  const missingDialog = await openAndEdit(missingHarness, 'ID 없음');
+  const missingStateBefore = await exportState(missingHarness);
+  await missingHarness.elements.recurringConfirmForm.dispatch('submit', {
+    submitter: missingHarness.elements.recurringConfirmSave
+  });
+  assert.strictEqual(missingHarness.cloudCalls.insertTransaction.length, 1);
+  assert.strictEqual(missingHarness.cloudCalls.downloadState.length - missingDownloadBaseline, 1);
+  assertNoOverwriteWrites(missingHarness);
+  assert.deepStrictEqual(await exportState(missingHarness), missingStateBefore);
+  assert.deepStrictEqual(confirmValues(missingHarness), missingDialog.values);
+  assert.strictEqual(missingHarness.elements.recurringConfirmDialog.open, true);
+  assert.match(missingHarness.elements.recurringConfirmMessage.textContent, /클라우드 거래 상태가 달라졌어요/);
+  assert.match(missingHarness.elements.globalMessage.textContent, /클라우드 거래 상태가 달라졌어요/);
+  assert.strictEqual(missingHarness.document.activeElement, missingHarness.elements.recurringConfirmMessage);
+  assert.strictEqual(missingHarness.records.cloudStatuses.at(-1).readiness, 'load-error');
+  assert.strictEqual(missingHarness.document.querySelectorAll('[data-cloud-write]').every((control) => control.disabled), true);
+  await missingHarness.elements.recurringConfirmForm.dispatch('submit', {
+    submitter: missingHarness.elements.recurringConfirmSave
+  });
+  assert.strictEqual(missingHarness.cloudCalls.insertTransaction.length, 1);
+  assert.strictEqual(missingHarness.cloudCalls.downloadState.length - missingDownloadBaseline, 1);
+  await missingHarness.elements.recurringConfirmCancel.dispatch('click');
+  assert.deepStrictEqual(missingHarness.records.recurringConfirmCloses.at(-1), { reason: 'cancel' });
+  assert.strictEqual(missingHarness.elements.recurringConfirmDialog.open, false);
+  assert.deepStrictEqual(confirmValues(missingHarness), { date: '', amount: '', category: '', memo: '' });
+  assert.strictEqual(missingHarness.document.activeElement, missingHarness.elements.recurringUpcomingHeading);
+  assert.strictEqual(missingHarness.records.cloudStatuses.at(-1).readiness, 'load-error');
+  assert.strictEqual(missingHarness.document.querySelectorAll('[data-cloud-write]').every((control) => control.disabled), true);
+
+  let rejectedDownloadCount = 0;
+  const rejectedHarness = createAppHarness({
+    cloud: {
+      downloadState: async () => {
+        rejectedDownloadCount += 1;
+        if (rejectedDownloadCount === 1) return initialState;
+        throw new Error('download offline');
+      },
+      insertTransaction: async () => { throw duplicateError(); }
+    }
+  });
+  await rejectedHarness.init();
+  const rejectedDownloadBaseline = rejectedHarness.cloudCalls.downloadState.length;
+  const rejectedDialog = await openAndEdit(rejectedHarness, '조회 실패');
+  const rejectedStateBefore = await exportState(rejectedHarness);
+  await rejectedHarness.elements.recurringConfirmForm.dispatch('submit', {
+    submitter: rejectedHarness.elements.recurringConfirmSave
+  });
+  assert.strictEqual(rejectedHarness.cloudCalls.insertTransaction.length, 1);
+  assert.strictEqual(rejectedHarness.cloudCalls.downloadState.length - rejectedDownloadBaseline, 1);
+  assertNoOverwriteWrites(rejectedHarness);
+  assert.deepStrictEqual(await exportState(rejectedHarness), rejectedStateBefore);
+  assert.deepStrictEqual(confirmValues(rejectedHarness), rejectedDialog.values);
+  assert.strictEqual(rejectedHarness.elements.recurringConfirmDialog.open, true);
+  assert.match(rejectedHarness.elements.recurringConfirmMessage.textContent, /최신 클라우드 거래를 확인하지 못했어요/);
+  assert.match(rejectedHarness.elements.globalMessage.textContent, /최신 클라우드 거래를 확인하지 못했어요/);
+  assert.strictEqual(rejectedHarness.document.activeElement, rejectedHarness.elements.recurringConfirmMessage);
+  assert.strictEqual(rejectedHarness.records.cloudStatuses.at(-1).readiness, 'load-error');
+  assert.strictEqual(rejectedHarness.document.querySelectorAll('[data-cloud-write]').every((control) => control.disabled), true);
+
+  let textDownloadCount = 0;
+  const textOnlyHarness = createAppHarness({
+    cloud: {
+      downloadState: async () => {
+        textDownloadCount += 1;
+        return initialState;
+      },
+      insertTransaction: async () => { throw new Error('duplicate transaction text only'); }
+    }
+  });
+  await textOnlyHarness.init();
+  const textDownloadBaseline = textOnlyHarness.cloudCalls.downloadState.length;
+  const textDialog = await openAndEdit(textOnlyHarness, '문구만 duplicate');
+  const textStateBefore = await exportState(textOnlyHarness);
+  await textOnlyHarness.elements.recurringConfirmForm.dispatch('submit', {
+    submitter: textOnlyHarness.elements.recurringConfirmSave
+  });
+  assert.strictEqual(textOnlyHarness.cloudCalls.insertTransaction.length, 1);
+  assert.strictEqual(textOnlyHarness.cloudCalls.downloadState.length - textDownloadBaseline, 0);
+  assertNoOverwriteWrites(textOnlyHarness);
+  assert.deepStrictEqual(await exportState(textOnlyHarness), textStateBefore);
+  assert.deepStrictEqual(confirmValues(textOnlyHarness), textDialog.values);
+  assert.strictEqual(textOnlyHarness.elements.recurringConfirmDialog.open, true);
+  assert.match(textOnlyHarness.elements.recurringConfirmMessage.textContent, /duplicate transaction text only/);
+  assert.strictEqual(textOnlyHarness.records.cloudStatuses.at(-1).readiness, 'ready');
+  assert.strictEqual(textOnlyHarness.document.querySelectorAll('[data-cloud-write]').every((control) => !control.disabled), true);
+}
+
 async function testAppLogoutClearsPrivateStateAndFocusesLogin() {
   const base = createContext().BudgetStorage.defaultState();
   const harness = createAppHarness({
@@ -5442,6 +5953,8 @@ const tests = [
   testAppWholeStateConflictPassesExpectedStateAndKeepsLocalState,
   testAppSettingsConflictRetriesOnlyAfterCloudRefresh,
   testAppRecurringTemplateCrudIsRemoteFirst,
+  testAppRecurringConfirmationSerializesAndPreservesFailureInput,
+  testAppRecurringDuplicateReloadsWithoutUpsert,
   testAppLogoutClearsPrivateStateAndFocusesLogin
 ];
 
