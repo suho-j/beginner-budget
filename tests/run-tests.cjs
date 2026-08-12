@@ -1586,19 +1586,10 @@ function testRecurringImportExportAllowsTemplateOnlyAndRejectsFutureVersion() {
     skippedCount: 1
   });
 
-  const collectionFallbacks = [
+  const missingCollectionDefaults = [
     {
       result: transactions.importState(JSON.stringify({
         version: 2,
-        recurringExpenseTemplates: [template]
-      })),
-      transactionCount: 0,
-      templateCount: 1
-    },
-    {
-      result: transactions.importState(JSON.stringify({
-        version: 2,
-        transactions: { unexpected: true },
         recurringExpenseTemplates: [template]
       })),
       transactionCount: 0,
@@ -1611,18 +1602,9 @@ function testRecurringImportExportAllowsTemplateOnlyAndRejectsFutureVersion() {
       })),
       transactionCount: 1,
       templateCount: 0
-    },
-    {
-      result: transactions.importState(JSON.stringify({
-        version: 2,
-        transactions: [legacyTransaction],
-        recurringExpenseTemplates: { unexpected: true }
-      })),
-      transactionCount: 1,
-      templateCount: 0
     }
   ];
-  collectionFallbacks.forEach(({ result, transactionCount, templateCount }) => {
+  missingCollectionDefaults.forEach(({ result, transactionCount, templateCount }) => {
     assert.strictEqual(result.ok, true);
     assert.strictEqual(result.summary.sourceTransactionCount, transactionCount);
     assert.strictEqual(result.summary.importedTransactionCount, transactionCount);
@@ -1633,6 +1615,28 @@ function testRecurringImportExportAllowsTemplateOnlyAndRejectsFutureVersion() {
     assert.strictEqual(result.summary.sourceCount, transactionCount);
     assert.strictEqual(result.summary.importedCount, transactionCount);
     assert.strictEqual(result.summary.skippedCount, 0);
+  });
+
+  const malformedCollections = [{ unexpected: true }, 'corrupt', 123, null, true, false];
+  malformedCollections.forEach((malformedTransactions) => {
+    const result = transactions.importState(JSON.stringify({
+      version: 2,
+      transactions: malformedTransactions,
+      recurringExpenseTemplates: [template]
+    }));
+    assert.strictEqual(result.ok, false);
+    assert.strictEqual(result.state, null);
+    assert.match(result.errors[0].message, /백업.*거래 내역.*올바르지/);
+  });
+  malformedCollections.forEach((malformedTemplates) => {
+    const result = transactions.importState(JSON.stringify({
+      version: 2,
+      transactions: [legacyTransaction],
+      recurringExpenseTemplates: malformedTemplates
+    }));
+    assert.strictEqual(result.ok, false);
+    assert.strictEqual(result.state, null);
+    assert.match(result.errors[0].message, /백업.*반복 지출.*올바르지/);
   });
 
   const templateBytes = JSON.stringify(confirmed.state.recurringExpenseTemplates);

@@ -590,6 +590,15 @@
         return { ok: false, state: null, errors: [error('importData', '더 새로운 버전의 백업이에요. 앱을 업데이트해 주세요.')] };
       }
 
+      const hasTransactions = Object.prototype.hasOwnProperty.call(parsed, 'transactions');
+      if (hasTransactions && !Array.isArray(parsed.transactions)) {
+        return { ok: false, state: null, errors: [error('importData', '백업 거래 내역 형식이 올바르지 않아요.')] };
+      }
+      const hasTemplates = Object.prototype.hasOwnProperty.call(parsed, 'recurringExpenseTemplates');
+      if (hasTemplates && !Array.isArray(parsed.recurringExpenseTemplates)) {
+        return { ok: false, state: null, errors: [error('importData', '백업 반복 지출 형식이 올바르지 않아요.')] };
+      }
+
       const rawTransactions = Array.isArray(parsed.transactions) ? parsed.transactions : [];
       const rawTemplates = Array.isArray(parsed.recurringExpenseTemplates)
         ? parsed.recurringExpenseTemplates
