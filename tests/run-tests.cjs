@@ -5216,6 +5216,11 @@ function testPreviewV2LiveConcurrencyRunnerContract() {
   assert.match(artifactBuilder, /version\.testCount\s+-ne\s+89/i, 'artifact validation must require the current 89-test suite');
   assert.match(artifactBuilder, /testCount\s*=\s*89/i, 'artifact metadata must publish the current 89-test suite');
   assert.match(artifactBuilder, /self-tests passed:\s*16 scenarios/i, 'artifact self-test evidence must report all sixteen fixtures');
+  assert.match(
+    artifactBuilder,
+    /git\s+-c\s+"safe\.directory=\$safeRoot"\s+-c\s+'core\.excludesFile='\s+-c\s+'core\.autocrlf=false'\s+-C\s+\$Source[\s\S]*?archive/i,
+    'artifact export must preserve committed bytes even when Git for Windows enables core.autocrlf'
+  );
 
   const currentTestPlan = fs.readFileSync(path.join(__dirname, '..', 'docs', 'TEST_PLAN.md'), 'utf8');
   const currentChecklist = fs.readFileSync(path.join(__dirname, '..', 'manual-test-checklist.md'), 'utf8');

@@ -291,7 +291,7 @@ function Export-CommitArtifact {
   )
 
   $safeRoot = $Source.Replace('\', '/')
-  $archiveOutput = @(& git -c "safe.directory=$safeRoot" -c 'core.excludesFile=' -C $Source `
+  $archiveOutput = @(& git -c "safe.directory=$safeRoot" -c 'core.excludesFile=' -c 'core.autocrlf=false' -C $Source `
     archive '--format=tar' "--output=$ArchivePath" $Commit '--' @artifactFiles 2>&1)
   if ($LASTEXITCODE -ne 0) {
     throw "git archive failed for SourceCommit $Commit`: $($archiveOutput -join [Environment]::NewLine)"
