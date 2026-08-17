@@ -7,6 +7,7 @@
 - 마지막 기능 구현 SHA: `20eddaf476edfc1cb9ceaaaf9ffa953e3a0f1e94`
 - 문서 동기화 작업 트리 자동 테스트: `87 tests passed` 확인
 - Task 14 동시성 러너 SHA `054d992b3efc9de55217085bb65d44de212ab381`: `89 tests passed`, PowerShell 파서와 원격 Docker context 차단 음성 테스트 확인
+- 2026-08-17 항목 간 예산 이동 작업 트리: `96 tests passed`; 실제 로그인 Supabase 저장은 미실행이며 공개 URL 배포는 실행별 source commit과 workflow로 별도 검증
 - PostgreSQL 17 격리 런타임: **PASS — Task 13**, 검증 SHA `10cd05693449cf154f3559ca3bb27928d613eb7d`, 최종 출력 `preview-v2 PostgreSQL runtime tests passed`
 - 실제 Supabase V2 SQL과 사용자 A/B RLS·인증 저장: **PENDING — Task 14**
 - `/v2/` 산출물과 `/v2/version.json`: **PENDING — Tasks 15~16**
@@ -29,12 +30,16 @@ node tests/run-tests.cjs
 git diff --check
 ```
 
-성공 기준은 여섯 문법 검사 통과, 정확히 `89 tests passed`, diff 오류 0건입니다. 테스트 범위는 다음을 포함합니다.
+기존 V2 동시성 러너 산출물의 성공 기준은 정확히 `89 tests passed`이며, 위 SHA에 고정된 역사적 배포 계약입니다.
+
+현재 항목 간 예산 이동 작업 트리의 성공 기준은 여섯 문법 검사 통과, 정확히 `96 tests passed`, diff 오류 0건입니다. 테스트 범위는 다음을 포함합니다.
 
 - 상태 버전 2, V1 승격, 미래 버전·손상 배열 거부
 - 반복지출 템플릿 정규화·100개 제한·CRUD·월말 보정
 - 선택 예산 기간 occurrence, 네 상태, 결정적 거래 ID, 확정 후보 검증
 - 예약 키 왕복과 일반 카테고리 예산 제외
+- 항목 간 예산 이동의 총액 보존, 기간 내 사용액 차감, 잔액 초과·동일 항목·DB 상한 거부
+- 예산 이동 폼의 명시적 라벨과 live region, 360px 배치, settings CAS 성공 전 로컬 미반영·실패 롤백
 - V2 fail-closed 라우팅, settings CAS, 순수 insert, 정확한 `23505` 판정
 - 템플릿·예정 UI의 안전한 DOM 렌더링, 포커스, 모바일 계약
 - V2 SQL의 스키마·RLS·권한·seed·5인자 RPC 정적 계약

@@ -612,7 +612,9 @@ function createAppHarness(options = {}) {
     'editDate', 'editType', 'editCategory', 'editAmount', 'editMemo', 'editMessage',
     'editClose', 'editCancel', 'editSave', 'monthStartForm', 'monthStartInput',
     'monthStartMessage', 'budgetForm', 'budgetInput', 'budgetMessage', 'categoryBudgetForm',
-    'categoryBudgetFields', 'categoryBudgetMessage', 'cloudPanel', 'cloudLoginForm',
+    'categoryBudgetFields', 'categoryBudgetMessage', 'budgetTransferForm',
+    'budgetTransferFrom', 'budgetTransferTo', 'budgetTransferAmount',
+    'budgetTransferAvailable', 'budgetTransferMessage', 'cloudPanel', 'cloudLoginForm',
     'cloudPassword', 'cloudUploadButton', 'cloudDownloadButton', 'cloudLogoutButton',
     'cloudStatus', 'cloudMessage', 'transactionForm', 'dateInput', 'typeSelect',
     'categorySelect', 'amountInput', 'memoInput', 'formMessage', 'monthInput',
@@ -635,7 +637,7 @@ function createAppHarness(options = {}) {
   ]) elements[name] = createElement(name.includes('Form') ? 'form' : 'div');
 
   for (const name of [
-    'monthStartSave', 'budgetSave', 'categoryBudgetSave', 'transactionSave',
+    'monthStartSave', 'budgetSave', 'categoryBudgetSave', 'budgetTransferSave', 'transactionSave',
     'recurringTemplateSave', 'recurringConfirmSave'
   ]) {
     elements[name] = createElement('button');
@@ -667,6 +669,9 @@ function createAppHarness(options = {}) {
   elements.recurringConfirmAmount.name = 'amount';
   elements.recurringConfirmCategory.name = 'category';
   elements.recurringConfirmMemo.name = 'memo';
+  elements.budgetTransferFrom.name = 'fromCategory';
+  elements.budgetTransferTo.name = 'toCategory';
+  elements.budgetTransferAmount.name = 'amount';
   elements.recurringTemplateSave.textContent = '반복지출 등록';
   elements.recurringTemplateCancel.hidden = true;
   elements.importFile.files = Array.isArray(options.importFiles)
@@ -690,8 +695,15 @@ function createAppHarness(options = {}) {
     elements.recurringConfirmSave,
     elements.recurringConfirmCancel
   );
+  elements.budgetTransferForm.append(
+    elements.budgetTransferFrom,
+    elements.budgetTransferTo,
+    elements.budgetTransferAmount,
+    elements.budgetTransferSave
+  );
   for (const control of [
-    elements.monthStartSave, elements.budgetSave, elements.categoryBudgetSave, elements.transactionSave,
+    elements.monthStartSave, elements.budgetSave, elements.categoryBudgetSave, elements.budgetTransferSave,
+    elements.transactionSave,
     elements.sampleButton, elements.importButton, elements.resetButton,
     elements.cloudUploadButton, elements.editSave, elements.recurringTemplateSave,
     elements.recurringConfirmSave
@@ -709,6 +721,7 @@ function createAppHarness(options = {}) {
     recurringConfirmCloses: [],
     recurringUiResets: [],
     recurringCategoryFillCount: 0,
+    budgetTransferAvailabilityRenders: [],
     recurringDomainCalls: { add: [], update: [], delete: [], derive: [], confirm: [] },
     validationErrors: [],
     availabilitySnapshots,
@@ -804,12 +817,24 @@ function createAppHarness(options = {}) {
       target.budgetInput.valueAsNumber = budget.monthlyBudget;
       target.typeSelect.value = 'expense';
       target.categorySelect.value = '생활비';
+      this.fillBudgetTransferCategoryOptions(target);
       this.fillRecurringExpenseCategoryOptions(target);
     },
     fillFilterCategoryOptions(select) { select.value = 'all'; },
     fillCategoryOptions(select, type) { select.value = type === 'income' ? '월급' : '생활비'; },
     syncCategoryBudgetInputs() {},
     readCategoryBudgetInputs() { return {}; },
+    fillBudgetTransferCategoryOptions(target) {
+      target.budgetTransferFrom.value = '비상금';
+      target.budgetTransferTo.value = '생활비';
+    },
+    renderBudgetTransferAvailability(target, currentState, month) {
+      records.budgetTransferAvailabilityRenders.push({
+        state: copyRecord(currentState),
+        month,
+        fromCategory: target.budgetTransferFrom.value
+      });
+    },
     renderSummary(target, summary) { records.renderedSummaries.push(summary); },
     renderList(target, transactions) {
       const rendered = copyRecord(transactions);
@@ -949,12 +974,18 @@ function createAppHarness(options = {}) {
             amount: elements.recurringConfirmAmount,
             memo: elements.recurringConfirmMemo
           }
-        : {
-            memo: elements.recurringTemplateMemo,
-            category: elements.recurringTemplateCategory,
-            amount: elements.recurringTemplateAmount,
-            dayOfMonth: elements.recurringTemplateDay
-          };
+        : scope === elements.budgetTransferForm
+          ? {
+              fromCategory: elements.budgetTransferFrom,
+              toCategory: elements.budgetTransferTo,
+              amount: elements.budgetTransferAmount
+            }
+          : {
+              memo: elements.recurringTemplateMemo,
+              category: elements.recurringTemplateCategory,
+              amount: elements.recurringTemplateAmount,
+              dayOfMonth: elements.recurringTemplateDay
+            };
       const first = errors.find((item) => fields[item.field]);
       if (first) fields[first.field].focus();
     },
@@ -1654,6 +1685,144 @@ function testCategoryBudgetSaveAndSummary() {
 
   const invalid = win.BudgetTransactions.setCategoryBudgets(state, { 생활비: '-1' });
   assert.strictEqual(invalid.ok, false);
+}
+
+function testCategoryBudgetTransferMovesOnlyUnspentSourceBudget() {
+  const win = createContext();
+  const state = win.BudgetStorage.normalizeState({
+    monthlyBudget: 500000,
+    monthStartDay: 25,
+    monthlyBudgets: {
+      '2026-05': {
+        monthlyBudget: 700000,
+        categoryBudgets: { 생활비: 200000, 배달비: 50000, 비상금: 300000 }
+      }
+    },
+    transactions: [
+      { id: 'inside-source-spend', date: '2026-06-01', type: 'expense', category: '비상금', amount: 80000, memo: '', source: 'user' },
+      { id: 'outside-source-spend', date: '2026-05-24', type: 'expense', category: '비상금', amount: 50000, memo: '', source: 'user' }
+    ]
+  });
+  const before = JSON.stringify(state);
+
+  assert.deepStrictEqual(
+    plain(win.BudgetTransactions.categoryBudgetAvailability(state, '2026-05', '비상금')),
+    { budget: 300000, spent: 80000, available: 220000 }
+  );
+
+  const result = win.BudgetTransactions.transferCategoryBudget(state, {
+    fromCategory: '비상금',
+    toCategory: '생활비',
+    amount: '120,000'
+  }, '2026-05');
+
+  assert.strictEqual(result.ok, true);
+  assert.deepStrictEqual(plain(result.state.monthlyBudgets['2026-05'].categoryBudgets), {
+    생활비: 320000,
+    배달비: 50000,
+    비상금: 180000
+  });
+  assert.strictEqual(result.state.monthlyBudgets['2026-05'].monthlyBudget, 700000);
+  assert.deepStrictEqual(plain(result.transfer), {
+    fromCategory: '비상금',
+    toCategory: '생활비',
+    amount: 120000,
+    fromRemaining: 180000,
+    toBudget: 320000
+  });
+  assert.strictEqual(JSON.stringify(state), before);
+}
+
+function testCategoryBudgetTransferRejectsUnavailableSourceBudget() {
+  const win = createContext();
+  const state = win.BudgetStorage.normalizeState({
+    monthStartDay: 25,
+    monthlyBudgets: {
+      '2026-05': {
+        monthlyBudget: 700000,
+        categoryBudgets: { 생활비: 200000, 비상금: 300000 }
+      }
+    },
+    transactions: [
+      { id: 'source-spend', date: '2026-06-01', type: 'expense', category: '비상금', amount: 80000, memo: '', source: 'user' }
+    ]
+  });
+  const before = JSON.stringify(state);
+
+  const tooMuch = win.BudgetTransactions.transferCategoryBudget(state, {
+    fromCategory: '비상금', toCategory: '생활비', amount: '220,001'
+  }, '2026-05');
+  assert.strictEqual(tooMuch.ok, false);
+  assert.strictEqual(tooMuch.errors[0].field, 'amount');
+  assert.match(tooMuch.errors[0].message, /220,000원까지/);
+
+  const sameCategory = win.BudgetTransactions.transferCategoryBudget(state, {
+    fromCategory: '비상금', toCategory: '비상금', amount: '10,000'
+  }, '2026-05');
+  assert.strictEqual(sameCategory.ok, false);
+  assert.strictEqual(sameCategory.errors[0].field, 'toCategory');
+
+  const unsetSource = win.BudgetTransactions.transferCategoryBudget(state, {
+    fromCategory: '의류비', toCategory: '생활비', amount: '10,000'
+  }, '2026-05');
+  assert.strictEqual(unsetSource.ok, false);
+  assert.strictEqual(unsetSource.errors[0].field, 'fromCategory');
+  assert.strictEqual(JSON.stringify(state), before);
+}
+
+function testCategoryBudgetTransferValidatesInputAndDatabaseBounds() {
+  const win = createContext();
+  const state = win.BudgetStorage.normalizeState({
+    categoryBudgets: { 생활비: 100000, 비상금: 300000 },
+    monthlyBudgets: {
+      '2026-05': {
+        monthlyBudget: 700000,
+        categoryBudgets: { 생활비: 100000, 비상금: 300000 }
+      }
+    }
+  });
+  const before = JSON.stringify(state);
+
+  const invalidMoney = win.BudgetTransactions.transferCategoryBudget(state, {
+    fromCategory: '비상금', toCategory: '생활비', amount: '12,34'
+  }, '2026-05');
+  assert.strictEqual(invalidMoney.ok, false);
+  assert.strictEqual(invalidMoney.errors[0].field, 'amount');
+  assert.match(invalidMoney.errors[0].message, /쉼표/);
+
+  const invalidMonth = win.BudgetTransactions.transferCategoryBudget(state, {
+    fromCategory: '비상금', toCategory: '생활비', amount: '10,000'
+  }, '2026-13');
+  assert.strictEqual(invalidMonth.ok, false);
+  assert.strictEqual(invalidMonth.errors[0].field, 'budgetMonth');
+
+  const invalidFrom = win.BudgetTransactions.transferCategoryBudget(state, {
+    fromCategory: '월급', toCategory: '생활비', amount: '10,000'
+  }, '2026-05');
+  assert.strictEqual(invalidFrom.ok, false);
+  assert.strictEqual(invalidFrom.errors[0].field, 'fromCategory');
+
+  const invalidTo = win.BudgetTransactions.transferCategoryBudget(state, {
+    fromCategory: '비상금', toCategory: '월급', amount: '10,000'
+  }, '2026-05');
+  assert.strictEqual(invalidTo.ok, false);
+  assert.strictEqual(invalidTo.errors[0].field, 'toCategory');
+
+  const overflowState = win.BudgetStorage.normalizeState({
+    monthlyBudgets: {
+      '2026-05': {
+        monthlyBudget: 700000,
+        categoryBudgets: { 생활비: 2147483640, 비상금: 100 }
+      }
+    }
+  });
+  const overflow = win.BudgetTransactions.transferCategoryBudget(overflowState, {
+    fromCategory: '비상금', toCategory: '생활비', amount: '10'
+  }, '2026-05');
+  assert.strictEqual(overflow.ok, false);
+  assert.strictEqual(overflow.errors[0].field, 'amount');
+  assert.match(overflow.errors[0].message, /2,147,483,647원/);
+  assert.strictEqual(JSON.stringify(state), before);
 }
 
 
@@ -2463,7 +2632,10 @@ function testAppMarkupProvidesTabsCalendarEditDialogAndPreviewWarning() {
     'id="preview-data-warning"', 'role="tablist"', 'id="tab-home"', 'id="tab-history"',
     'id="tab-calendar"', 'id="tab-settings"', 'id="month-previous"', 'id="month-next"',
     'id="filter-category"', 'id="calendar-grid"', 'id="calendar-detail-list"',
-    '<dialog id="edit-dialog"', 'id="edit-transaction-form"', 'id="global-message"'
+    '<dialog id="edit-dialog"', 'id="edit-transaction-form"', 'id="global-message"',
+    'id="budget-transfer-form"', 'id="budget-transfer-from"', 'id="budget-transfer-to"',
+    'id="budget-transfer-amount"', 'id="budget-transfer-available"',
+    'id="budget-transfer-save"', 'id="budget-transfer-message"'
   ]) assert.ok(source.includes(required), `missing markup: ${required}`);
 
   assert.match(source, /개발 화면 · 운영 데이터 복사본/);
@@ -2479,10 +2651,38 @@ function testAppMarkupProvidesTabsCalendarEditDialogAndPreviewWarning() {
 
   for (const id of [
     'month-start-save', 'budget-save', 'category-budget-save', 'transaction-save',
-    'sample-button', 'import-button', 'reset-button', 'cloud-upload-button', 'edit-save'
+    'budget-transfer-save', 'sample-button', 'import-button', 'reset-button',
+    'cloud-upload-button', 'edit-save'
   ]) {
     assertBooleanAttribute(startTagById(id), 'data-cloud-write');
   }
+
+  for (const [label, control] of [
+    ['어디에서', 'budget-transfer-from'],
+    ['어디로', 'budget-transfer-to'],
+    ['얼마를', 'budget-transfer-amount']
+  ]) {
+    assert.match(
+      source,
+      new RegExp(`<label\\s+for="${control}">${label}<\\/label>`),
+      `${control} needs an explicit Korean label`
+    );
+  }
+  const transferForm = startTagById('budget-transfer-form');
+  assert.strictEqual(transferForm.name, 'form');
+  assertBooleanAttribute(transferForm, 'novalidate');
+  const transferAmount = startTagById('budget-transfer-amount');
+  assert.strictEqual(transferAmount.name, 'input');
+  assertAttribute(transferAmount, 'type', 'text');
+  assertAttribute(transferAmount, 'inputmode', 'numeric');
+  assertAttribute(transferAmount, 'aria-describedby', 'budget-transfer-help budget-transfer-available budget-transfer-message');
+  const transferAvailable = startTagById('budget-transfer-available');
+  assertAttribute(transferAvailable, 'aria-live', 'polite');
+  assertAttribute(transferAvailable, 'aria-atomic', 'true');
+  const transferMessage = startTagById('budget-transfer-message');
+  assertAttribute(transferMessage, 'role', 'status');
+  assertAttribute(transferMessage, 'aria-live', 'polite');
+  assertAttribute(transferMessage, 'aria-atomic', 'true');
 
   const stickyChromeMatches = [...source.matchAll(/<div\b(?=[^>]*\bclass="[^"]*\bapp-sticky-chrome\b[^"]*")(?=[^>]*\brole="region")(?=[^>]*\baria-label="가계부 상태와 주요 메뉴")[^>]*>[\s\S]*?<\/nav>\s*<\/div>/g)];
   assert.strictEqual(stickyChromeMatches.length, 1, 'preview warning and tabs need one named sticky region');
@@ -2649,6 +2849,45 @@ function testAppStylesCoverTabsCalendarDialogAndMobile() {
   const calendarContentWidth = 360 - 24 - 2 - (2 * 4);
   const calendarMinimumWidth = (7 * 44) + (6 * 1.6);
   assert.ok(calendarMinimumWidth <= calendarContentWidth, 'seven 44px targets must fit the 360px calendar panel');
+}
+
+function testAppStylesBudgetTransferForMobileAndDesktop() {
+  const source = fs.readFileSync(path.join(__dirname, '..', 'css/style.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+  const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const declarations = (selector, scope = source) => {
+    const match = scope.match(new RegExp(`(?:^|})\\s*${escapeRegex(selector)}\\s*\\{([^}]*)\\}`, 'm'));
+    assert.ok(match, `missing style rule: ${selector}`);
+    return match[1];
+  };
+
+  const box = declarations('.budget-transfer-box');
+  assert.match(box, /(?:^|;)\s*min-width\s*:\s*0\s*;/);
+  assert.match(box, /(?:^|;)\s*border\s*:\s*[^;]+;/);
+  assert.match(box, /(?:^|;)\s*background\s*:\s*[^;]+;/);
+  const heading = declarations('.budget-transfer-heading');
+  assert.match(heading, /(?:^|;)\s*display\s*:\s*flex\s*;/);
+  assert.match(heading, /(?:^|;)\s*justify-content\s*:\s*space-between\s*;/);
+  const fields = declarations('.budget-transfer-fields');
+  assert.match(fields, /(?:^|;)\s*display\s*:\s*grid\s*;/);
+  assert.match(fields, /(?:^|;)\s*grid-template-columns\s*:\s*1fr\s*;/);
+
+  const desktopMarker = '@media (min-width: 560px)';
+  const desktopStart = source.indexOf(desktopMarker);
+  assert.ok(desktopStart >= 0, `missing style: ${desktopMarker}`);
+  const desktopEnd = source.indexOf('@media (min-width: 900px)', desktopStart);
+  const desktop = source.slice(desktopStart, desktopEnd);
+  assert.match(
+    declarations('.budget-transfer-fields', desktop),
+    /grid-template-columns\s*:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)\s*;/
+  );
+
+  const mobileMarker = '@media (max-width: 559px)';
+  const mobileStart = source.indexOf(mobileMarker);
+  assert.ok(mobileStart >= 0, `missing style: ${mobileMarker}`);
+  const mobile = source.slice(mobileStart);
+  const mobileBox = declarations('.budget-transfer-box', mobile);
+  assert.match(mobileBox, /(?:^|;)\s*max-width\s*:\s*100%\s*;/);
+  assert.match(mobileBox, /overflow-x\s*:\s*hidden\s*;[\s\S]*overflow-x\s*:\s*clip\s*;/);
 }
 
 function testAppMarkupProvidesRecurringSectionsAndDialogContracts() {
@@ -2993,6 +3232,41 @@ function testUiTabsAndFilterOptionsBehave() {
   window.BudgetUI.fillFilterCategoryOptions(select, 'income', '생활비');
   assert.strictEqual(JSON.stringify(select.children.map((option) => option.value)), JSON.stringify(['all', '급여', '공통']));
   assert.strictEqual(select.value, 'all');
+}
+
+function testUiBudgetTransferDefaultsAndAvailabilityBehave() {
+  const { window, document } = createUiContext();
+  const elements = {
+    budgetTransferFrom: document.createElement('select'),
+    budgetTransferTo: document.createElement('select'),
+    budgetTransferAvailable: document.createElement('p')
+  };
+  window.BudgetTransactions.EXPENSE_CATEGORIES = ['생활비', '배달비', '의류비', '비상금'];
+  window.BudgetTransactions.categoryBudgetAvailability = (state, month, category) => {
+    assert.strictEqual(state.marker, 'state');
+    assert.strictEqual(month, '2026-05');
+    return category === '비상금'
+      ? { budget: 300000, spent: 80000, available: 220000 }
+      : { budget: 0, spent: 0, available: 0 };
+  };
+
+  window.BudgetUI.fillBudgetTransferCategoryOptions(elements);
+  assert.strictEqual(
+    JSON.stringify(elements.budgetTransferFrom.children.map((option) => option.textContent)),
+    JSON.stringify(['생활비', '배달비', '의류비', '비상금'])
+  );
+  assert.strictEqual(elements.budgetTransferFrom.value, '비상금');
+  assert.strictEqual(elements.budgetTransferTo.value, '생활비');
+
+  window.BudgetUI.renderBudgetTransferAvailability(elements, { marker: 'state' }, '2026-05');
+  assert.match(elements.budgetTransferAvailable.textContent, /비상금 예산/);
+  assert.match(elements.budgetTransferAvailable.textContent, /300,000/);
+  assert.match(elements.budgetTransferAvailable.textContent, /80,000/);
+  assert.match(elements.budgetTransferAvailable.textContent, /220,000/);
+
+  elements.budgetTransferFrom.value = '의류비';
+  window.BudgetUI.renderBudgetTransferAvailability(elements, { marker: 'state' }, '2026-05');
+  assert.strictEqual(elements.budgetTransferAvailable.textContent, '의류비 예산이 설정되지 않았어요.');
 }
 
 function testUiValidationAndEditDialogFocusFlow() {
@@ -3366,10 +3640,14 @@ function testUiRendersRecurringOccurrencesAndTemplatesSafely() {
     monthStartInput: document.createElement('input'),
     budgetInput: document.createElement('input'),
     categoryBudgetFields: document.createElement('div'),
+    budgetTransferFrom: document.createElement('select'),
+    budgetTransferTo: document.createElement('select'),
+    budgetTransferAvailable: document.createElement('p'),
     categorySelect: document.createElement('select'),
     typeSelect: document.createElement('select')
   };
   defaultsElements.typeSelect.value = 'expense';
+  window.BudgetTransactions.categoryBudgetAvailability = () => ({ budget: 0, spent: 0, available: 0 });
   window.BudgetUI.initDefaults(defaultsElements, { monthStartDay: 1 });
   assert.deepStrictEqual(
     elements.recurringTemplateCategory.children.map((option) => option.value),
@@ -3795,6 +4073,104 @@ function testAppIntegratesTabsCalendarAndRemoteFirstMutations() {
     !source.includes('persist(window.BudgetTransactions.deleteTransaction'),
     'transaction deletion must not update local state before Supabase succeeds'
   );
+}
+
+async function testAppBudgetTransferSavesSettingsBeforeLocalCommit() {
+  const storage = createContext().BudgetStorage;
+  const month = storage.monthKeyForDate(storage.localDateString(), 1);
+  const initialState = storage.normalizeState({
+    monthlyBudgets: {
+      [month]: {
+        monthlyBudget: 700000,
+        categoryBudgets: { 생활비: 200000, 비상금: 300000 }
+      }
+    },
+    transactions: [
+      {
+        id: 'emergency-spend',
+        date: `${month}-02`,
+        type: 'expense',
+        category: '비상금',
+        amount: 80000,
+        memo: '',
+        source: 'user'
+      }
+    ]
+  });
+  const saveGate = createDeferred();
+  const harness = createAppHarness({
+    cloudState: initialState,
+    cloud: { saveSettings: () => saveGate.promise }
+  });
+  await harness.init();
+  const savedStateCountBeforeTransfer = harness.records.savedStates.length;
+  harness.elements.budgetTransferFrom.value = '비상금';
+  harness.elements.budgetTransferTo.value = '생활비';
+  harness.elements.budgetTransferAmount.value = '120,000';
+
+  const submitting = harness.elements.budgetTransferForm.dispatch('submit', {
+    submitter: harness.elements.budgetTransferSave
+  });
+  await Promise.resolve();
+
+  assert.strictEqual(harness.cloudCalls.saveSettings.length, 1);
+  assert.deepStrictEqual(
+    plain(harness.cloudCalls.saveSettings[0][0].monthlyBudgets[month].categoryBudgets),
+    { 생활비: 320000, 비상금: 180000 }
+  );
+  assert.strictEqual(harness.records.savedStates.length, savedStateCountBeforeTransfer);
+  assert.strictEqual(harness.elements.budgetTransferAmount.value, '120,000');
+
+  saveGate.resolve({ ok: true });
+  await submitting;
+
+  assert.strictEqual(harness.records.savedStates.length, savedStateCountBeforeTransfer + 1);
+  assert.deepStrictEqual(
+    plain(harness.records.savedStates.at(-1).monthlyBudgets[month].categoryBudgets),
+    { 생활비: 320000, 비상금: 180000 }
+  );
+  assert.strictEqual(harness.elements.budgetTransferAmount.value, '');
+  assert.match(harness.elements.budgetTransferMessage.textContent, /비상금에서 생활비로 120,000원을 옮겼어요/);
+  assert.strictEqual(harness.elements.budgetTransferMessage.messageKind, 'ok');
+}
+
+async function testAppBudgetTransferFailureKeepsLocalStateAndInput() {
+  const storage = createContext().BudgetStorage;
+  const month = storage.monthKeyForDate(storage.localDateString(), 1);
+  const initialState = storage.normalizeState({
+    monthlyBudgets: {
+      [month]: {
+        monthlyBudget: 700000,
+        categoryBudgets: { 생활비: 200000, 비상금: 300000 }
+      }
+    }
+  });
+  const harness = createAppHarness({
+    cloudState: initialState,
+    cloud: { saveSettings: async () => { throw new Error('network down'); } }
+  });
+  await harness.init();
+  const savedStateCountBeforeTransfer = harness.records.savedStates.length;
+  harness.elements.budgetTransferFrom.value = '비상금';
+  harness.elements.budgetTransferTo.value = '생활비';
+  harness.elements.budgetTransferAmount.value = '120,000';
+
+  await harness.elements.budgetTransferForm.dispatch('submit', {
+    submitter: harness.elements.budgetTransferSave
+  });
+  await harness.elements.exportButton.dispatch('click');
+  const exported = JSON.parse(harness.records.downloads.at(-1).content);
+
+  assert.strictEqual(harness.cloudCalls.saveSettings.length, 1);
+  assert.strictEqual(harness.records.savedStates.length, savedStateCountBeforeTransfer);
+  assert.deepStrictEqual(
+    plain(exported.monthlyBudgets[month].categoryBudgets),
+    { 생활비: 200000, 비상금: 300000 }
+  );
+  assert.strictEqual(harness.elements.budgetTransferAmount.value, '120,000');
+  assert.match(harness.elements.budgetTransferMessage.textContent, /Supabase 저장 실패: network down/);
+  assert.strictEqual(harness.elements.budgetTransferMessage.messageKind, 'error');
+  assert.strictEqual(harness.writeControls.every((control) => !control.disabled), true);
 }
 
 async function testCloudMutatesOnlyRequestedTransactionRow() {
@@ -7296,6 +7672,7 @@ async function testAppLogoutClearsPrivateStateAndFocusesLogin() {
   harness.elements.filterType.value = 'expense';
   harness.elements.filterCategory.value = '생활비';
   harness.elements.filterQuery.value = '비공개';
+  harness.elements.budgetTransferAmount.value = '120,000';
 
   await harness.elements.cloudLogoutButton.dispatch('click');
   await harness.elements.exportButton.dispatch('click');
@@ -7310,6 +7687,7 @@ async function testAppLogoutClearsPrivateStateAndFocusesLogin() {
   assert.strictEqual(harness.elements.filterType.value, 'all');
   assert.strictEqual(harness.elements.filterCategory.value, 'all');
   assert.strictEqual(harness.elements.filterQuery.value, '');
+  assert.strictEqual(harness.elements.budgetTransferAmount.value, '');
   assert.strictEqual(harness.writeControls.every((control) => control.disabled), true);
   assert.strictEqual(harness.elements.cloudPanel.hidden, false);
   assert.strictEqual(harness.elements.cloudLoginForm.hidden, false);
@@ -7331,6 +7709,9 @@ const tests = [
   testTransactionIdsUseSafeOpaqueAsciiContract,
   testDatabaseIntegerBoundsAreEnforced,
   testCategoryBudgetSaveAndSummary,
+  testCategoryBudgetTransferMovesOnlyUnspentSourceBudget,
+  testCategoryBudgetTransferRejectsUnavailableSourceBudget,
+  testCategoryBudgetTransferValidatesInputAndDatabaseBounds,
   testBudgetMonthStartAndMonthlyBudgets,
   testMonthKeyUsesClampedFebruaryStartBoundary,
   testAddTransactionCanonicalizesBeginnerMoneyInput,
@@ -7349,6 +7730,7 @@ const tests = [
   testCategoryBudgetDetailShowsSpentBeforeBudget,
   testUiExportsTabEditAndCalendarRenderers,
   testUiTabsAndFilterOptionsBehave,
+  testUiBudgetTransferDefaultsAndAvailabilityBehave,
   testUiValidationAndEditDialogFocusFlow,
   testUiCalendarRenderingPreservesFocusAndExplainsEmptyDates,
   testUiTransactionActionLabelsIncludeType,
@@ -7357,6 +7739,7 @@ const tests = [
   testAppMarkupProvidesTabsCalendarEditDialogAndPreviewWarning,
   testAppSkipLinkTargetsFocusableMainContent,
   testAppStylesCoverTabsCalendarDialogAndMobile,
+  testAppStylesBudgetTransferForMobileAndDesktop,
   testAppMarkupProvidesRecurringSectionsAndDialogContracts,
   testAppStylesCoverRecurringCardsDialogAndMobile,
   testCategoryFilterCombinesWithMonthTypeAndQuery,
@@ -7364,6 +7747,8 @@ const tests = [
   testCalendarDaysCoverBudgetPeriodByWholeWeeks,
   testSummarizeTransactionsByDateHonorsBudgetPeriod,
   testAppIntegratesTabsCalendarAndRemoteFirstMutations,
+  testAppBudgetTransferFailureKeepsLocalStateAndInput,
+  testAppBudgetTransferSavesSettingsBeforeLocalCommit,
   testCloudRejectsInvalidOrStaleTransactionMutations,
   testCloudTransactionMutationsFilterExpectedPriorRow,
   testCloudMutatesOnlyRequestedTransactionRow,

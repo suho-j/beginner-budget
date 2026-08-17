@@ -45,6 +45,7 @@
       elements.formMessage,
       elements.budgetMessage,
       elements.categoryBudgetMessage,
+      elements.budgetTransferMessage,
       elements.monthStartMessage,
       elements.editMessage,
       elements.recurringTemplateMessage,
@@ -176,6 +177,7 @@
       elements.budgetInput.value = selectedBudget.monthlyBudget;
     }
     window.BudgetUI.syncCategoryBudgetInputs(elements, selectedBudget.categoryBudgets);
+    window.BudgetUI.renderBudgetTransferAvailability(elements, state, filters.month);
 
     const period = window.BudgetStorage.periodRangeForMonth(filters.month, filters.monthStartDay);
     const summary = window.BudgetTransactions.summarize(
@@ -289,6 +291,41 @@
     if (saved) {
       window.BudgetUI.setMessage(elements.categoryBudgetMessage, `${month} 항목별 예산을 저장했어요.`, 'ok');
     }
+  }
+
+  async function handleBudgetTransferSubmit(event) {
+    event.preventDefault();
+    window.BudgetUI.clearFieldErrors(elements.budgetTransferForm);
+    const month = viewState.month;
+    const result = window.BudgetTransactions.transferCategoryBudget(state, {
+      fromCategory: elements.budgetTransferFrom.value,
+      toCategory: elements.budgetTransferTo.value,
+      amount: elements.budgetTransferAmount.value
+    }, month);
+    if (!result.ok) {
+      window.BudgetUI.showValidationErrors(
+        elements.budgetTransferForm,
+        elements.budgetTransferMessage,
+        result.errors
+      );
+      return;
+    }
+
+    const saved = await persistRemoteFirst(
+      result.state,
+      () => window.BudgetCloud.saveSettings(result.state),
+      elements.budgetTransferMessage,
+      event.submitter
+    );
+    if (!saved) return;
+
+    elements.budgetTransferAmount.value = '';
+    window.BudgetUI.renderBudgetTransferAvailability(elements, state, month);
+    window.BudgetUI.setMessage(
+      elements.budgetTransferMessage,
+      `${result.transfer.fromCategory}에서 ${result.transfer.toCategory}로 ${result.transfer.amount.toLocaleString('ko-KR')}원을 옮겼어요.`,
+      'ok'
+    );
   }
 
   async function handleTransactionSubmit(event) {
@@ -870,6 +907,7 @@
     elements.typeSelect.value = 'expense';
     elements.amountInput.value = '';
     elements.memoInput.value = '';
+    elements.budgetTransferAmount.value = '';
     elements.editId.value = '';
     elements.editDate.value = '';
     elements.editAmount.value = '';
@@ -918,6 +956,10 @@
     elements.monthStartForm.addEventListener('submit', handleMonthStartSubmit);
     elements.budgetForm.addEventListener('submit', handleBudgetSubmit);
     elements.categoryBudgetForm.addEventListener('submit', handleCategoryBudgetSubmit);
+    elements.budgetTransferForm.addEventListener('submit', handleBudgetTransferSubmit);
+    elements.budgetTransferFrom.addEventListener('change', () => {
+      window.BudgetUI.renderBudgetTransferAvailability(elements, state, viewState.month);
+    });
     elements.transactionForm.addEventListener('submit', handleTransactionSubmit);
     elements.recurringTemplateForm.addEventListener('submit', handleRecurringTemplateSubmit);
     elements.recurringTemplateList.addEventListener('click', handleRecurringTemplateAction);

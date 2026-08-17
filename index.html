@@ -252,6 +252,37 @@
         </div>
       </form>
       <p id="category-budget-message" class="message" role="status" aria-live="polite"></p>
+
+      <div class="budget-transfer-box">
+        <div class="budget-transfer-heading">
+          <div>
+            <h3 id="budget-transfer-title">예산 옮겨 쓰기</h3>
+            <p id="budget-transfer-help" class="hint">총예산은 그대로이고 항목별 예산만 바뀌어요. 예: 비상금 → 생활비</p>
+          </div>
+          <span class="budget-transfer-mark" aria-hidden="true">↔</span>
+        </div>
+        <form id="budget-transfer-form" class="budget-transfer-form" aria-labelledby="budget-transfer-title" novalidate>
+          <div class="budget-transfer-fields">
+            <div class="field">
+              <label for="budget-transfer-from">어디에서</label>
+              <select id="budget-transfer-from" name="fromCategory" required aria-describedby="budget-transfer-help budget-transfer-available budget-transfer-message"></select>
+            </div>
+            <div class="field">
+              <label for="budget-transfer-to">어디로</label>
+              <select id="budget-transfer-to" name="toCategory" required aria-describedby="budget-transfer-help budget-transfer-message"></select>
+            </div>
+            <div class="field">
+              <label for="budget-transfer-amount">얼마를</label>
+              <input id="budget-transfer-amount" name="amount" type="text" inputmode="numeric" pattern="[0-9,]*" placeholder="예: 50,000" required aria-describedby="budget-transfer-help budget-transfer-available budget-transfer-message">
+            </div>
+          </div>
+          <p id="budget-transfer-available" class="budget-transfer-available" aria-live="polite" aria-atomic="true"></p>
+          <div class="form-actions budget-transfer-actions">
+            <button id="budget-transfer-save" type="submit" data-cloud-write>예산 옮기기</button>
+          </div>
+        </form>
+        <p id="budget-transfer-message" class="message" role="status" aria-live="polite" aria-atomic="true"></p>
+      </div>
     </section>
 
     <section id="recurring-template-section" class="panel recurring-template-section" aria-labelledby="recurring-template-heading">

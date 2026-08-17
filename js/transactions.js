@@ -439,6 +439,100 @@
     };
   }
 
+  function categoryBudgetAvailability(state, month, category) {
+    const selectedBudget = window.BudgetStorage.budgetForMonth(state, month);
+    const budget = Number(selectedBudget.categoryBudgets[category]) || 0;
+    const spent = (state.transactions || [])
+      .filter((transaction) => transaction.type === 'expense'
+        && transaction.category === category
+        && window.BudgetStorage.isDateInBudgetMonth(
+          transaction.date,
+          month,
+          state.monthStartDay || 1
+        ))
+      .reduce((sum, transaction) => sum + transaction.amount, 0);
+    return { budget, spent, available: Math.max(0, budget - spent) };
+  }
+
+  function transferCategoryBudget(state, input, month) {
+    const value = input && typeof input === 'object' ? input : {};
+    const fromCategory = String(value.fromCategory || '').trim();
+    const toCategory = String(value.toCategory || '').trim();
+    const amount = parseMoneyInput(value.amount);
+    const errors = [];
+
+    if (!window.BudgetStorage.isValidMonthString(month)) {
+      errors.push(error('budgetMonth', '예산기간을 올바르게 선택해 주세요.'));
+    }
+    if (!EXPENSE_CATEGORIES.includes(fromCategory)) {
+      errors.push(error('fromCategory', '가져올 항목을 골라 주세요.'));
+    }
+    if (!EXPENSE_CATEGORIES.includes(toCategory)) {
+      errors.push(error('toCategory', '보낼 항목을 골라 주세요.'));
+    }
+    if (fromCategory && fromCategory === toCategory) {
+      errors.push(error('toCategory', '서로 다른 두 항목을 골라 주세요.'));
+    }
+    if (!amount) {
+      errors.push(error(
+        'amount',
+        '옮길 금액은 1원 이상 2,147,483,647원 이하의 숫자로 입력해 주세요. 쉼표(예: 12,000)는 사용할 수 있어요.'
+      ));
+    }
+    if (errors.length) return { state, ok: false, transfer: null, errors };
+
+    const source = categoryBudgetAvailability(state, month, fromCategory);
+    if (!source.budget) {
+      return {
+        state,
+        ok: false,
+        transfer: null,
+        errors: [error('fromCategory', `${fromCategory} 예산을 먼저 설정해 주세요.`)]
+      };
+    }
+    if (amount > source.available) {
+      return {
+        state,
+        ok: false,
+        transfer: null,
+        errors: [error(
+          'amount',
+          `${fromCategory}에서 옮길 수 있는 금액은 남은 예산 ${source.available.toLocaleString('ko-KR')}원까지예요.`
+        )]
+      };
+    }
+
+    const selectedBudget = window.BudgetStorage.budgetForMonth(state, month);
+    const nextBudgets = { ...selectedBudget.categoryBudgets };
+    const nextTargetBudget = (Number(nextBudgets[toCategory]) || 0) + amount;
+    if (!window.BudgetStorage.isPositiveInteger(nextTargetBudget)) {
+      return {
+        state,
+        ok: false,
+        transfer: null,
+        errors: [error('amount', `${toCategory} 예산은 2,147,483,647원을 넘을 수 없어요.`)]
+      };
+    }
+    const nextSourceBudget = source.budget - amount;
+
+    if (nextSourceBudget > 0) nextBudgets[fromCategory] = nextSourceBudget;
+    else delete nextBudgets[fromCategory];
+    nextBudgets[toCategory] = nextTargetBudget;
+
+    const result = setCategoryBudgets(state, nextBudgets, month);
+    if (!result.ok) return { ...result, transfer: null };
+    return {
+      ...result,
+      transfer: {
+        fromCategory,
+        toCategory,
+        amount,
+        fromRemaining: nextSourceBudget,
+        toBudget: nextTargetBudget
+      }
+    };
+  }
+
   function filterTransactions(transactions, filters) {
     const month = filters.month || '';
     const monthStartDay = window.BudgetStorage.normalizeMonthStartDay(filters.monthStartDay || 1);
@@ -723,6 +817,8 @@
     setMonthlyBudget,
     setMonthStartDay,
     setCategoryBudgets,
+    categoryBudgetAvailability,
+    transferCategoryBudget,
     filterTransactions,
     summarizeTransactionsByDate,
     summarize,

@@ -113,9 +113,11 @@
     elements.monthStartInput.value = state.monthStartDay || 1;
     elements.budgetInput.value = monthBudget.monthlyBudget;
     renderCategoryBudgetFields(elements.categoryBudgetFields, monthBudget.categoryBudgets || {});
+    fillBudgetTransferCategoryOptions(elements);
     fillCategoryOptions(elements.categorySelect, elements.typeSelect.value);
     fillRecurringExpenseCategoryOptions(elements);
     syncCategoryBudgetInputs(elements, monthBudget.categoryBudgets);
+    renderBudgetTransferAvailability(elements, state, month);
   }
 
   function renderCategoryBudgetFields(container, categoryBudgets) {
@@ -155,6 +157,38 @@
       budgets[input.name] = input.value;
     });
     return budgets;
+  }
+
+  function fillBudgetTransferCategoryOptions(elements) {
+    const categories = window.BudgetTransactions.EXPENSE_CATEGORIES;
+    const selectedFrom = elements.budgetTransferFrom.value;
+    const selectedTo = elements.budgetTransferTo.value;
+
+    [elements.budgetTransferFrom, elements.budgetTransferTo].forEach((select) => {
+      select.innerHTML = '';
+      categories.forEach((category) => {
+        const option = document.createElement('option');
+        option.value = category;
+        option.textContent = category;
+        select.append(option);
+      });
+    });
+
+    elements.budgetTransferFrom.value = categories.includes(selectedFrom)
+      ? selectedFrom
+      : (categories.includes('비상금') ? '비상금' : categories[0]);
+    const availableTargets = categories.filter((category) => category !== elements.budgetTransferFrom.value);
+    elements.budgetTransferTo.value = availableTargets.includes(selectedTo)
+      ? selectedTo
+      : (availableTargets.includes('생활비') ? '생활비' : availableTargets[0]);
+  }
+
+  function renderBudgetTransferAvailability(elements, state, month) {
+    const category = elements.budgetTransferFrom.value;
+    const source = window.BudgetTransactions.categoryBudgetAvailability(state, month, category);
+    elements.budgetTransferAvailable.textContent = source.budget > 0
+      ? `${category} 예산 ${formatWon(source.budget)} 중 ${formatWon(source.spent)}을 사용했고, ${formatWon(source.available)}까지 옮길 수 있어요.`
+      : `${category} 예산이 설정되지 않았어요.`;
   }
 
   function renderSummary(elements, summary, month, periodRange) {
@@ -835,6 +869,12 @@
       categoryBudgetForm: $('#category-budget-form'),
       categoryBudgetFields: $('#category-budget-fields'),
       categoryBudgetMessage: $('#category-budget-message'),
+      budgetTransferForm: $('#budget-transfer-form'),
+      budgetTransferFrom: $('#budget-transfer-from'),
+      budgetTransferTo: $('#budget-transfer-to'),
+      budgetTransferAmount: $('#budget-transfer-amount'),
+      budgetTransferAvailable: $('#budget-transfer-available'),
+      budgetTransferMessage: $('#budget-transfer-message'),
       cloudPanel: $('#cloud-panel'),
       cloudLoginForm: $('#cloud-login-form'),
       cloudPassword: $('#cloud-password'),
@@ -909,6 +949,8 @@
     renderCategoryBudgetFields,
     syncCategoryBudgetInputs,
     readCategoryBudgetInputs,
+    fillBudgetTransferCategoryOptions,
+    renderBudgetTransferAvailability,
     renderSummary,
     renderCategoryBudgetStatus,
     renderCategoryBreakdown,
