@@ -11,7 +11,7 @@
   const MAX_RECURRING_EXPENSE_TEMPLATES = 100;
   const TRANSACTION_ID_PATTERN = /^[A-Za-z0-9._:-]+$/;
   const RECURRING_TEMPLATE_ID_PATTERN = /^rt-[A-Za-z0-9._:-]+$/;
-  const EXPENSE_CATEGORIES = ['생활비', '배달비', '의류비', '비상금'];
+  const EXPENSE_CATEGORIES = ['생활비', '배달비', '의류비', '비상금', '휴가비'];
   const LEGACY_EXPENSE_CATEGORY_MAP = {
     '식비': '생활비',
     '생활용품': '생활비',

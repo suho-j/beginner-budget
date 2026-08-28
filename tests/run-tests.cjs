@@ -1086,6 +1086,25 @@ function testSaveDoesNotUseLocalStorage() {
   assert.strictEqual(result.state.monthlyBudget, 700000);
 }
 
+function testVacationExpenseCategoryIsSupported() {
+  const win = createContext();
+  assert.strictEqual(
+    JSON.stringify(win.BudgetStorage.EXPENSE_CATEGORIES),
+    JSON.stringify(['생활비', '배달비', '의류비', '비상금', '휴가비'])
+  );
+  const state = win.BudgetStorage.normalizeState({
+    transactions: [{
+      id: 'tx-vacation',
+      date: '2026-08-28',
+      type: 'expense',
+      category: '휴가비',
+      amount: 179900,
+      memo: '마미파파 켄싱턴 경주 숙박'
+    }]
+  });
+  assert.strictEqual(state.transactions[0].category, '휴가비');
+}
+
 function testStrictDateValidation() {
   const win = createContext();
   assert.strictEqual(win.BudgetStorage.isValidDateString('2026-02-28'), true);
@@ -7697,6 +7716,7 @@ async function testAppLogoutClearsPrivateStateAndFocusesLogin() {
 const tests = [
   testStorageDefaultsAndIgnoresLocalStorage,
   testSaveDoesNotUseLocalStorage,
+  testVacationExpenseCategoryIsSupported,
   testStrictDateValidation,
   testLocalDateFormatting,
   testV2StatePromotesV1AndNormalizesRecurringTemplates,
