@@ -14,14 +14,13 @@ const condition = (lhs, rhs) => '<ConditionList sr="if"><Condition sr="c0" ve="3
 const statusPage = 'https://suho-j.github.io/beginner-budget/artifacts/tasker-guide/diagnose.html';
 
 function statusTask(id, name, source) {
-  const fallback = statusPage + '#v=1&connection=script_error&queue=invalid&last=unknown&at=';
+  const fallback = statusPage + '#v=2&connection=script_error&queue=invalid&last=unknown&at=';
   return '<Task sr="task' + id + '"><id>' + id + '</id><nme>' + esc(name) + '</nme><pri>10</pri>'
     + '<Action sr="act0" ve="7"><code>547</code>' + str(0,'%budget_status_url') + str(1,fallback)
     + int(2,0) + int(3,0) + int(4,0) + int(5,3) + int(6,0) + '</Action>'
     + '<Action sr="act1" ve="7"><code>129</code><se>false</se>' + str(0,source) + str(1)
     + int(2,1) + int(3,10) + '</Action>'
     + '<Action sr="act2" ve="7"><code>104</code>' + str(0,'%budget_status_url')
-    + '<App sr="arg1"><appClass></appClass><appPkg></appPkg><label></label></App>' + int(2,0) + str(3)
     + '</Action></Task>';
 }
 
@@ -52,14 +51,13 @@ function buildProject() {
     bank:intake('kbank_notification'),
     eats:intake('eats_notification'),
     screen:intake('eats_screen'),
-    prepare:library + '\nsetLocal("budget_send", "0");\nsetLocal("http_data", "");\n'
-      + 'setLocal("http_response_code", "0");\n'
-      + '(function () { try {\n'
-      + 'var count = typeof budget_batch === "undefined" ? 0 : Number(budget_batch);\n'
-      + 'if (!Number.isFinite(count) || count >= 20) return;\n'
+    prepare:library + '\nvar budget_send = "0";\nvar budget_body = "";\nvar http_data = "";\n'
+      + 'var http_response_code = "0";\n'
+      + 'var budget_batch = typeof budget_batch === "undefined" ? "0" : budget_batch;\n'
+      + 'try { if (Number.isFinite(Number(budget_batch)) && Number(budget_batch) < 20) {\n'
       + read('tasker/prepare-send.js')
-      + '\nsetLocal("budget_batch", String(count + 1));\n'
-      + '} catch (_) { setGlobal("BUDGETSTATUS", "연결 설정 또는 이전 연결의 대기 알림을 확인해 주세요."); } })();',
+      + '\nbudget_batch = String(Number(budget_batch) + 1);\n'
+      + '} } catch (_) { setGlobal("BUDGETSTATUS", "연결 설정 또는 이전 연결의 대기 알림을 확인해 주세요."); }',
     acknowledge:read('tasker/acknowledge.js'),
     connectionStatus,
     status:read('tasker/status-report.js')
@@ -87,17 +85,26 @@ function buildProject() {
       + str(4)+str(5,'%budget_body')+str(6)+str(7)+int(8,30)+int(9,0)+int(10,0)+int(11,0)+int(12,0),'<se>false</se>')
     + js(3,scripts.acknowledge) + js(4,scripts.connectionStatus) + stop(5,'%budget_ack') + wait(6)
     + action(7,135,int(0,0)+int(1,1)+str(2));
+  const senderTask = task(5204,'BB 보내기',sender);
   const tasks = task(5201,'BB 시작',js(0,scripts.setup))
     + task(5202,'BB 케이뱅크 받기',js(0,scripts.bank),true)
     + task(5203,'BB 쿠팡이츠 받기',js(0,scripts.eats),true)
-    + task(5204,'BB 보내기',sender)
+    + senderTask
     + task(5205,'BB 주문 화면',wait(0)+action(1,421,bundle(0))+js(2,scripts.screen))
     + statusTask(5206,'BB 상태',scripts.status);
   const xml = '<?xml version="1.0" encoding="UTF-8"?>\n<TaskerData sr="" dvi="1" tv="6.3.13">\n'
     + profiles + '\n<Project sr="proj0" ve="2"><name>가계부 자동수집</name>'
     + '<pids>5101,5102,5103</pids><tids>5201,5202,5203,5204,5205,5206</tids></Project>\n'
     + tasks + '\n</TaskerData>\n';
-  return {xml, uri:'taskerproject://' + zlib.gzipSync(Buffer.from(xml)).toString('base64'), scripts};
+  return {xml, uri:'taskerproject://' + zlib.gzipSync(Buffer.from(xml)).toString('base64'), scripts, senderTask};
+}
+
+function buildRepairProject() {
+  const project=buildProject();
+  const xml='<?xml version="1.0" encoding="UTF-8"?>\n<TaskerData sr="" dvi="1" tv="6.3.13">\n'
+    + '<Project sr="proj0" ve="2"><name>가계부 연결 수정</name><tids>5301,5204</tids></Project>\n'
+    + statusTask(5301,'BB 연결 확인',project.scripts.status) + '\n' + project.senderTask + '\n</TaskerData>\n';
+  return {xml,uri:'taskerproject://' + zlib.gzipSync(Buffer.from(xml)).toString('base64')};
 }
 
 if (require.main === module) {
@@ -112,6 +119,10 @@ if (require.main === module) {
   fs.writeFileSync(path.join(out,'Budget-Status.prj.xml'),diagnostic.xml);
   fs.writeFileSync(path.join(out,'diagnose.html'),read('tasker/diagnose-template.html')
     .replaceAll('{{STATUS_URI}}',diagnostic.uri).replaceAll('{{STATUS_XML}}',Buffer.from(diagnostic.xml).toString('base64')));
-  console.log('Created capture and read-only status projects and installer pages; no connection keys included.');
+  const repair=buildRepairProject();
+  fs.writeFileSync(path.join(out,'Budget-Repair.prj.xml'),repair.xml);
+  fs.writeFileSync(path.join(out,'repair.html'),read('tasker/repair-template.html')
+    .replaceAll('{{REPAIR_URI}}',repair.uri).replaceAll('{{REPAIR_XML}}',Buffer.from(repair.xml).toString('base64')));
+  console.log('Created capture, status and repair projects and installer pages; no connection keys included.');
 }
-module.exports = {buildProject,buildStatusProject};
+module.exports = {buildProject,buildStatusProject,buildRepairProject};

@@ -2,7 +2,8 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const vm = require('node:vm');
 const zlib = require('node:zlib');
-const { buildProject, buildStatusProject } = require('../tasker/build-project.cjs');
+const { buildProject, buildStatusProject, buildRepairProject } = require('../tasker/build-project.cjs');
+const { taskerRuntime } = require('./helpers/tasker-runtime.cjs');
 
 const config = () => ({
   endpoint:'https://test.supabase.co/rest/v1/rpc/receive_phone_event',
@@ -104,13 +105,11 @@ test('쿠팡이츠 이외의 화면과 사용자가 취소한 화면은 수집�
 });
 test('Tasker처럼 액션 사이에만 지역 변수를 전달해도 시험 응답과 재시도가 동작한다', () => {
   const project=buildProject(), globals={}, locals={}, calls=[];
+  const runtime=taskerRuntime(globals,locals);
   const run=source=>{
-    // setLocal updates Tasker's variables, not the current JavaScript scope.
-    const context=vm.createContext({...locals,global:n=>globals[n]||'',
-      setGlobal:(n,v)=>{globals[n]=String(v);},setLocal:(n,v)=>{locals[n]=String(v);},
-      prompt:()=>JSON.stringify(config()),flashLong:()=>{},performTask:(...a)=>calls.push(a),
+    runtime.run(source,{
+      prompt:()=>JSON.stringify(config()),performTask:(...a)=>calls.push(a),
       confirm:()=>true,evtprm:['케이뱅크','카드 승인','[합성] 10,000원']});
-    vm.runInContext(source,context);
   };
   run(project.scripts.setup);
   run(project.scripts.prepare);
@@ -211,4 +210,69 @@ test('손상된 연결·대기열·상태는 원문을 노출하지 않고 확�
     assert.ok(!url.includes('PRIVATE'));assert.ok(!url.includes(config().device_token));
     assert.deepEqual(p.globals,before);
   }
+});
+
+test('Tasker가 실행 종료 때 지역 변수를 반영해도 진단 결과가 초기 오류 화면으로 돌아가지 않는다', () => {
+  const globals={BUDGETCONFIG:JSON.stringify(config()),BUDGETREADY:config().connection_id,
+    BUDGETOUTBOX:'[]',BUDGETSTATUS:'마지막 전송 성공: 2026-10-16T13:57:39.000Z'};
+  const before={...globals};
+  const runtime=taskerRuntime(globals,{budget_status_url:
+    'https://suho-j.github.io/beginner-budget/artifacts/tasker-guide/diagnose.html#v=1&connection=script_error&queue=invalid&last=unknown&at='});
+  runtime.run(buildProject().scripts.status);
+  const result=new URLSearchParams(new URL(runtime.locals.budget_status_url).hash.slice(1));
+  assert.equal(result.get('connection'),'ready');
+  assert.equal(result.get('queue'),'0');
+  assert.equal(result.get('last'),'sent');
+  assert.deepEqual(globals,before);
+});
+
+test('재전송 때 기존 지역 변수와 이전 HTTP 응답이 남아 있어도 현재 알림만 보내고 확인한다', () => {
+  const project=buildProject();
+  const runtime=taskerRuntime({}, {budget_send:'0',budget_ack:'1',budget_body:'STALE',
+    budget_event_id:'stale',budget_url:'https://stale.invalid',budget_headers:'STALE',budget_batch:'0',
+    http_response_code:'200',http_data:'{"ok":true,"event_id":"stale"}'});
+  runtime.run(project.scripts.setup,{prompt:()=>JSON.stringify(config())});
+  const first=JSON.parse(runtime.globals.BUDGETOUTBOX)[0];
+  const second={...first,event_id:'phone-test-second'};
+  runtime.globals.BUDGETOUTBOX=JSON.stringify([first,second]);
+  runtime.run(project.scripts.prepare);
+  assert.equal(runtime.locals.budget_send,'1');
+  assert.equal(JSON.parse(runtime.locals.budget_body).p_event.event_id,first.event_id);
+  assert.equal(runtime.locals.http_response_code,'0');assert.equal(runtime.locals.http_data,'');
+  runtime.locals.http_response_code='503';runtime.locals.http_data='{}';
+  runtime.run(project.scripts.acknowledge);runtime.run(project.scripts.connectionStatus);
+  assert.equal(runtime.locals.budget_ack,'0');
+  assert.equal(JSON.parse(runtime.globals.BUDGETOUTBOX).length,2);
+  assert.equal(runtime.globals.BUDGETREADY,'');
+  runtime.run(project.scripts.prepare);
+  runtime.locals.http_response_code='200';runtime.locals.http_data=JSON.stringify({ok:true,event_id:first.event_id});
+  runtime.run(project.scripts.acknowledge);runtime.run(project.scripts.connectionStatus);
+  assert.equal(runtime.locals.budget_ack,'1');assert.equal(runtime.globals.BUDGETREADY,config().connection_id);
+  assert.deepEqual(JSON.parse(runtime.globals.BUDGETOUTBOX).map(event=>event.event_id),[second.event_id]);
+  runtime.run(project.scripts.prepare);
+  assert.equal(JSON.parse(runtime.locals.budget_body).p_event.event_id,second.event_id);
+  assert.equal(runtime.locals.budget_batch,'3');
+  runtime.locals.http_response_code='200';runtime.locals.http_data=JSON.stringify({ok:true,event_id:first.event_id});
+  runtime.run(project.scripts.acknowledge);
+  assert.equal(runtime.locals.budget_ack,'0');
+  assert.deepEqual(JSON.parse(runtime.globals.BUDGETOUTBOX).map(event=>event.event_id),[second.event_id]);
+  runtime.locals.http_data=JSON.stringify({ok:true,event_id:second.event_id});
+  runtime.run(project.scripts.acknowledge);
+  assert.equal(runtime.locals.budget_ack,'1');assert.equal(runtime.globals.BUDGETOUTBOX,'[]');
+});
+
+test('수정 가져오기는 기존 전송·진단 작업만 제공하고 기본 브라우저에 잘못된 앱 지정을 넣지 않는다', () => {
+  const repair=buildRepairProject();
+  assert.equal(zlib.gunzipSync(Buffer.from(repair.uri.slice('taskerproject://'.length),'base64')).toString(),repair.xml);
+  assert.ok(repair.xml.includes('<name>가계부 연결 수정</name>'));
+  assert.deepEqual([...repair.xml.matchAll(/<nme>([^<]+)<\/nme>/g)].map(match=>match[1]).sort(),['BB 보내기','BB 연결 확인']);
+  assert.ok(!repair.xml.includes('<Profile '));
+  assert.ok(!repair.xml.includes('setGlobal(&apos;BUDGETCONFIG&apos;'));
+  for(const xml of [repair.xml,buildStatusProject().xml,buildProject().xml]){
+    const browser=xml.match(/<code>104<\/code>([\s\S]*?)<\/Action>/)[1];
+    assert.ok(browser.includes('%budget_status_url'));
+    assert.ok(!browser.includes('sr="arg1"'),'Leave the optional app unset instead of an empty App object that imports as %');
+  }
+  const sender=xml=>xml.match(/<Task sr="task5204">[\s\S]*?<\/Task>/)[0];
+  assert.equal(sender(repair.xml),sender(buildProject().xml));
 });

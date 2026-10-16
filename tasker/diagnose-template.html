@@ -27,10 +27,12 @@
       <li>아래 <strong>▶</strong>를 누르면 이 브라우저에 결과가 표시됩니다.</li>
     </ol>
     <p class="muted">기존 알림 프로필·연결키·대기열은 변경하지 않습니다. 이 파일을 추가하는 것만으로 알림 수집 문제가 해결됐다는 뜻은 아닙니다.</p>
+    <p>이전에 설치했는데 오류 화면이 남으면 <a href="repair.html">수정 작업 가져오기</a>를 이용하세요.</p>
     <details><summary>파일로 가져오기</summary><p>Tasker 하단 프로젝트 탭을 길게 누른 뒤 Import에서 <strong>Budget-Status.prj.xml</strong>을 선택하세요. 기존 가계부 프로젝트를 지우지 마세요.</p></details>
   </section>
   <section id="result" hidden aria-live="polite" aria-atomic="true">
     <h1 id="result-title"></h1>
+    <p class="label" id="version"></p>
     <p class="muted">Tasker가 이번 실행에서 읽은 휴대폰 상태입니다. 현재 서버 접속이나 알림 접근 권한을 직접 검사한 결과는 아닙니다.</p>
     <dl>
       <div><dt>연결 시험</dt><dd id="connection"></dd></div>
@@ -38,6 +40,7 @@
       <div><dt>마지막 처리 상태</dt><dd id="last"></dd><dd class="muted" id="sent-at" hidden></dd></div>
     </dl>
     <div class="next"><strong>다음 확인</strong><p id="next"></p></div>
+    <a id="repair-link" class="primary" href="repair.html" hidden>수정 작업 가져오기</a>
     <p>위 세 항목을 알려주시면 멈춘 단계를 확인할 수 있습니다.</p>
     <p class="muted">재생 버튼이 다시 ▶로 바뀌는 것만으로 전송 성공을 판단하지 않습니다.</p>
   </section>
@@ -50,10 +53,10 @@
   'use strict';
   if (!location.hash) return;
   const params=new URLSearchParams(location.hash.slice(1));
-  const connections={ready:'통과 기록 있음',waiting:'연결 시험 완료 전',missing:'저장된 연결 설정 없음',invalid:'연결 설정을 읽지 못함',script_error:'상태 읽기 코드가 완료되지 않음'};
+  const connections={ready:'통과 기록 있음',waiting:'연결 시험 완료 전',missing:'저장된 연결 설정 없음',invalid:'연결 설정을 읽지 못함',script_error:'진단 결과가 전달되지 않음'};
   const statuses={sent:'마지막 전송 성공',send_wait:'서버 전송 대기',capture_error:'알림 내용을 보관하지 못함',config_error:'전송 설정 또는 이전 연결 확인 필요',testing:'연결 시험 중',unknown:'확인할 수 없음'};
   const connection=params.get('connection'), last=params.get('last'), queue=params.get('queue'), at=params.get('at')||'';
-  const valid=params.get('v')==='1' && Object.prototype.hasOwnProperty.call(connections,connection)
+  const valid=['1','2'].includes(params.get('v')) && Object.prototype.hasOwnProperty.call(connections,connection)
     && Object.prototype.hasOwnProperty.call(statuses,last) && (queue==='invalid'||/^(0|[1-9]\d{0,2})$/.test(queue)&&Number(queue)<=200)
     && (at===''||/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(at)&&Number.isFinite(Date.parse(at))&&new Date(at).toISOString()===at)
     && params.size===5 && [...params.keys()].every(key=>['v','connection','queue','last','at'].includes(key));
@@ -65,11 +68,15 @@
     show('connection','확인할 수 없음');show('queue','확인할 수 없음');show('last','확인할 수 없음');
     show('next','Tasker의 BB 연결 확인을 다시 실행해 주세요. 주소를 직접 수정하지 않아도 됩니다.');return;
   }
-  show('result-title',connection==='script_error'?'상태 읽기 단계가 멈췄어요.':'휴대폰 상태를 확인했어요.');
+  show('result-title',connection==='script_error'?'진단 결과를 받지 못했어요.':'휴대폰 상태를 확인했어요.');
+  show('version',params.get('v')==='2'?'진단 수정판 2':'이전 진단 작업');
   show('connection',connections[connection]);show('queue',queue==='invalid'?'대기열을 읽지 못함':queue+'개');show('last',statuses[last]);
   if(last==='sent'&&at){const node=document.getElementById('sent-at');node.hidden=false;node.textContent=new Intl.DateTimeFormat('ko-KR',{dateStyle:'medium',timeStyle:'medium',timeZone:'Asia/Seoul'}).format(new Date(at))+' (한국 시간)';}
   let next;
-  if(connection==='script_error')next='Tasker의 BB 연결 확인 작업에서 2번 JavaScriptlet에 표시된 오류를 확인해 주세요. 이 결과 화면을 보내주셔도 됩니다.';
+  if(connection==='script_error'){
+    document.getElementById('repair-link').hidden=false;
+    next=params.get('v')==='1'?'이전 진단은 상태를 읽어도 결과 주소가 초기값으로 남을 수 있습니다. 아래 수정 작업을 가져오세요. 이 화면만으로 서버 연결 실패를 뜻하지는 않습니다.':'Tasker의 BB 연결 확인 작업에서 2번 JavaScriptlet 오류와 3번 URL 찾아보기의 패키지/앱이름이 비어 있는지 확인해 주세요.';
+  }
   else if(connection==='missing'||connection==='invalid')next='기존 가계부 자동수집 프로젝트의 BB 시작을 실행해 연결 설정을 확인하세요. 진단 프로젝트에서는 설정을 변경하지 않습니다.';
   else if(queue==='invalid'||last==='config_error')next='기존 연결 설정이나 대기열을 확인해야 합니다. 새 연결을 만들거나 대기열을 지우기 전에 이 화면의 세 항목을 알려주세요.';
   else if(Number(queue)>0)next='알림이 폰에 남아 있습니다. 기존 프로젝트의 BB 보내기를 실행한 뒤 BB 연결 확인을 다시 실행하세요.';

@@ -1,8 +1,8 @@
 /* Run after HTTP Request, including errors. Never remove an unacknowledged item. */
+var budget_ack = '0';
+var budget_body = '';
 (function () {
   'use strict';
-  setLocal('budget_ack', '0');
-  setLocal('budget_body', '');
   var code = Number(typeof http_response_code !== 'undefined' ? http_response_code : 0);
   var response;
   try { response = JSON.parse(typeof http_data === 'string' ? http_data : 'null'); }
@@ -15,5 +15,5 @@
   setGlobal('BUDGETOUTBOX', JSON.stringify(queue.filter(function (event) {
     return event.event_id !== sentId;
   })));
-  setLocal('budget_ack', '1');
+  budget_ack = '1';
 })();

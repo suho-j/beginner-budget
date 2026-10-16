@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="referrer" content="no-referrer"><meta name="color-scheme" content="light dark">
+  <link rel="icon" href="data:,"><title>가계부 · Tasker 연결 수정</title>
+  <style>
+    :root{color-scheme:light dark;font-family:system-ui,-apple-system,"Segoe UI",sans-serif;color:light-dark(#192220,#e8efeb);background:light-dark(#f5f7f4,#151b18)}
+    *{box-sizing:border-box}body{margin:0;padding:28px 20px 48px}main{max-width:540px;margin:auto}h1{font-size:28px;line-height:1.3;letter-spacing:-.04em}p,li{line-height:1.65}a{color:light-dark(#215840,#a5debc);overflow-wrap:anywhere}a:focus-visible,summary:focus-visible{outline:3px solid light-dark(#1c6dba,#88c6ff);outline-offset:4px}.label,.muted,footer{color:light-dark(#51635b,#afc3b8)}.label,footer{font-size:13px}.muted{font-size:14px}.primary{display:block;background:light-dark(#215840,#a5debc);color:light-dark(#fff,#102a1d);padding:16px;border-radius:16px;text-align:center;text-decoration:none;font-weight:650;margin:22px 0 14px}.secondary{display:block;text-align:center;margin:18px 0}li{margin:14px 0}ol{padding-left:23px}details{margin-top:24px;padding-top:18px;border-top:1px solid light-dark(#d3ded5,#3b4b40)}summary{min-height:32px}footer{margin-top:28px}
+  </style>
+</head>
+<body><main>
+  <p class="label">가계부 자동수집 · 수정판 2</p>
+  <h1>연결키는 그대로,<br>두 작업만 교체하세요.</h1>
+  <p>상태를 읽어도 오류 화면이 남는 문제와 알림 재전송의 변수 전달을 수정했습니다. 브라우저 선택 칸에 잘못 들어가던 %도 제거했습니다.</p>
+  <a class="primary" id="import-repair" href="{{REPAIR_URI}}">수정 작업 가져오기</a>
+  <a class="secondary" id="download-repair" href="data:application/xml;base64,{{REPAIR_XML}}" download="Budget-Repair.prj.xml">앱이 열리지 않으면 수정 파일 받기</a>
+  <ol>
+    <li><strong>가계부 연결 수정</strong> 프로젝트를 가져옵니다.</li>
+    <li>같은 이름의 작업을 교체할지 물으면 <strong>BB 연결 확인</strong>과 <strong>BB 보내기</strong>의 덮어쓰기를 허용합니다.</li>
+    <li>Tasker에서 <strong>작업 → BB 연결 확인 → ▶</strong>를 누릅니다. 결과에 <strong>진단 수정판 2</strong>가 표시되는지 확인하세요.</li>
+  </ol>
+  <p class="muted">기존 알림 프로필과 연결 설정은 유지합니다. 연결키를 다시 입력하거나 ‘BB 시작’을 다시 실행할 필요가 없습니다. BB 보내기는 기존 대기 알림을 같은 연결로 전송하며 서버 성공 응답을 받은 건만 대기열에서 지웁니다.</p>
+  <details><summary>파일로 가져오기</summary><p>Tasker 하단 프로젝트 탭을 길게 누른 뒤 Import에서 <strong>Budget-Repair.prj.xml</strong>을 선택하세요. 전체 설정 복원 메뉴는 사용하지 않습니다.</p></details>
+  <details><summary>이름 중복으로 가져오기가 막히면</summary><p>기존 프로젝트나 대기열을 지우지 말고 표시되는 문구를 알려주세요. 덮어쓰기 안내는 <a href="https://tasker.joaoapps.com/userguide/en/sharecreation.html" target="_blank" rel="noopener">Tasker 공식 공유 문서</a>를 기준으로 했으며 실제 폰의 수정 파일 가져오기는 확인이 필요합니다.</p></details>
+  <p><a href="diagnose.html">연결 확인 안내 보기</a></p>
+  <footer>연결키가 포함되지 않은 수정 파일입니다. PC에서 변수 전달 재현·회귀 테스트와 웹 화면을 검증했습니다. 폰에서의 교체·수신 성공은 결과를 확인한 뒤 판단합니다.</footer>
+</main></body></html>
