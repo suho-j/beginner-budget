@@ -2957,11 +2957,11 @@ function testAppMarkupProvidesRecurringSectionsAndDialogContracts() {
   const sectionByLabel = (id) => elementFromStart(source.match(new RegExp(`<(section)\\b[^>]*\\baria-labelledby="${id}"[^>]*>`, 'i')));
 
   const upcomingSection = elementById('recurring-upcoming-section');
-  const expectedTabs = ['tab-home', 'tab-history', 'tab-calendar', 'tab-settings'];
+  const expectedTabs = ['tab-home', 'tab-review', 'tab-history', 'tab-calendar', 'tab-settings'];
   const actualTabs = [...source.matchAll(/<button\b[^>]*>/gi)]
     .filter((match) => attributeValue(match[0], 'role') === 'tab')
     .map((match) => attributeValue(match[0], 'id'));
-  assert.deepStrictEqual(actualTabs, expectedTabs, 'recurring expenses must not add a fifth top-level tab');
+  assert.deepStrictEqual(actualTabs, expectedTabs, 'review has its own tab; recurring expenses stay within home and settings');
 
   const futureElementKeys = {
     recurringUpcomingSection: 'recurring-upcoming-section',

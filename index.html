@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>처음 가계부</title>
   <link rel="icon" href="data:,">
-  <link rel="stylesheet" href="css/style.css?v=20261016-phone">
+  <link rel="stylesheet" href="css/style.css?v=20261017-review">
 </head>
 <body id="top">
   <a class="skip-link" href="#main-content">본문으로 바로가기</a>
@@ -28,6 +28,7 @@
     <nav class="container app-tabs" aria-label="주요 메뉴">
       <div role="tablist" aria-label="가계부 화면">
         <button id="tab-home" type="button" role="tab" aria-selected="true" aria-controls="panel-home" data-tab="home">홈</button>
+        <button id="tab-review" type="button" role="tab" aria-selected="false" aria-controls="panel-review" data-tab="review" tabindex="-1">분류 <span id="review-count" class="review-badge" hidden>0</span></button>
         <button id="tab-history" type="button" role="tab" aria-selected="false" aria-controls="panel-history" data-tab="history" tabindex="-1">내역</button>
         <button id="tab-calendar" type="button" role="tab" aria-selected="false" aria-controls="panel-calendar" data-tab="calendar" tabindex="-1">캘린더</button>
         <button id="tab-settings" type="button" role="tab" aria-selected="false" aria-controls="panel-settings" data-tab="settings" tabindex="-1">설정</button>
@@ -176,6 +177,18 @@
     </section>
     </section>
 
+    <section id="panel-review" class="tab-panel" role="tabpanel" aria-labelledby="tab-review" hidden>
+      <section class="panel review-panel" aria-labelledby="review-title">
+        <div class="review-heading"><div><p class="review-eyebrow">내가 고를 것만</p><h2 id="review-title">분류할 것</h2></div><button id="review-refresh" type="button" class="secondary">새로고침</button></div>
+        <p id="review-total" class="review-total">불러오는 중이에요</p>
+        <p class="hint">금액과 내용을 보고 분류를 누르면 기록돼요. 이체·플러스박스·연결 시험은 제외했어요.</p>
+        <p id="review-updated" class="muted">로그인 후 자동으로 확인해요.</p>
+        <p id="review-message" role="status" aria-live="polite" aria-atomic="true" tabindex="-1"></p>
+        <div id="review-empty" class="empty-state">분류할 결제를 확인하고 있어요.</div>
+        <div id="review-list"></div>
+        <details id="review-held-wrap" hidden><summary id="review-held-title">지출로 더하지 않은 알림</summary><div id="review-held"></div></details>
+      </section>
+    </section>
     <section id="panel-history" class="tab-panel" role="tabpanel" aria-labelledby="tab-history" hidden>
     <div class="panel filters" aria-labelledby="history-filter-title">
       <h2 id="history-filter-title">사용 내역 찾기</h2>
@@ -417,6 +430,8 @@
   <script src="js/ui.js?v=20260812-v2"></script>
   <script src="js/phone-import.js?v=20261016-2"></script>
   <script src="js/phone-sync.js?v=20261016-2"></script>
-  <script src="js/app.js?v=20261016-phone"></script>
+  <script src="js/phone-review.js?v=20261017-1"></script>
+  <script src="js/phone-review-ui.js?v=20261017-1"></script>
+  <script src="js/app.js?v=20261017-review"></script>
 </body>
 </html>

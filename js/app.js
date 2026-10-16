@@ -31,6 +31,7 @@
     cloudReadiness = readiness;
     signedInUser = user || null;
     if (window.BudgetPhoneSync) window.BudgetPhoneSync.setSession(signedInUser, readiness);
+    if (window.BudgetPhoneReviewUI) window.BudgetPhoneReviewUI.setSession(signedInUser, readiness);
     window.BudgetUI.updateCloudStatus(elements, signedInUser, cloudReadiness);
     syncMutationAvailability();
   }
@@ -168,6 +169,7 @@
   }
 
   function render() {
+    if (window.BudgetPhoneReviewUI) window.BudgetPhoneReviewUI.setTransactions(state.transactions);
     const filters = activeFilters();
     elements.monthInput.value = viewState.month;
     const selectedBudget = window.BudgetStorage.budgetForMonth(state, filters.month);
@@ -635,6 +637,7 @@
   function selectTab(tab, focus = false) {
     viewState.tab = tab;
     window.BudgetUI.setActiveTab(elements, tab, focus);
+    if (tab === 'review' && window.BudgetPhoneReviewUI) window.BudgetPhoneReviewUI.open();
   }
 
   function handleTabKeydown(event) {
