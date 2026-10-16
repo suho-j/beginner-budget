@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>가계부 · Tasker 한 번에 가져오기</title>
+  <style>
+    :root {color-scheme:light dark;font-family:system-ui,-apple-system,"Segoe UI",sans-serif;color:light-dark(#192220,#e8efeb);background:light-dark(#f5f7f4,#151b18)}
+    * {box-sizing:border-box} body {margin:0;padding:32px 20px 48px} main {max-width:540px;margin:auto}
+    .eyebrow {color:light-dark(#446456,#a5c7b6);letter-spacing:.06em;font-size:13px}
+    h1 {font-size:30px;line-height:1.25;font-weight:650;letter-spacing:-.04em;margin:14px 0 18px}
+    p,li {line-height:1.65} .sub {color:light-dark(#51635b,#afc3b8)}
+    .primary {display:block;background:light-dark(#215840,#a5debc);color:light-dark(#fff,#102a1d);padding:17px 18px;border-radius:16px;text-align:center;text-decoration:none;font-weight:650}
+    .secondary {display:block;text-align:center;margin:18px 0;color:inherit;line-height:1.6}
+    .status {padding:15px 17px;border-radius:14px;background:light-dark(#fff0d3,#3d3020);color:light-dark(#604710,#f6d69d);margin:22px 0;font-size:14px}
+    ol {padding-left:24px} li {padding-left:5px;margin:16px 0} strong {font-weight:650}
+    details {border-top:1px solid light-dark(#d3ded5,#3b4b40);padding:18px 0;margin-top:20px}
+    summary {min-height:30px} code {font-size:14px;overflow-wrap:anywhere} a:focus-visible,summary:focus-visible {outline:3px solid light-dark(#1c6dba,#88c6ff);outline-offset:4px}
+    footer {margin-top:28px;font-size:13px;color:light-dark(#54665c,#afc3b8)}
+    @media(max-width:360px) {body{padding:22px 16px} h1{font-size:27px}}
+  </style>
+</head>
+<body>
+<main>
+  <p class="eyebrow">가계부 자동수집 · ANDROID / TASKER</p>
+  <h1>복잡한 작업 등록은<br>한 번에 끝내세요.</h1>
+  <p class="sub">Tasker가 설치된 갤럭시에서 열어 주세요. 케이뱅크·쿠팡이츠 알림, 실패 시 재전송, 연결 시험이 함께 들어갑니다.</p>
+  <a class="primary" href="{{TASKER_URI}}" id="import">Tasker로 한 번에 가져오기</a>
+  <a class="secondary" href="data:application/xml;base64,{{XML_BASE64}}" download="Budget-Auto.prj.xml" id="download">앱이 열리지 않으면 프로젝트 파일 받기</a>
+  <div class="status" role="note"><strong>가계부 서버 연결 준비 완료</strong><br>서버 수신 시험을 통과했습니다. 아래 순서대로 연결해 주세요. 실제 갤럭시 알림 수신은 폰에서 확인해야 합니다. 내 폰의 연결 시험에 성공한 뒤 새 알림을 수집합니다.</div>
+  <p><a class="secondary" href="https://suho-j.github.io/beginner-budget/" target="_blank" rel="noopener">웹 가계부 열기 · 연결 설정 만들기 (새 창)</a></p>
+  <ol>
+    <li><strong>가져오기 허용</strong><br>Tasker에 <b>가계부 자동수집</b> 프로젝트를 추가하고 프로필 활성화를 허용하세요. 기존 설정 전체를 복원하는 메뉴는 사용하지 않습니다.</li>
+    <li><strong>알림 접근 허용</strong><br>갤럭시 설정에서 <b>알림 접근</b>을 검색해 Tasker를 허용하세요. Tasker의 배터리 설정도 <b>제한 없음</b>으로 설정합니다.</li>
+    <li><strong>연결 설정 한 번 붙여 넣기</strong><br>가계부 <b>설정 → 휴대폰 알림 연결 → 연결 설정 만들기</b>에서 복사한 뒤, Tasker 작업 <b>BB 시작</b>을 열고 ▶를 누르세요. 붙여 넣으면 연결 시험이 실행됩니다.</li>
+    <li><strong>시험 성공 확인</strong><br><b>BB 상태</b>에서 서버 연결을 확인하고 가계부 수신함의 <b>[연결 시험]</b> 한 건을 확인하세요. 실제 결제는 만들지 않습니다.</li>
+  </ol>
+  <details>
+    <summary>파일로 가져오려면</summary>
+    <p>받은 파일 이름은 <code>Budget-Auto.prj.xml</code>입니다. Tasker 하단의 프로젝트 탭(집 아이콘 또는 프로젝트 이름)을 길게 누르고 <b>Import / 가져오기</b>에서 이 파일을 고르세요. 같은 이름의 프로젝트가 이미 있으면 중복으로 추가하지 마세요.</p>
+  </details>
+  <details>
+    <summary>쿠팡이츠 메뉴도 보내려면</summary>
+    <p>알림은 자동 수집합니다. 메뉴가 알림에 없을 때는 Tasker 설정의 <b>Action → Quick Settings Tasks</b> 빈 칸에 <b>BB 주문 화면</b>을 지정하고 갤럭시 빠른 설정에 해당 Tasker 타일을 추가하세요.</p>
+    <p>쿠팡이츠 주문 상세를 열고 타일을 누르면 화면 글자를 확인한 뒤 보냅니다. Tasker를 기본 디지털 어시스턴트로 지정해야 할 수 있으며, 앱이 화면 글자를 제공해야 합니다. 실제 쿠팡이츠 화면 추출은 아직 검증 전입니다.</p>
+  </details>
+  <details>
+    <summary>어떤 내용이 가계부에 들어가나요?</summary>
+    <p>설치 이후 케이뱅크·쿠팡이츠가 표시한 알림을 수신함에 모읍니다. 과거 내역을 조회하지는 않습니다. 알려진 잔액·번호 표기를 가리고 인증번호 알림은 보내지 않습니다.</p>
+    <p>이체·플러스박스 이동·환불은 자동 지출로 더하지 않습니다. 카드 결제 후보도 사람이 확인해야 지출이 됩니다. 쿠팡 주문 자동 조회와 카테고리 자동 확정은 이번 설치에 포함되지 않습니다.</p>
+  </details>
+  <footer>프로젝트에는 개인 연결키가 없습니다. 연결키는 휴대폰에서 입력합니다.<br>가져오기 방식: <a href="https://tasker.joaoapps.com/import/import.html" target="_blank" rel="noopener">Tasker 공식 예시</a> · 2026-10-16</footer>
+</main>
+</body>
+</html>

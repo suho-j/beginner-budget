@@ -483,3 +483,26 @@ Tasks 15~16 이후에만 실행합니다.
 ## 부록. V1 runbook 회귀 계약
 
 이 부록은 기존 V1 자동 회귀가 요구하는 역사적 계약이며 V2 SQL 적용 명령이 아닙니다. V1 최초 seed는 **짧은 운영 쓰기 중단 창**에서 운영·미리보기·로컬 로그인 탭의 쓰기를 중단하고, API를 포함한 세 환경의 모든 writer를 멈춘 상태로 실행했습니다. V1 SQL은 `READ COMMITTED`, `production_snapshot_v1`, **canonical settings**와 **canonical transactions** 전체 행/값의 **양방향 EXCEPT**를 사용했습니다. 비교 완료 후에만 운영·preview·local 쓰기 재개가 허용됐습니다.
+
+## 휴대폰 알림 수신 (2026-10-16)
+
+```powershell
+node --test tests/phone-import.test.cjs tests/tasker-scripts.test.cjs
+npm.cmd install --prefix .tmp/phone-tests --no-save --ignore-scripts @electric-sql/pglite@0.3.14
+node tests/phone-sql.test.cjs
+# playwright가 설치된 검증 환경에서 실행. 필요하면 NODE_PATH에 해당 node_modules 지정.
+node tests/phone-browser.cjs
+```
+
+phone-sql 테스트는 메모리 안 PostgreSQL(PGlite)에 합성 사용자와 테이블을 만든 뒤 실제 SQL을 실행합니다. 운영 Supabase에 접속하지 않습니다. anon 수신 제한, 사용자 RLS, 전송키 회수, 중복 수신·중복 기록, 환경 분리, 잘못된 요청, 취소 오등록 방지를 확인합니다.
+
+phone-browser 테스트는 별도 headless Chrome과 시험용 Cloud 응답을 사용합니다. 연결 설정 생성, 알림 텍스트 렌더링, 쉼표 금액, 기록, 360px, 로그아웃 정리를 확인합니다. 실제 Supabase 인증 저장 증거는 아닙니다.
+
+최종 실기기 게이트는 TASKER_SETUP.md의 연결 시험과 실제 알림·주문 화면 시험입니다. 실제 폰에서 Tasker JavaScript 라이브러리 로드, 권한, 백그라운드 지속성까지 통과하기 전에는 수집 완료로 표시하지 않습니다.
+
+### 이체·플러스박스 오등록 방지 회귀
+
+- tests/fixtures/phone-notifications.cjs는 실제 고객 자료가 아닌 합성 알림 29종입니다. 카드 승인/완료, 박스 원금 이동, 이체/송금, 중복 출금, 이자, 취소/환불, 결제 예정/실패, 문구 미확인을 포함합니다.
+- 같은 사례를 JavaScript 분류와 PostgreSQL 직접 기록 RPC에서 모두 확인합니다. 알림 수신 자체는 가능하지만 제외 알림의 기록 요청은 거절되어야 합니다.
+- 브라우저에서 카드 후보 1건과 보관 알림 4건을 함께 표시하고, 등록 폼은 1개만 나타나며 수신만으로 합계가 늘지 않는지 확인합니다. 카드 후보 기록 후에는 폼이 0개이고 그 결제액만 합계에 남아야 합니다.
+- 실제 케이뱅크 앱의 전경/배경 알림 차이와 플러스박스 알림 문구는 실기기 게이트로 남습니다.

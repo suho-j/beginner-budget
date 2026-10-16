@@ -30,6 +30,7 @@
   function setCloudReadiness(readiness, user = signedInUser) {
     cloudReadiness = readiness;
     signedInUser = user || null;
+    if (window.BudgetPhoneSync) window.BudgetPhoneSync.setSession(signedInUser, readiness);
     window.BudgetUI.updateCloudStatus(elements, signedInUser, cloudReadiness);
     syncMutationAvailability();
   }
@@ -862,7 +863,8 @@
       setGlobalMessage('클라우드 데이터 불러오기를 시작할 수 없는 상태예요.', 'error');
       return;
     }
-    if (!window.confirm('현재 화면을 최신 클라우드 데이터로 다시 불러올까요?')) return;
+    const fromPhoneRecord = event && event.type === 'budget:phone-recorded';
+    if (!fromPhoneRecord && !window.confirm('현재 화면을 최신 클라우드 데이터로 다시 불러올까요?')) return;
     const user = signedInUser;
     setCloudReadiness('loading', user);
     try {
@@ -1001,6 +1003,7 @@
     elements.cloudLoginForm.addEventListener('submit', handleCloudLogin);
     elements.cloudUploadButton.addEventListener('click', handleCloudUpload);
     elements.cloudDownloadButton.addEventListener('click', handleCloudDownload);
+    document.addEventListener('budget:phone-recorded', handleCloudDownload);
     elements.cloudLogoutButton.addEventListener('click', handleCloudLogout);
     elements.transactionForm.addEventListener('reset', () => {
       window.setTimeout(() => {

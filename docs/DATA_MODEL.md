@@ -132,3 +132,11 @@ tx-recurring-<templateId>-<YYYY-MM>
 ## 복구 원칙
 
 클라우드 다운로드나 로컬 정규화에서 잘못된 개별 행은 제외하고 유효한 데이터는 유지합니다. 다른 브라우저의 선행 변경, 손상된 백업 배열, 미래 버전 백업은 자동 덮어쓰기로 복구하지 않습니다. 사용자가 최신 클라우드 상태를 다시 불러오거나 올바른 백업을 선택하도록 안내합니다.
+
+## 휴대폰 수신 데이터 (2026-10-16)
+
+phone_devices는 (user_id, environment)별 전송키 해시를 보관합니다. phone_inbox는 같은 범위 안의 event_id를 PK로 사용하며 수집 시각(captured_at)과 서버 수신 시각(received_at)을 분리합니다. 현재 수신 원문은 계좌/카드번호·잔액의 알려진 표기를 가린 뒤 저장되며 결제 전문 구조로 가정하지 않습니다.
+
+status는 pending / recorded / ignored, transaction_id는 확인 후 기록된 기존 거래 ID입니다. 현재 UI에 ignored 처리 기능은 없으며 향후 처리 상태로만 예약했습니다. 승인된 기록은 source=user, ID는 phone- + 사용자·환경·이벤트 ID의 MD5입니다. 원문은 별도 수신함에 남고 기존 JSON 가계부 백업에는 포함되지 않습니다. 전체 가계부 초기화는 수신함·기기키를 삭제하지 않습니다.
+
+receive_phone_event는 전송만 허용하고 user_id/environment를 클라이언트에서 받지 않습니다. record_phone_event는 로그인 사용자와 원래 환경 범위만 잠그고 insert한 뒤 상태를 함께 변경합니다. 사용자 수정된 기존 거래를 update/upsert하지 않습니다. 수신 시각이나 알림의 첫 금액을 실제 결제 시각/금액으로 변환하지 않습니다.
