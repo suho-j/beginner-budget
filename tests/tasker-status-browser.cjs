@@ -3,13 +3,14 @@ const path = require('node:path');
 const http = require('node:http');
 const assert = require('node:assert/strict');
 const {chromium} = require('playwright');
-const {buildStatusProject,buildRepairProject} = require('../tasker/build-project.cjs');
+const {buildStatusProject,buildRepairProject,buildCaptureRestoreProject} = require('../tasker/build-project.cjs');
 
 (async () => {
   const html=fs.readFileSync(path.resolve(__dirname,'../artifacts/tasker-guide/diagnose.html'));
   const repairHtml=fs.readFileSync(path.resolve(__dirname,'../artifacts/tasker-guide/repair.html'));
+  const restoreHtml=fs.readFileSync(path.resolve(__dirname,'../artifacts/tasker-guide/restore.html'));
   const project=buildStatusProject();
-  const server=http.createServer((req,res)=>{res.writeHead(200,{'Content-Type':'text/html; charset=utf-8'});res.end(req.url==='/repair.html'?repairHtml:html);});
+  const server=http.createServer((req,res)=>{res.writeHead(200,{'Content-Type':'text/html; charset=utf-8'});res.end(req.url==='/restore.html'?restoreHtml:req.url==='/repair.html'?repairHtml:html);});
   await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
   const base=process.env.TASKER_STATUS_BASE_URL||'http://127.0.0.1:'+server.address().port;
   const browser=await chromium.launch({channel:'chrome',headless:true});
@@ -101,10 +102,27 @@ const {buildStatusProject,buildRepairProject} = require('../tasker/build-project
     await page.setViewportSize({width:360,height:800});
     await page.locator('details').evaluateAll(nodes=>nodes.forEach(node=>{node.open=false;}));
     await page.screenshot({path:path.join(output,'status-repair.png'),fullPage:true});
+    await page.goto(new URL('./restore.html',base).href);
+    const restore=buildCaptureRestoreProject();
+    assert.equal(await page.locator('#import-restore').getAttribute('href'),restore.uri);
+    const restoreDownloadPromise=page.waitForEvent('download');
+    await page.locator('#download-restore').click();
+    const restoreDownload=await restoreDownloadPromise;
+    assert.equal(restoreDownload.suggestedFilename(),'Budget-Capture.prj.xml');
+    assert.equal(fs.readFileSync(await restoreDownload.path(),'utf8'),restore.xml);
+    assert.ok((await page.locator('body').innerText()).includes('자동수집 복원 1'));
+    for(const width of [800,360,320]){
+      await page.setViewportSize({width,height:800});
+      await page.locator('details').evaluateAll(nodes=>nodes.forEach(node=>{node.open=true;}));
+      assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+    }
+    await page.setViewportSize({width:360,height:800});
+    await page.locator('details').evaluateAll(nodes=>nodes.forEach(node=>{node.open=false;}));
+    await page.screenshot({path:path.join(output,'capture-restore.png'),fullPage:true});
     assert.deepEqual(errors,[]);
     assert.ok(requests.every(request=>request.type==='document'&&new URL(request.url).origin===new URL(base).origin),
       'The status page must not send status or notification data through a background request');
-    console.log('PASS: status and repair pages, exact imports/downloads, v1/v2 failure states, no reflected data or background requests, 800/360/320px, keyboard, no console errors. Android repair import remains untested.');
+    console.log('PASS: status, repair and capture restore pages, exact imports/downloads, v1/v2 failure states, no reflected data or background requests, 800/360/320px, keyboard, no console errors. Android restore import remains untested.');
   } finally {
     await browser.close();await new Promise(resolve=>server.close(resolve));
   }

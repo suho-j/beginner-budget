@@ -2,12 +2,32 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const vm = require('node:vm');
 const zlib = require('node:zlib');
-const { buildProject, buildStatusProject, buildRepairProject } = require('../tasker/build-project.cjs');
+const { buildProject, buildStatusProject, buildRepairProject, buildCaptureRestoreProject } = require('../tasker/build-project.cjs');
 const { taskerRuntime } = require('./helpers/tasker-runtime.cjs');
 
 const config = () => ({
   endpoint:'https://test.supabase.co/rest/v1/rpc/receive_phone_event',
   public_key:'sb_publishable_test', device_token:'a'.repeat(64), connection_id:'b'.repeat(64)
+});
+
+test('자동수집 복원은 수정판과 이름·ID 충돌 없이 세 프로필을 되살리고 기존 보내기로 연결한다', () => {
+  const restore=buildCaptureRestoreProject(), repair=buildRepairProject();
+  assert.equal(zlib.gunzipSync(Buffer.from(restore.uri.slice('taskerproject://'.length),'base64')).toString(),restore.xml);
+  const names=xml=>[...xml.matchAll(/<nme>([^<]+)<\/nme>/g)].map(m=>m[1]);
+  assert.equal((restore.xml.match(/<Profile /g)||[]).length,3);
+  assert.ok(names(restore.xml).every(name=>!names(repair.xml).includes(name)));
+  const ids=xml=>[...xml.matchAll(/<Task sr="task(\d+)">/g)].map(m=>m[1]);
+  assert.ok(ids(restore.xml).every(id=>!ids(repair.xml).includes(id)));
+  for(const [,mid] of restore.xml.matchAll(/<mid0>(\d+)<\/mid0>/g))assert.ok(ids(restore.xml).includes(mid));
+  for(const key of ['BUDGETCONFIG','BUDGETREADY','BUDGETTESTID'])assert.ok(!restore.xml.includes('setGlobal(&apos;'+key+'&apos;'));
+  assert.ok(!restore.xml.includes('연결 설정을 붙여'));
+  assert.ok(restore.xml.includes('performTask(&quot;BB 보내기&quot;'));
+  assert.ok(restore.xml.includes('<repval>15</repval>'));
+  const full=buildProject().xml;
+  for(const id of ['5202','5203','5205']) {
+    const task=xml=>xml.match(new RegExp('<Task sr="task'+id+'">[\\s\\S]*?<\\/Task>'))[0];
+    assert.equal(task(restore.xml),task(full));
+  }
 });
 function phone(answer = JSON.stringify(config())) {
   const globals = {};

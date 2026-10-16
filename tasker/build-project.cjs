@@ -110,6 +110,23 @@ function buildRepairProject() {
   return {xml,uri:'taskerproject://' + zlib.gzipSync(Buffer.from(xml)).toString('base64')};
 }
 
+function buildCaptureRestoreProject() {
+  // Keep the already installed repair sender. Do not import duplicate task names or reset pairing.
+  const full=buildProject().xml;
+  const profiles=full.match(/<Profile\s[\s\S]*?<\/Profile>/g).join('\n')
+    .replace('<mid0>5204</mid0>','<mid0>5404</mid0>');
+  const tasks=[5202,5203,5205].map(id=>full.match(new RegExp('<Task sr="task'+id+'">[\\s\\S]*?<\\/Task>'))[0]).join('\n');
+  const retry='<Task sr="task5404"><id>5404</id><nme>BB 자동 재전송</nme><pri>10</pri>'
+    + '<Action sr="act0" ve="7"><code>129</code>'
+    + str(0,'performTask("BB 보내기", 5, "", "", "", false, false, "", false);')
+    + str(1) + int(2,1) + int(3,45) + '</Action></Task>';
+  const xml='<?xml version="1.0" encoding="UTF-8"?>\n<TaskerData sr="" dvi="1" tv="6.3.13">\n'
+    + profiles + '\n<Project sr="proj0" ve="2"><name>가계부 자동수집 복원</name>'
+    + '<pids>5101,5102,5103</pids><tids>5202,5203,5205,5404</tids></Project>\n'
+    + tasks + '\n' + retry + '\n</TaskerData>\n';
+  return {xml,uri:'taskerproject://' + zlib.gzipSync(Buffer.from(xml)).toString('base64')};
+}
+
 if (require.main === module) {
   const out = path.join(root,'artifacts/tasker-guide');
   fs.mkdirSync(out,{recursive:true});
@@ -126,6 +143,10 @@ if (require.main === module) {
   fs.writeFileSync(path.join(out,'Budget-Repair.prj.xml'),repair.xml);
   fs.writeFileSync(path.join(out,'repair.html'),read('tasker/repair-template.html')
     .replaceAll('{{REPAIR_URI}}',repair.uri).replaceAll('{{REPAIR_XML}}',Buffer.from(repair.xml).toString('base64')));
+  const restore=buildCaptureRestoreProject();
+  fs.writeFileSync(path.join(out,'Budget-Capture.prj.xml'),restore.xml);
+  fs.writeFileSync(path.join(out,'restore.html'),read('tasker/restore-template.html')
+    .replaceAll('{{RESTORE_URI}}',restore.uri).replaceAll('{{RESTORE_XML}}',Buffer.from(restore.xml).toString('base64')));
   console.log('Created capture, status and repair projects and installer pages; no connection keys included.');
 }
-module.exports = {buildProject,buildStatusProject,buildRepairProject};
+module.exports = {buildProject,buildStatusProject,buildRepairProject,buildCaptureRestoreProject};
