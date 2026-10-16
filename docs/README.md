@@ -107,9 +107,9 @@ V1 최초 seed의 역사적 안전 계약은 **짧은 운영 쓰기 중단 창**
 - [현재 V2 구현·검증 계획](superpowers/plans/2026-08-12-budget-recurring-upcoming-v2.md)
 - [과거 V1 탭·수정·캘린더 설계](superpowers/specs/2026-08-11-budget-tabs-edit-calendar-preview-design.md)
 
-## 안드로이드 알림 수신 준비 (2026-10-16)
+## 안드로이드 알림 수신 (2026-10-16)
 
-[Tasker 설정 안내](TASKER_SETUP.md)와 [독립 수신 SQL](supabase-phone-import.sql)을 추가했습니다. 설정 탭에서 수신용 연결키를 만들고 알림을 불러와 확인한 지출만 기록할 수 있습니다. Supabase 서버 적용·정적 파일 배포·실제 휴대폰 시험은 별도 단계입니다. 케이뱅크 알림 자동 확정과 쿠팡/쿠팡이츠 실제 주문 자동 보강은 아직 활성화되지 않았습니다.
+[Tasker 설치 화면](../artifacts/tasker-guide/install.html)과 [설정 안내](TASKER_SETUP.md)를 제공합니다. 운영 Supabase에 [수신 SQL](supabase-phone-import.sql)을 적용하고 실제 HTTP 수신·중복·권한·이체 제외를 시험했습니다. 설정 탭에서 수신용 연결키를 만들고 알림을 불러와 확인한 지출만 기록할 수 있습니다. 실제 휴대폰 시험은 별도 단계입니다. 케이뱅크 알림 자동 확정과 쿠팡/쿠팡이츠 실제 주문 자동 보강은 아직 활성화되지 않았습니다.
 
 앱은 계속 빌드 없는 정적 사이트입니다. Tasker 추가 테스트와 PostgreSQL 격리 테스트는 [테스트 계획](TEST_PLAN.md)의 휴대폰 수신 절차를 따릅니다.
 

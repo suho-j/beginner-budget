@@ -21,4 +21,4 @@
 - artifacts/tasker-guide/Budget-Auto.prj.xml: 키가 없는 프로젝트
 - artifacts/tasker-guide/install.html: 설치 버튼과 파일 다운로드를 포함한 단일 파일. 자체 포함된 데이터만 사용하고 외부 스크립트는 불러오지 않음.
 
-JS 실행 테스트, gzip 링크 왕복, 표준 XML 파서, 프로필/작업 참조 및 카탈로그 인수 대조는 PC에서 검증했다. Android Tasker의 실제 가져오기·네이티브 HTTP·알림 권한·백그라운드 수집은 미검증이다. 서버 SQL과 웹 기능도 아직 운영에 반영하지 않았다.
+JS 실행 테스트, gzip 링크 왕복, 표준 XML 파서, 프로필/작업 참조 및 카탈로그 인수 대조는 PC에서 검증했다. 운영 Supabase에 SQL을 적용하고 실제 HTTP 수신·권한·중복·이체 제외를 검증했다. Android Tasker의 실제 가져오기·네이티브 HTTP·알림 권한·백그라운드 수집은 미검증이다.

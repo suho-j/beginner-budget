@@ -27,7 +27,8 @@ const {buildProject} = require('../tasker/build-project.cjs');
     const download=await downloadPromise;
     assert.equal(download.suggestedFilename(),'Budget-Auto.prj.xml');
     assert.equal(fs.readFileSync(await download.path(),'utf8'),project.xml);
-    assert.ok(await page.getByText('서버 반영과 실제 갤럭시 검증은 아직입니다.',{exact:false}).isVisible());
+    assert.ok(await page.getByText('가계부 서버 연결 준비 완료',{exact:true}).isVisible());
+    assert.ok(await page.getByText('실제 갤럭시 알림 수신은 폰에서 확인해야 합니다.',{exact:false}).isVisible());
     assert.deepEqual(errors,[]);
     console.log('PASS: installer 800/360/320px, native import URI, exact XML download, no script errors. Android launch is not tested.');
   } finally {
