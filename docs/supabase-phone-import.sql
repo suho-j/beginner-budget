@@ -149,8 +149,13 @@ begin
   if v_event.status = 'recorded' then
     return jsonb_build_object('id', v_event.transaction_id, 'already_recorded', true);
   end if;
-  if v_event.status <> 'pending' or v_event.text ~ '(취소|환불|입금)' then
-    raise exception 'cancellation, refund or deposit requires separate review' using errcode = '22023';
+  -- Receipt is not spending. Keep this conservative gate aligned with paymentDraft.
+  -- Unrecognized real-world formats stay in the inbox until independently verified.
+  if v_event.status <> 'pending'
+    or v_event.text ~ '(취소|환불|반환|이자|캐시백|리워드|적립|플러스[[:space:]]*박스|\+[[:space:]]*박스|이체|송금|입금|출금|인출|거절|실패|예정|요청|신청|대기|안내|발급|등록|결제일|혜택)'
+    or v_event.text !~ '카드[[:space:]:：]*(승인([[:space:]]*완료)?|결제[[:space:]]*완료)($|[[:space:]:：0-9])'
+    or v_event.text !~ '[0-9][0-9,]*[[:space:]]*원' then
+    raise exception 'only explicit card payment candidates can be reviewed as expenses' using errcode = '22023';
   end if;
   if p_transaction is null or jsonb_typeof(p_transaction) <> 'object' then
     raise exception 'invalid transaction' using errcode = '22023';

@@ -42,12 +42,31 @@
   }
 
   function paymentDraft(event) {
-    return {
-      status: 'needs_review', amount: null, date: '', memo: '',
-      reason: event.kind === 'kbank_notification'
-        ? '승인·출금·취소를 구분하고 실제 결제 금액과 날짜를 확인해 주세요.'
-        : '주문 정보는 결제 내역의 설명에만 사용해요. 별도 지출로 더하지 않아요.'
-    };
+    const draft = {status:'needs_review', amount:null, date:'', memo:'', canRecordExpense:false};
+    const text = typeof event.text === 'string' ? event.text : '';
+    if (event.kind !== 'kbank_notification') {
+      draft.reason = '주문 정보는 결제 내역의 설명에만 사용해요. 별도 지출로 더하지 않아요.';
+    } else if (/취소|환불|반환/.test(text)) {
+      draft.reason = '취소·환불은 새 지출로 기록하지 않아요. 원래 결제와 따로 확인해 주세요.';
+    } else if (/이자|캐시백|리워드|적립/.test(text)) {
+      draft.reason = '이자·혜택 알림은 지출로 기록하지 않아요. 수입으로도 자동 등록하지 않아요.';
+    } else if (/플러스\s*박스|\+\s*박스/.test(text)) {
+      draft.reason = '플러스박스의 원금 이동은 내 돈을 옮기는 것이에요. 수입·지출에 더하지 않아요.';
+    } else if (/이체|송금/.test(text)) {
+      draft.reason = '이체·송금은 지출로 분류하지 않아요. 실제 소비라면 거래 입력에서 직접 기록해 주세요.';
+    } else if (/입금|출금|인출/.test(text)) {
+      draft.reason = '계좌 입출금은 카드 결제와 중복될 수 있어 여기서 지출로 기록하지 않아요.';
+    } else if (/거절|실패|예정|요청|신청|대기|안내|발급|등록|결제일|혜택/.test(text)) {
+      draft.reason = '결제가 완료된 알림으로 확인되지 않아 보관만 해요. 지출 합계에 더하지 않아요.';
+    } else if (/카드[\s:：]*(승인(\s*완료)?|결제\s*완료)($|[\s:：0-9])/.test(text)
+      && /[0-9][0-9,]*\s*원/.test(text)) {
+      // A review candidate, not a verified bank transaction. Keep SQL's gate in sync.
+      draft.canRecordExpense = true;
+      draft.reason = '카드 결제 후보예요. 실제 금액·날짜와 중복 여부를 확인한 뒤 기록해 주세요.';
+    } else {
+      draft.reason = '카드 결제로 확인되지 않아 보관만 해요. 지출 합계에는 더하지 않아요.';
+    }
+    return draft;
   }
 
   function instant(value) {

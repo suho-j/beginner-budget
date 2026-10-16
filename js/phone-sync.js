@@ -112,8 +112,9 @@
       card.append(element('h3', row.status === 'recorded' ? '기록한 알림' : names[row.kind] || '받은 알림'));
       card.append(element('p', '폰 수집 시각: ' + new Date(row.captured_at).toLocaleString('ko-KR', {timeZone:'Asia/Seoul'}), 'muted'));
       card.append(element('pre', row.text, 'phone-raw'));
-      card.append(element('p', window.BudgetPhoneImport.paymentDraft(row).reason, 'hint'));
-      if (row.kind === 'kbank_notification' && row.status === 'pending' && !/취소|환불|입금/.test(row.text)) {
+      const draft = window.BudgetPhoneImport.paymentDraft(row);
+      card.append(element('p', draft.reason, 'hint'));
+      if (row.status === 'pending' && draft.canRecordExpense) {
         const form = element('form', undefined, 'phone-record-form');
         const date = field(form, '결제일', 'date', 'date', index); date.required = true;
         const amount = field(form, '결제금액', 'amount', 'text', index);
@@ -168,7 +169,7 @@
     byId('phone-revoke').addEventListener('click', revoke);
     byId('phone-refresh').addEventListener('click', () => operation(async active => {
       await fetchInbox(active);
-      if (active()) message('최근 알림 최대 50건을 불러왔어요. 같은 결제의 승인·출금 알림은 한 번만 기록해 주세요.');
+      if (active()) message('최근 알림 최대 50건을 불러왔어요. 이체·출금·미확인 알림은 보관만 하고, 확인한 카드 결제만 기록해요.');
     }));
     updateButtons();
   });

@@ -69,3 +69,15 @@ test('존재하지 않는 날짜를 정상 날짜로 보정해서 주문과 연�
   const order = {id:'a', platform:'coupang_eats', card_paid_amount:18900, paid_at:'2026-03-03T10:30:00+09:00', card_hint:'ONE-1234', status:'paid', items:['메뉴']};
   assert.equal(phone.matchOrder(payment, [order]).status, 'needs_review');
 });
+
+test('자금이동·이체·출금·미확인 알림은 지출 후보에서 제외하고 명시적 카드 승인만 확인한다', () => {
+  const phone = require('../js/phone-import.js');
+  const cases = require('./fixtures/phone-notifications.cjs');
+  for (const item of cases) {
+    const draft = phone.paymentDraft(phone.normalizeEvent(sample({text:item.text})));
+    assert.equal(draft.canRecordExpense, item.eligible, item.name);
+    assert.equal(draft.amount, null, item.name + ': 금액은 아직 추측하지 않음');
+    assert.ok(draft.reason, item.name + ': 사용자에게 처리 이유 표시');
+  }
+  assert.equal(phone.paymentDraft({kind:'eats_notification', text:'카드 승인 18,900원'}).canRecordExpense, false);
+});

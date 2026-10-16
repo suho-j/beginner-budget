@@ -81,6 +81,25 @@ const { PGlite } = require('../.tmp/phone-tests/node_modules/@electric-sql/pglit
   for (const id of ['refund-1','eats-1']) {
     await assert.rejects(db.query('select public.record_phone_event($1,$2,$3::jsonb)', ['preview-v2', id, JSON.stringify(transaction)]));
   }
+  // Use the same synthetic corpus as the UI. A direct RPC must not bypass the guard.
+  const cases = require('./fixtures/phone-notifications.cjs');
+  for (const [index, item] of cases.entries()) {
+    await db.exec('begin');
+    try {
+      const candidate = {...event, event_id:'guard-' + index, text:item.text};
+      await db.query('select public.receive_phone_event($1,$2::jsonb)', [token, JSON.stringify(candidate)]);
+      const record = () => db.query('select public.record_phone_event($1,$2,$3::jsonb)',
+        ['preview-v2', candidate.event_id, JSON.stringify(transaction)]);
+      if (item.eligible) {
+        await record();
+      } else {
+        await assert.rejects(record, {code:'22023'}, item.name);
+      }
+    } finally {
+      await db.exec('rollback');
+    }
+  }
+  console.log('PASS: UI/server corpus excludes transfers, Plus Box, withdrawals and unknown notifications');
   const masked = (await db.query("select text from public.phone_inbox where event_id = 'masked-1'")).rows[0].text;
   assert.ok(!masked.includes('999,999') && !masked.includes('123-456-789012') && masked.includes('18,900'));
   await db.query('select public.revoke_phone_device($1)', ['preview-v2']);
