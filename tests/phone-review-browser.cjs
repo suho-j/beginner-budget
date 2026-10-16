@@ -32,12 +32,12 @@ const root = path.resolve(__dirname, '..');
       ].map((text, index) => ({...event, event_id:'held-' + index, text}));
       let transactions = [];
       let user = {id:'test-user'};
-      const fixture=window.reviewFixture={fail:false,calls:0,next:()=>{event.event_id='next-event';event.status='pending';}};
+      const fixture=window.reviewFixture={fail:false,calls:0,downloads:0,next:()=>{event.event_id='next-event';event.status='pending';}};
       window.BudgetCloud = {
-        ENVIRONMENT:{name:'preview-v2', isPreview:true},
+        ENVIRONMENT:{name:'preview-v2', isPreview:true,transactionsTable:'preview_v2_transactions'},
         SUPABASE_URL:'https://example.invalid', SUPABASE_ANON_KEY:'public-test-key',
         isConfigured:() => true, currentUser:async () => user, signOut:async () => { user = null; },
-        downloadState:async () => window.BudgetStorage.normalizeState({transactions}),
+        downloadState:async () => {fixture.downloads++;return window.BudgetStorage.normalizeState({transactions});},
         saveSettings:async () => {}, isDuplicateTransactionError:() => false,
         getClient:() => ({
           rpc:async (name, args) => {
@@ -51,9 +51,9 @@ const root = path.resolve(__dirname, '..');
             }
             return {data:null, error:null};
           },
-          from:() => {
+          from:table => {
             const query = {select:() => query, eq:() => query, order:() => query,
-              limit:async () => ({data:[{...event}, ...heldEvents], error:null})};
+              limit:async () => ({data:table==='phone_inbox'?[{...event}, ...heldEvents]:transactions, error:null})};
             return query;
           }
         })
@@ -83,6 +83,7 @@ const root = path.resolve(__dirname, '..');
     assert.equal(await page.locator('#review-count').isVisible(),false);
     assert.ok((await page.locator('#review-message').innerText()).includes('생활비로 기록'));
     await page.waitForFunction(()=>!document.querySelector('#phone-connect').disabled);
+    assert.equal(await page.evaluate(()=>window.reviewFixture.downloads),2,'Only initial load and post-save reload may advance the shared cloud snapshot');
     await page.evaluate(()=>window.reviewFixture.next());
     await page.getByRole('button',{name:'새로고침',exact:true}).click();
     await page.getByRole('button',{name:'확인하고 분류',exact:true}).waitFor();

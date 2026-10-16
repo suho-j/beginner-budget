@@ -87,12 +87,15 @@
   async function save(row,value,confirmed){
     if(!ready||busy)return;const own=generation;busy=true;controls();say('기록하고 있어요…');
     try{
-      // Refresh existing expenses before a one-touch write, including records made on another device.
-      const latest=await window.BudgetCloud.downloadState();
-      if(own!==generation||!ready)return;
-      transactions=latest.transactions||[];
-      if(!confirmed&&model().duplicate(value,transactions)){
-        forcedReview.add(row.event_id);editing=false;render();say('같은 날짜·금액의 지출이 있어요. 확인하고 분류해 주세요.');return;
+      // A read-only query must not advance BudgetCloud's settings CAS snapshot.
+      if(!confirmed){
+        const duplicate=await window.BudgetCloud.getClient().from(window.BudgetCloud.ENVIRONMENT.transactionsTable)
+          .select('date,amount,type').eq('user_id',userId).eq('type','expense').eq('date',value.date).eq('amount',value.amount).limit(1);
+        if(duplicate.error)throw duplicate.error;
+        if(own!==generation||!ready)return;
+        if((duplicate.data||[]).length){
+          forcedReview.add(row.event_id);editing=false;render();say('같은 날짜·금액의 지출이 있어요. 확인하고 분류해 주세요.');return;
+        }
       }
       const result=await window.BudgetCloud.getClient().rpc('record_phone_event',{p_environment:env(),p_event_id:row.event_id,p_transaction:value});
       if(result.error)throw result.error;if(own!==generation)return;
