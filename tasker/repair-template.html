@@ -10,17 +10,21 @@
   </style>
 </head>
 <body><main>
-  <p class="label">가계부 자동수집 · 수정판 2</p>
-  <h1>연결키는 그대로,<br>두 작업만 교체하세요.</h1>
-  <p>상태를 읽어도 오류 화면이 남는 문제와 알림 재전송의 변수 전달을 수정했습니다. 브라우저 선택 칸에 잘못 들어가던 %도 제거했습니다.</p>
+  <p class="label">가계부 자동수집 · 연결 복구 수정판 3</p>
+  <h1>남은 알림을 보존하며<br>새 연결로 복구하세요.</h1>
+  <p>‘이전 연결의 미전송 알림이 있어요’에서 멈췄다면 아래 순서로 진행하세요. 새 연결키를 만든 뒤 이전 키로 전송하라고 안내하던 문제를 수정했습니다.</p>
   <a class="primary" id="import-repair" href="{{REPAIR_URI}}">수정 작업 가져오기</a>
   <a class="secondary" id="download-repair" href="data:application/xml;base64,{{REPAIR_XML}}" download="Budget-Repair.prj.xml">앱이 열리지 않으면 수정 파일 받기</a>
   <ol>
-    <li><strong>가계부 연결 수정</strong> 프로젝트를 가져옵니다.</li>
+    <li><strong>가계부 연결 수정</strong> 프로젝트를 가져옵니다. 기존 프로젝트와 변수는 삭제하지 마세요.</li>
     <li>같은 이름의 작업을 교체할지 물으면 <strong>BB 연결 확인</strong>과 <strong>BB 보내기</strong>의 덮어쓰기를 허용합니다.</li>
-    <li>Tasker에서 <strong>작업 → BB 연결 확인 → ▶</strong>를 누릅니다. 결과에 <strong>진단 수정판 2</strong>가 표시되는지 확인하세요.</li>
+    <li>가계부에서 <strong>가장 최근 만든 연결 설정</strong>을 복사합니다. 이미 복사해 두었다면 다시 만들지 않아도 됩니다.</li>
+    <li>Tasker에서 <strong>작업 → BB 연결 복구 → ▶</strong>를 누르고 붙여 넣으세요. 같은 계정·같은 가계부에서 복사한 설정이면 <strong>미전송 알림을 보낼까요?</strong> 안내에서 확인을 누릅니다.</li>
+    <li>전송 후 <strong>BB 연결 확인 → ▶</strong>에서 <strong>미전송 알림 0개</strong>인지 확인하고, 가계부의 <strong>받은 알림 불러오기</strong>에서 새 <strong>[연결 시험]</strong>을 확인하세요.</li>
   </ol>
-  <p class="muted">기존 알림 프로필과 연결 설정은 유지합니다. 연결키를 다시 입력하거나 ‘BB 시작’을 다시 실행할 필요가 없습니다. BB 보내기는 기존 대기 알림을 같은 연결로 전송하며 서버 성공 응답을 받은 건만 대기열에서 지웁니다.</p>
+  <p class="muted">가져오기만으로 연결이 바뀌지는 않습니다. 복구를 실행하고 확인하면 기존 대기열을 폰에 백업한 뒤 연결을 변경합니다. 남은 알림은 내용·ID를 유지하며 서버 성공 응답을 받은 건만 대기열에서 지웁니다. 기존 알림 프로필은 유지합니다.</p>
+  <details><summary>새 연결키를 만들지 않았다면</summary><p>복구를 실행할 필요 없이 BB 보내기 → BB 연결 확인 순서로 실행하세요. 이 파일에는 이전 수정판의 전송·진단 수정도 포함돼 있습니다.</p></details>
+  <details><summary>‘BB 보내기가 실행 중’이라고 나오면</summary><p>최대 1분 기다린 뒤 다시 복구하세요. 계속 같은 안내가 나오면 Tasker의 실행 중인 작업 화면을 확인해야 합니다. 대기열이나 프로젝트는 지우지 마세요.</p></details>
   <details><summary>파일로 가져오기</summary><p>Tasker 하단 프로젝트 탭을 길게 누른 뒤 Import에서 <strong>Budget-Repair.prj.xml</strong>을 선택하세요. 전체 설정 복원 메뉴는 사용하지 않습니다.</p></details>
   <details><summary>이름 중복으로 가져오기가 막히면</summary><p>기존 프로젝트나 대기열을 지우지 말고 표시되는 문구를 알려주세요. 덮어쓰기 안내는 <a href="https://tasker.joaoapps.com/userguide/en/sharecreation.html" target="_blank" rel="noopener">Tasker 공식 공유 문서</a>를 기준으로 했으며 실제 폰의 수정 파일 가져오기는 확인이 필요합니다.</p></details>
   <p><a href="diagnose.html">연결 확인 안내 보기</a></p>

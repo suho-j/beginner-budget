@@ -16,7 +16,7 @@ function phone(answer = JSON.stringify(config())) {
   const context = vm.createContext({
     global:n => globals[n] || '', setGlobal:(n,v) => {globals[n] = String(v);},
     setLocal:(n,v) => {context[n] = String(v);},
-    prompt:() => answer, confirm:() => true, flashLong:t => messages.push(t),
+    prompt:() => answer, confirm:() => true, flashLong:t => messages.push(t), taskRunning:()=>false,
     performTask:(...args) => {calls.push(args); return true;},
     sendIntent:() => true,
     evtprm:['케이뱅크','카드 승인','[합성] 쿠팡 주식회사 18,900원'],
@@ -75,6 +75,73 @@ test('기존 연결의 미전송 알림을 새 연결로 옮기지 않는다', (
   p.run(buildProject().scripts.setup);
   assert.deepEqual(p.globals,before);
   assert.equal(p.calls.length,0);
+});
+
+test('키 재발급 후 사용자가 확인하면 미전송 원문과 ID를 보존해 새 연결로 재시도한다', () => {
+  const next={...config(),device_token:'d'.repeat(64),connection_id:'c'.repeat(64)};
+  const p=phone(JSON.stringify(next));
+  const event={version:1,event_id:'original-payment',kind:'kbank_notification',
+    package_name:'com.kbankwith.smartbank',captured_at:'2026-10-16T14:00:00.000Z',
+    text:'카드 승인 쿠팡 18,900원',connection_id:config().connection_id};
+  p.globals.BUDGETCONFIG=JSON.stringify(config());
+  p.globals.BUDGETOUTBOX=JSON.stringify([event]);
+  p.globals.BUDGETREADY=config().connection_id;
+  const original=p.globals.BUDGETOUTBOX;
+  const confirmations=[];
+  p.context.confirm=message=>{confirmations.push(message);return true;};
+  p.context.taskRunning=()=>false;
+  p.run(buildProject().scripts.setup);
+  assert.equal(JSON.parse(p.globals.BUDGETCONFIG).device_token,next.device_token);
+  const queue=JSON.parse(p.globals.BUDGETOUTBOX);
+  assert.deepEqual(queue[0],{...event,connection_id:next.connection_id});
+  assert.equal(queue.length,2);
+  assert.equal(p.globals.BUDGETOUTBOXBACKUP,original);
+  assert.equal(p.globals.BUDGETREADY,'');
+  assert.equal(p.calls[0][0],'BB 보내기');
+  assert.equal(confirmations.length,1);
+  assert.ok(confirmations[0].includes('1개'));
+  assert.ok(confirmations[0].includes('같은 계정'));
+  assert.ok(!confirmations[0].includes(event.text));
+  // The new token is used while the original payment identity stays unchanged.
+  p.run(buildProject().scripts.prepare);
+  const body=JSON.parse(p.context.budget_body);
+  assert.equal(body.p_token,next.device_token);
+  assert.equal(body.p_event.event_id,event.event_id);
+});
+
+test('복구 취소·다른 서버·혼합 연결·손상 알림·진행 중 전송은 기존 데이터를 보존한다', () => {
+  for(const mode of ['cancel','other-server','mixed','invalid','running','changed']) {
+    const next={...config(),device_token:'d'.repeat(64),connection_id:'c'.repeat(64)};
+    if(mode==='other-server') next.endpoint='https://other.supabase.co/rest/v1/rpc/receive_phone_event';
+    const p=phone(JSON.stringify(next));
+    const event={version:1,event_id:'original-payment',kind:'kbank_notification',
+      package_name:'com.kbankwith.smartbank',captured_at:'2026-10-16T14:00:00.000Z',
+      text:'카드 승인 쿠팡 18,900원',connection_id:mode==='mixed'?'e'.repeat(64):config().connection_id};
+    if(mode==='invalid')event.kind='unknown';
+    p.globals.BUDGETCONFIG=JSON.stringify(config());
+    p.globals.BUDGETOUTBOX=JSON.stringify([event]);
+    p.globals.BUDGETREADY=config().connection_id;
+    const before={...p.globals};
+    p.context.confirm=()=>{
+      if(mode==='changed')p.globals.BUDGETOUTBOX=JSON.stringify([event,{...event,event_id:'arrived-during-dialog'}]);
+      return mode!=='cancel';
+    };
+    p.context.taskRunning=()=>mode==='running';
+    p.run(buildProject().scripts.setup);
+    assert.equal(p.calls.length,0,mode);
+    if(mode==='changed') {
+      assert.equal(p.globals.BUDGETCONFIG,before.BUDGETCONFIG);
+      assert.equal(JSON.parse(p.globals.BUDGETOUTBOX).length,2);
+      assert.equal(p.globals.BUDGETOUTBOXBACKUP,undefined);
+    }else assert.deepEqual(p.globals,before,mode);
+  }
+});
+
+test('연결 수정 파일에 복구 작업이 포함되고 기존 시작·알림 프로필은 교체하지 않는다', () => {
+  const repair=buildRepairProject();
+  assert.ok(repair.xml.includes('<nme>BB 연결 복구</nme>'));
+  assert.ok(!repair.xml.includes('<nme>BB 시작</nme>'));
+  assert.ok(!repair.xml.includes('<Profile '));
 });
 test('실제 시험 응답을 확인한 뒤 수집을 켜고 잔액을 가린다', () => {
   const p = phone(); const project=buildProject(); p.run(project.scripts.setup);
@@ -261,13 +328,12 @@ test('재전송 때 기존 지역 변수와 이전 HTTP 응답이 남아 있어�
   assert.equal(runtime.locals.budget_ack,'1');assert.equal(runtime.globals.BUDGETOUTBOX,'[]');
 });
 
-test('수정 가져오기는 기존 전송·진단 작업만 제공하고 기본 브라우저에 잘못된 앱 지정을 넣지 않는다', () => {
+test('수정 가져오기는 전송·진단·복구 작업을 제공하고 기본 브라우저에 잘못된 앱 지정을 넣지 않는다', () => {
   const repair=buildRepairProject();
   assert.equal(zlib.gunzipSync(Buffer.from(repair.uri.slice('taskerproject://'.length),'base64')).toString(),repair.xml);
   assert.ok(repair.xml.includes('<name>가계부 연결 수정</name>'));
-  assert.deepEqual([...repair.xml.matchAll(/<nme>([^<]+)<\/nme>/g)].map(match=>match[1]).sort(),['BB 보내기','BB 연결 확인']);
+  assert.deepEqual([...repair.xml.matchAll(/<nme>([^<]+)<\/nme>/g)].map(match=>match[1]).sort(),['BB 보내기','BB 연결 복구','BB 연결 확인']);
   assert.ok(!repair.xml.includes('<Profile '));
-  assert.ok(!repair.xml.includes('setGlobal(&apos;BUDGETCONFIG&apos;'));
   for(const xml of [repair.xml,buildStatusProject().xml,buildProject().xml]){
     const browser=xml.match(/<code>104<\/code>([\s\S]*?)<\/Action>/)[1];
     assert.ok(browser.includes('%budget_status_url'));

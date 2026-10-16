@@ -91,6 +91,8 @@ const {buildStatusProject,buildRepairProject} = require('../tasker/build-project
     assert.equal(repairDownload.suggestedFilename(),'Budget-Repair.prj.xml');
     assert.equal(fs.readFileSync(await repairDownload.path(),'utf8'),repair.xml);
     assert.ok((await page.locator('body').innerText()).includes('BB 보내기'));
+    assert.ok((await page.locator('body').innerText()).includes('연결 복구 수정판 3'));
+    assert.ok((await page.locator('body').innerText()).includes('BB 연결 복구'));
     for(const width of [800,360,320]){
       await page.setViewportSize({width,height:800});
       await page.locator('details').evaluateAll(nodes=>nodes.forEach(node=>{node.open=true;}));

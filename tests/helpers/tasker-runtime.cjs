@@ -10,7 +10,7 @@ function taskerRuntime(globals = {}, locals = {}) {
       global:name => globals[name] || '',
       setGlobal:(name,value) => {globals[name]=String(value);},
       setLocal:(name,value) => {locals[name]=String(value);},
-      flashLong:() => {}, performTask:(...args) => calls.push(args),
+      flashLong:() => {}, performTask:(...args) => calls.push(args), taskRunning:()=>false,
       ...additions
     });
     vm.runInContext(source,context);

@@ -86,7 +86,7 @@ function buildProject() {
     + js(3,scripts.acknowledge) + js(4,scripts.connectionStatus) + stop(5,'%budget_ack') + wait(6)
     + action(7,135,int(0,0)+int(1,1)+str(2));
   const senderTask = task(5204,'BB 보내기',sender);
-  const tasks = task(5201,'BB 시작',js(0,scripts.setup))
+  const tasks = task(5201,'BB 시작',js(0,scripts.setup,120))
     + task(5202,'BB 케이뱅크 받기',js(0,scripts.bank),true)
     + task(5203,'BB 쿠팡이츠 받기',js(0,scripts.eats),true)
     + senderTask
@@ -102,8 +102,11 @@ function buildProject() {
 function buildRepairProject() {
   const project=buildProject();
   const xml='<?xml version="1.0" encoding="UTF-8"?>\n<TaskerData sr="" dvi="1" tv="6.3.13">\n'
-    + '<Project sr="proj0" ve="2"><name>가계부 연결 수정</name><tids>5301,5204</tids></Project>\n'
-    + statusTask(5301,'BB 연결 확인',project.scripts.status) + '\n' + project.senderTask + '\n</TaskerData>\n';
+    + '<Project sr="proj0" ve="2"><name>가계부 연결 수정</name><tids>5301,5204,5302</tids></Project>\n'
+    + statusTask(5301,'BB 연결 확인',project.scripts.status) + '\n' + project.senderTask
+    + '\n<Task sr="task5302"><id>5302</id><nme>BB 연결 복구</nme><pri>10</pri>'
+    + '<Action sr="act0" ve="7"><code>129</code>' + str(0,project.scripts.setup) + str(1)
+    + int(2,1) + int(3,120) + '</Action></Task>\n</TaskerData>\n';
   return {xml,uri:'taskerproject://' + zlib.gzipSync(Buffer.from(xml)).toString('base64')};
 }
 

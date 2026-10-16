@@ -17,14 +17,37 @@
     if (!Array.isArray(queue) || queue.length >= 200) throw new Error('invalid queue');
     var old = global('BUDGETCONFIG');
     var previous = !old || old === '%BUDGETCONFIG' ? null : JSON.parse(old);
-    if (queue.some(function (event) { return event.connection_id !== config.connection_id; })
+    var reconnect = queue.some(function (event) { return event.connection_id !== config.connection_id; })
       || (queue.length && previous && (previous.endpoint !== config.endpoint
-        || previous.device_token !== config.device_token || previous.public_key !== config.public_key))) {
-      flashLong('이전 연결의 미전송 알림이 있어요. 기존 연결에서 먼저 전송한 뒤 연결을 바꿔 주세요.');
+        || previous.device_token !== config.device_token || previous.public_key !== config.public_key));
+    if (reconnect) {
+      // A new registration revokes the old key. Never require the revoked key to drain the queue.
+      // Explicit consent is needed: the phone cannot prove the account owning the new key.
+      if (!previous || previous.endpoint !== config.endpoint
+        || !/^[0-9a-f]{64}$/.test(previous.connection_id || '')
+        || queue.some(function (event) { return event.connection_id !== previous.connection_id; })) {
+        flashLong('연결이 서로 달라 자동으로 복구하지 않았어요. 남은 알림은 그대로 보관합니다.');
+        return;
+      }
+      queue.forEach(function (event) { BudgetPhoneImport.normalizeEvent(event); });
+      if (!confirm('미전송 알림 ' + queue.length + '개를 방금 붙여 넣은 연결로 보낼까요?\n'
+        + '기존과 같은 계정·같은 가계부에서 복사한 설정일 때만 확인을 누르세요.\n'
+        + '알림 내용과 ID는 유지하고, 이전 대기열은 휴대폰에 백업합니다. 취소하면 바꾸지 않습니다.')) return;
+      queue = queue.map(function (event) {
+        return Object.assign({}, event, {connection_id:config.connection_id});
+      });
+    }
+    // An in-flight sender may still acknowledge an old request. Do not change its connection.
+    if (taskRunning('BB 보내기')) {
+      flashLong('BB 보내기가 실행 중이에요. 실행이 끝난 뒤 다시 시도해 주세요. 연결은 바꾸지 않았어요.');
+      return;
+    }
+    if (global('BUDGETOUTBOX') !== saved || global('BUDGETCONFIG') !== old) {
+      flashLong('준비 중 알림 상태가 바뀌었어요. 다시 실행해 주세요. 연결은 바꾸지 않았어요.');
       return;
     }
     var testId = global('BUDGETTESTID');
-    var pending = queue.some(function (event) { return event.event_id === testId; });
+    var pending = !reconnect && queue.some(function (event) { return event.event_id === testId; });
     if (!pending) {
       var event = BudgetPhoneImport.normalizeEvent({
         version:1, event_id:'phone-test-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2),
@@ -35,6 +58,7 @@
       queue.push(event);
       testId = event.event_id;
     }
+    if (reconnect) setGlobal('BUDGETOUTBOXBACKUP', saved);
     setGlobal('BUDGETCONFIG', JSON.stringify(config));
     setGlobal('BUDGETOUTBOX', JSON.stringify(queue));
     setGlobal('BUDGETTESTID', testId);
