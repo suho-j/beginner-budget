@@ -833,5 +833,43 @@ var before = global(&quot;BUDGETOUTBOX&quot;);
 })();
 if (global(&quot;BUDGETOUTBOX&quot;) !== before) performTask(&quot;BB 보내기&quot;, 5, &quot;&quot;, &quot;&quot;, &quot;&quot;, false, false, &quot;&quot;, false);
 } catch (_) { setGlobal(&quot;BUDGETSTATUS&quot;, &quot;알림을 보관하지 못했어요. 내용 또는 연결 상태를 확인해 주세요.&quot;); }
-})();</Str><Str sr="arg1" ve="3"></Str><Int sr="arg2" val="1"/><Int sr="arg3" val="45"/></Action></Task><Task sr="task5206"><id>5206</id><nme>BB 상태</nme><pri>10</pri><Action sr="act0" ve="7"><code>129</code><Str sr="arg0" ve="3">(function () { var saved = global(&quot;BUDGETOUTBOX&quot;); var count = &quot;?&quot;;try { count = JSON.parse(saved &amp;&amp; saved !== &quot;%BUDGETOUTBOX&quot; ? saved : &quot;[]&quot;).length; } catch (_) {}var config; try { config = JSON.parse(global(&quot;BUDGETCONFIG&quot;) || &quot;null&quot;); } catch (_) {}var ready = config &amp;&amp; config.connection_id &amp;&amp; global(&quot;BUDGETREADY&quot;) === config.connection_id;alert(&quot;가계부 연결\n&quot; + (ready ? &quot;서버 연결 확인됨&quot; : &quot;연결 시험 전 또는 대기 중&quot;) + &quot;\n미전송 알림: &quot; + count + &quot;개\n&quot; + (global(&quot;BUDGETSTATUS&quot;) || &quot;BB 시작을 실행해 주세요.&quot;) + &quot;\n\n알림 권한과 케이뱅크 실제 수신은 별도로 확인해야 합니다.&quot;); })();</Str><Str sr="arg1" ve="3"></Str><Int sr="arg2" val="1"/><Int sr="arg3" val="45"/></Action></Task>
+})();</Str><Str sr="arg1" ve="3"></Str><Int sr="arg2" val="1"/><Int sr="arg3" val="45"/></Action></Task><Task sr="task5206"><id>5206</id><nme>BB 상태</nme><pri>10</pri><Action sr="act0" ve="7"><code>547</code><Str sr="arg0" ve="3">%budget_status_url</Str><Str sr="arg1" ve="3">https://suho-j.github.io/beginner-budget/artifacts/tasker-guide/diagnose.html#v=1&amp;connection=script_error&amp;queue=invalid&amp;last=unknown&amp;at=</Str><Int sr="arg2" val="0"/><Int sr="arg3" val="0"/><Int sr="arg4" val="0"/><Int sr="arg5" val="3"/><Int sr="arg6" val="0"/></Action><Action sr="act1" ve="7"><code>129</code><se>false</se><Str sr="arg0" ve="3">/* Read-only diagnostic. Only allowlisted flags go to the browser URL fragment. */
+(function () {
+  &apos;use strict&apos;;
+  function read(name) {
+    var value = global(name);
+    return typeof value === &apos;string&apos; &amp;&amp; value !== &apos;%&apos; + name ? value : &apos;&apos;;
+  }
+  var connection = &apos;missing&apos;;
+  var savedConfig = read(&apos;BUDGETCONFIG&apos;);
+  if (savedConfig) {
+    connection = &apos;invalid&apos;;
+    try {
+      var config = JSON.parse(savedConfig);
+      if (config &amp;&amp; /^https:\/\/[a-z0-9]+\.supabase\.co\/rest\/v1\/rpc\/receive_phone_event$/.test(config.endpoint || &apos;&apos;)
+        &amp;&amp; typeof config.public_key === &apos;string&apos; &amp;&amp; /^[A-Za-z0-9._-]{10,4096}$/.test(config.public_key)
+        &amp;&amp; /^[0-9a-f]{64}$/.test(config.device_token || &apos;&apos;)
+        &amp;&amp; /^[0-9a-f]{64}$/.test(config.connection_id || &apos;&apos;)) {
+        connection = read(&apos;BUDGETREADY&apos;) === config.connection_id ? &apos;ready&apos; : &apos;waiting&apos;;
+      }
+    } catch (_) {}
+  }
+  var queued = &apos;invalid&apos;;
+  try {
+    var queue = JSON.parse(read(&apos;BUDGETOUTBOX&apos;) || &apos;[]&apos;);
+    if (Array.isArray(queue) &amp;&amp; queue.length &lt;= 200) queued = String(queue.length);
+  } catch (_) {}
+  var savedStatus = read(&apos;BUDGETSTATUS&apos;);
+  var last = &apos;unknown&apos;;
+  var at = &apos;&apos;;
+  var sent = savedStatus.match(/^마지막 전송 성공: (\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z)$/);
+  if (sent &amp;&amp; Number.isFinite(Date.parse(sent[1])) &amp;&amp; new Date(sent[1]).toISOString() === sent[1]) {
+    last = &apos;sent&apos;; at = sent[1];
+  } else if (savedStatus.indexOf(&apos;전송 대기:&apos;) === 0) last = &apos;send_wait&apos;;
+  else if (savedStatus.indexOf(&apos;알림을 보관하지 못했어요.&apos;) === 0) last = &apos;capture_error&apos;;
+  else if (savedStatus === &apos;연결 설정 또는 이전 연결의 대기 알림을 확인해 주세요.&apos;) last = &apos;config_error&apos;;
+  else if (savedStatus === &apos;연결 시험 중&apos;) last = &apos;testing&apos;;
+  var report = &apos;v=1&amp;connection=&apos; + connection + &apos;&amp;queue=&apos; + queued + &apos;&amp;last=&apos; + last + &apos;&amp;at=&apos; + encodeURIComponent(at);
+  setLocal(&apos;budget_status_url&apos;, &apos;https://suho-j.github.io/beginner-budget/artifacts/tasker-guide/diagnose.html#&apos; + report);
+})();</Str><Str sr="arg1" ve="3"></Str><Int sr="arg2" val="1"/><Int sr="arg3" val="10"/></Action><Action sr="act2" ve="7"><code>104</code><Str sr="arg0" ve="3">%budget_status_url</Str><App sr="arg1"><appClass></appClass><appPkg></appPkg><label></label></App><Int sr="arg2" val="0"/><Str sr="arg3" ve="3"></Str></Action></Task>
 </TaskerData>

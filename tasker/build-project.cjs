@@ -11,6 +11,26 @@ const int = (index, value) => '<Int sr="arg' + index + '" val="' + value + '"/>'
 const bundle = index => '<Bundle sr="arg' + index + '"><Vals sr="val"/></Bundle>';
 const condition = (lhs, rhs) => '<ConditionList sr="if"><Condition sr="c0" ve="3"><lhs>'
   + esc(lhs) + '</lhs><op>2</op><rhs>' + esc(rhs) + '</rhs></Condition></ConditionList>';
+const statusPage = 'https://suho-j.github.io/beginner-budget/artifacts/tasker-guide/diagnose.html';
+
+function statusTask(id, name, source) {
+  const fallback = statusPage + '#v=1&connection=script_error&queue=invalid&last=unknown&at=';
+  return '<Task sr="task' + id + '"><id>' + id + '</id><nme>' + esc(name) + '</nme><pri>10</pri>'
+    + '<Action sr="act0" ve="7"><code>547</code>' + str(0,'%budget_status_url') + str(1,fallback)
+    + int(2,0) + int(3,0) + int(4,0) + int(5,3) + int(6,0) + '</Action>'
+    + '<Action sr="act1" ve="7"><code>129</code><se>false</se>' + str(0,source) + str(1)
+    + int(2,1) + int(3,10) + '</Action>'
+    + '<Action sr="act2" ve="7"><code>104</code>' + str(0,'%budget_status_url')
+    + '<App sr="arg1"><appClass></appClass><appPkg></appPkg><label></label></App>' + int(2,0) + str(3)
+    + '</Action></Task>';
+}
+
+function buildStatusProject() {
+  const xml = '<?xml version="1.0" encoding="UTF-8"?>\n<TaskerData sr="" dvi="1" tv="6.3.13">\n'
+    + '<Project sr="proj0" ve="2"><name>가계부 연결 진단</name><tids>5301</tids></Project>\n'
+    + statusTask(5301,'BB 연결 확인',read('tasker/status-report.js')) + '\n</TaskerData>\n';
+  return {xml, uri:'taskerproject://' + zlib.gzipSync(Buffer.from(xml)).toString('base64')};
+}
 
 function buildProject() {
   const library = read('js/phone-import.js') + '\n';
@@ -42,13 +62,7 @@ function buildProject() {
       + '} catch (_) { setGlobal("BUDGETSTATUS", "연결 설정 또는 이전 연결의 대기 알림을 확인해 주세요."); } })();',
     acknowledge:read('tasker/acknowledge.js'),
     connectionStatus,
-    status:'(function () { var saved = global("BUDGETOUTBOX"); var count = "?";'
-      + 'try { count = JSON.parse(saved && saved !== "%BUDGETOUTBOX" ? saved : "[]").length; } catch (_) {}'
-      + 'var config; try { config = JSON.parse(global("BUDGETCONFIG") || "null"); } catch (_) {}'
-      + 'var ready = config && config.connection_id && global("BUDGETREADY") === config.connection_id;'
-      + 'alert("가계부 연결\\n" + (ready ? "서버 연결 확인됨" : "연결 시험 전 또는 대기 중")'
-      + ' + "\\n미전송 알림: " + count + "개\\n" + (global("BUDGETSTATUS") || "BB 시작을 실행해 주세요.")'
-      + ' + "\\n\\n알림 권한과 케이뱅크 실제 수신은 별도로 확인해야 합니다."); })();'
+    status:read('tasker/status-report.js')
   };
   const action = (index, code, args, extra = '') =>
     '<Action sr="act' + index + '" ve="7"><code>' + code + '</code>'
@@ -78,7 +92,7 @@ function buildProject() {
     + task(5203,'BB 쿠팡이츠 받기',js(0,scripts.eats),true)
     + task(5204,'BB 보내기',sender)
     + task(5205,'BB 주문 화면',wait(0)+action(1,421,bundle(0))+js(2,scripts.screen))
-    + task(5206,'BB 상태',js(0,scripts.status));
+    + statusTask(5206,'BB 상태',scripts.status);
   const xml = '<?xml version="1.0" encoding="UTF-8"?>\n<TaskerData sr="" dvi="1" tv="6.3.13">\n'
     + profiles + '\n<Project sr="proj0" ve="2"><name>가계부 자동수집</name>'
     + '<pids>5101,5102,5103</pids><tids>5201,5202,5203,5204,5205,5206</tids></Project>\n'
@@ -94,6 +108,10 @@ if (require.main === module) {
   const template = read('tasker/install-template.html');
   fs.writeFileSync(path.join(out,'install.html'),template.replaceAll('{{TASKER_URI}}',project.uri)
     .replaceAll('{{XML_BASE64}}',Buffer.from(project.xml).toString('base64')));
-  console.log('Created Budget-Auto.prj.xml and install.html; no connection keys included.');
+  const diagnostic = buildStatusProject();
+  fs.writeFileSync(path.join(out,'Budget-Status.prj.xml'),diagnostic.xml);
+  fs.writeFileSync(path.join(out,'diagnose.html'),read('tasker/diagnose-template.html')
+    .replaceAll('{{STATUS_URI}}',diagnostic.uri).replaceAll('{{STATUS_XML}}',Buffer.from(diagnostic.xml).toString('base64')));
+  console.log('Created capture and read-only status projects and installer pages; no connection keys included.');
 }
-module.exports = {buildProject};
+module.exports = {buildProject,buildStatusProject};
