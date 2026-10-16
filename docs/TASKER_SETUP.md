@@ -1,0 +1,172 @@
+# 안드로이드 Tasker로 케이뱅크·쿠팡이츠 연결하기
+
+2026-10-16 구현. **서버 SQL 적용과 실제 휴대폰 검증 전 단계**입니다. 아직 운영에서 자동 수집 중이라는 뜻은 아닙니다.
+
+## 이번 방식
+
+- 케이뱅크: Android 알림 → Tasker → Supabase 수신함.
+- 쿠팡이츠: 알림도 수신함으로 전송. 메뉴가 부족하면 **주문 상세를 열고 Tasker 타일을 눌러 화면 글자를 확인·전송**.
+- 쿠팡 쇼핑: Hermes가 로그인한 브라우저의 주문 상세에서 추출할 별도 작업. 이 변경에 Hermes 수집기는 포함하지 않습니다.
+- PC나 LDPlayer를 계속 켜 둘 필요 없이 폰에서 Supabase로 직접 보낼 수 있도록 설계했습니다. 폰과 인터넷은 필요합니다.
+- 수신 시각을 결제 시각으로, 알림의 첫 금액을 결제 금액으로 추측하지 않습니다. 실제 케이뱅크 알림이 아직 없으므로 **지출 자동 확정은 꺼져 있습니다**.
+- 쿠팡이츠 주문 알림·화면은 별도 지출로 더하지 않습니다. 결제 내역을 설명하는 자료입니다.
+
+## 1. 서버 준비 — 한 번만
+
+1. 기존 Supabase 프로젝트의 SQL Editor에서 [supabase-phone-import.sql](supabase-phone-import.sql)을 적용합니다. 기존 가계부 기본 테이블이 먼저 있어야 합니다.
+2. 이 파일은 새로운 phone_devices / phone_inbox와 전용 함수를 만듭니다. 기존 운영·미리보기 거래를 복사하거나 덮어쓰지 않습니다. 한 트랜잭션으로 한 번 적용하며, 이미 적용된 파일을 재실행하면 실패하고 롤백됩니다.
+3. 이 브랜치의 정적 웹 파일도 배포해야 새 설정 화면이 보입니다.
+4. 가계부 로그인 → **설정 → 휴대폰 알림 연결 → 연결 설정 만들기**.
+5. 표시되는 JSON을 폰 Tasker의 전역 변수 **%BUDGETCONFIG**에 그대로 붙여 넣습니다. 따옴표를 추가하거나 공백을 삭제하지 않아도 됩니다.
+
+운영 주소는 정확히 https://suho-j.github.io/beginner-budget/ 입니다. 로컬·다른 경로는 기존 정책대로 preview-v2입니다. **연결을 만든 화면의 환경에만 수신**되며, 폰이 보내는 JSON으로 사용자나 환경을 바꿀 수 없습니다.
+
+전송키는 수신만 허용합니다. 가계부 읽기·수정 권한, 로그인 비밀번호, Supabase service_role 키를 폰에 주지 않습니다. 서버에는 키의 SHA-256만 저장됩니다. 연결 설정에는 비밀 전송키가 있으므로 공개 Tasker 공유/백업에 포함하지 마세요.
+
+## 2. 폰 준비
+
+1. 케이뱅크 앱과 Android 설정에서 케이뱅크의 알림을 허용합니다.
+2. 케이뱅크 앱의 **카드 승인·취소 알림**을 우선 켭니다. 입출금 알림도 사용한다면 같은 체크카드 결제의 승인과 출금을 두 번 지출로 등록하지 않습니다.
+3. 잔액 표시를 끌 수 있다면 끕니다. 추가로 수집 코드가 알려진 잔액·번호 표기를 가리지만 모든 형식을 보장하지는 않습니다.
+4. Tasker의 **알림 접근 권한**을 허용하고, Tasker를 활성화합니다. Android 배터리 설정에서 Tasker의 백그라운드 실행 제한을 풀어 주세요.
+5. 쿠팡이츠 앱 알림도 허용합니다.
+6. 아래 네 파일을 폰의 Tasker/budget 폴더에 복사합니다.
+   - js/phone-import.js → Tasker/budget/phone-import.js
+   - tasker/capture.js → Tasker/budget/capture.js
+   - tasker/prepare-send.js → Tasker/budget/prepare-send.js
+   - tasker/acknowledge.js → Tasker/budget/acknowledge.js
+
+**기존 Tasker 설정 전체를 가져오기/덮어쓰기 하지 않습니다.** 아래 작업과 프로필만 새로 만듭니다. 검증하지 않은 Tasker 프로젝트 XML은 제공하지 않습니다.
+
+## 3. 공통 작업: 가계부 보내기
+
+Tasker의 Tasks에 **가계부 보내기**를 만듭니다. 작업 속성의 Collision Handling은 **Abort New Task**로 설정해 동시 전송을 막습니다.
+
+순서대로 액션을 추가합니다.
+
+1. Code → JavaScript
+   - Path: Tasker/budget/prepare-send.js
+   - Libraries: file:///storage/emulated/0/Tasker/budget/phone-import.js
+   - Auto Exit: 켬
+2. Task → Stop, 조건: **%budget_send = 0**
+3. Variables → Variable Clear: **%http_data**
+4. Variables → Variable Clear: **%http_response_code**
+5. Net → HTTP Request
+   - Method: POST
+   - URL: **%budget_url**
+   - Headers: **%budget_headers**
+   - Body: **%budget_body**
+   - Timeout: 30초
+   - Trust Any Certificate: 끔
+   - Continue Task After Error: 켬
+6. Code → JavaScript
+   - Path: Tasker/budget/acknowledge.js
+   - Auto Exit: 켬
+7. Task → Stop, 조건: **%budget_ack != 1**
+8. Task → Wait: 1초
+9. Task → Goto: 액션 1
+
+파일 경로는 실제 저장한 경로로 선택합니다. Libraries의 file URL도 실제 저장 위치에 맞춥니다. 폰에서 다른 외부 저장소를 쓰면 /storage/emulated/0 경로가 다를 수 있습니다.
+
+실패한 전송은 **%BUDGETOUTBOX**에 남습니다. 성공 코드만으로 삭제하지 않고 서버가 같은 event_id를 확인한 경우에만 제거합니다. HTTP 응답을 받기 전에 앱이 꺼져도 다음 전송은 같은 ID를 사용합니다.
+
+Profiles → Time에 15분 반복을 만들고 **가계부 보내기**를 연결합니다. 이 타이머는 전송 대기 알림을 재시도하는 용도이며 과거 주문 내역을 조회하지 않습니다. Android 절전 중에는 실행이 늦어질 수 있습니다.
+
+연결을 재발급하기 전에 대기열 전송을 마치세요. 연결키가 바뀌면 이전 연결의 대기열을 새 연결로 자동 이동하지 않습니다. 이전 대기열을 지우거나 재지정하기 전에 내용을 확인해야 합니다.
+
+## 4. 케이뱅크 알림 프로필
+
+Profiles → + → Event → UI → Notification:
+
+- Owner Application: **케이뱅크** 하나만 선택.
+- 패키지: com.kbankwith.smartbank
+- Title / Text: 비워 둠.
+- New Only: **끔**. 앱이 같은 알림을 갱신할 수 있어 초기에는 놓치지 않고 모읍니다. 같은 내용의 갱신이 여러 건 잡힐 수 있으므로 모두 별도 지출로 확정하지 않습니다.
+
+연결할 수집 작업의 Collision Handling은 **Run Both Together**로 설정합니다. 전송 작업이 기다리는 동안 새 알림이 와도 수집 작업이 버려지지 않게 합니다. 공통 전송 작업만 Abort New Task를 사용합니다.
+
+연결할 작업의 액션:
+
+1. Variable Set: **%budget_kind** = **kbank_notification**
+2. JavaScript: Tasker/budget/capture.js
+   - Libraries: file:///storage/emulated/0/Tasker/budget/phone-import.js
+   - Auto Exit: 켬
+3. Perform Task: **가계부 보내기**, 조건 **%budget_queued = 1**
+
+Notification 이벤트의 %evtprm 배열에서 제목과 본문 등 문자열을 수집합니다. 전역 %NTITLE보다 이벤트별 변수를 우선 사용합니다. OTP/인증번호 내용은 거절합니다. 이 단계는 결제 알림의 특정 문구를 가정하지 않습니다.
+
+## 5. 쿠팡이츠 알림 프로필
+
+케이뱅크 프로필과 동일하게 만들되:
+
+- Owner Application: **쿠팡이츠** 하나만 선택.
+- 패키지: com.coupang.mobile.eats
+- %budget_kind = **eats_notification**
+
+배달 진행 알림에 메뉴·결제액이 없다면 그것만으로 메뉴를 만들지 않습니다. 실제 알림 내용은 아직 검증하지 않았습니다.
+
+## 6. 쿠팡이츠 상세 — 우선 한 번 눌러 보내기
+
+**가계부 이츠 화면** 작업을 만듭니다.
+
+1. Wait: 1초. 빠른 설정 패널이 닫힌 뒤 실행되도록 합니다.
+2. Display → **Get Screen Info (Assistant)**.
+3. Variable Set: **%budget_kind** = **eats_screen**.
+4. JavaScript: Tasker/budget/capture.js, 위와 같은 Library.
+5. Perform Task: **가계부 보내기**, 조건 **%budget_queued = 1**.
+
+Tasker의 Setup Quick Setting Tile / 빠른 설정 작업 기능으로 이 작업을 타일에 연결합니다. **쿠팡이츠 주문 상세를 화면에 열어 둔 상태**에서 타일을 누릅니다. Tasker가 요청하는 어시스턴트 설정을 허용하고 화면 텍스트 사용 권한을 켭니다. 기존 기본 어시스턴트 설정이 바뀔 수 있습니다.
+
+스크립트는 %ai_texts의 text 필드만 사용하고 extras, 링크, 화면 이미지 등은 보내지 않습니다. 전송 전 확인창에서 쿠팡이츠 주문 화면인지 확인합니다. 주소·전화번호 또는 다른 앱 화면이 보이면 취소하세요.
+
+화면 글자가 비거나 메뉴/실결제액이 빠지면 **상세 수집 성공이 아닙니다**. 앱 화면 구현에 따라 읽히지 않을 수 있습니다. 잠긴 폰에서 과거 주문 화면을 스스로 돌아다니는 기능은 구현하지 않았습니다. 추가 유료 AutoInput은 이 시험 뒤에 판단합니다.
+
+## 7. 실제 결제 없이 연결 시험
+
+Tasker의 Notify로 만든 알림은 Notification 이벤트를 트리거하지 않습니다. 시험용 작업을 별도로 만드세요.
+
+1. Variable Set: %budget_kind = eats_notification.
+2. Array Set: %evtprm, Values = 쿠팡이츠|[연결 시험]|실제 결제가 아닙니다., Splitter = |.
+3. capture.js 실행, 같은 Library.
+4. Perform Task: 가계부 보내기.
+
+가계부의 **받은 알림 불러오기**에 시험 알림이 보이고 대기열에서 없어져야 통신 시험이 완료됩니다. 이 주문 자료에는 지출 등록 버튼이 없어 시험 지출이 생성되지 않습니다.
+
+다음 실제 사용 때 별도로 확인할 사항:
+
+- 케이뱅크 승인/출금/취소 각각의 제목·본문이 수신되는가?
+- 잠금 화면, 백그라운드, 재부팅 후에도 수신되는가?
+- 인터넷을 끊었다가 연결하면 같은 ID로 재전송되는가?
+- 쿠팡이츠 주문 화면에 가게, 메뉴, 주문번호, 주문일시, **실제 카드 결제액**이 잡히는가?
+- 쿠폰·쿠페이 사용액·배달비·부분취소를 구분할 수 있는가?
+
+사용자가 결제 알림을 아직 받은 적이 없어 이 실기기 검증은 미완료입니다. 공개 자료를 실제 사용자 알림인 것처럼 테스트하지 않았습니다.
+
+## 8. 주문 매칭 계약
+
+js/phone-import.js의 matchOrder(payment, orders)는 준비된 순수 함수이며 아직 실제 수집·DB 자동 갱신 작업에 연결하지 않았습니다.
+
+- 결제: amount, approved_at(시간대 포함), merchant, card_hint.
+- 주문: id, platform(coupang/coupang_eats), card_paid_amount, paid_at(시간대 포함), card_hint, status(paid), store, items.
+- 실제 카드 결제액이 같고 승인 시각과 15분 이내인 후보를 찾습니다. 이 시간 범위는 초기 보수적 설정이며 실제 자료로 재검증해야 합니다.
+- 양쪽 카드 식별값이 서로 다르면 제외합니다. 카드 식별값이나 메뉴가 빠지면 확인 대기로 둡니다.
+- 후보가 여러 개면 가까운 시각 하나를 임의로 선택하지 않습니다.
+- 환불/취소 주문은 자동 연결하지 않습니다.
+- 결과는 주문번호·설명·분류 제안입니다. 원래 결제 금액·일시·가맹점과 사용자 수정값을 덮어쓰지 않습니다.
+- 쿠팡의 생활비 분류는 제안이며 의류 등 실제 내용에 따라 수정해야 합니다.
+
+실알림 계약 확정, 중복 승인/출금 통합, 승인번호 기반 연계, 취소·부분환불 처리, Hermes 주문 수집 및 자동 설명 갱신은 후속 작업입니다.
+
+## 확인한 근거
+
+- [Tasker Notification 공식 도움말](https://tasker.joaoapps.com/userguide/en/help/eh_new_notification.html): 앱 필터, 갱신 알림, Tasker 자체 알림 제외.
+- [Tasker 변수 공식 설명](https://tasker.joaoapps.com/userguide_summary.html): Notification에서는 %NTITLE보다 %evtprm2 등 이벤트 변수를 권장.
+- [Tasker HTTP Request 공식 도움말](https://tasker.joaoapps.com/userguide/en/help/ah_http_request.html): POST·헤더·JSON 본문.
+- [Tasker JavaScript 공식 문서](https://tasker.joaoapps.com/userguide/en/javascript.html): 로컬 라이브러리·배열·전역 변수·확인창.
+- [Tasker Get Screen Info 공식 도움말](https://tasker.joaoapps.com/userguide/en/help/ah_get_screen_info_assistant.html): 현재 화면의 %ai_texts. 앱마다 제공 정보가 다름.
+- [Tasker 공식 이슈 Q&A](https://tasker.helprace.com/i1468-assistance-request-targetted-to-a-specific-app-is-always-running-for-every-app): 화면 텍스트 사용 설정이 필요하다는 보고와 개발자 답변.
+- [케이뱅크 공식 Android 앱](https://play.google.com/store/apps/details?id=com.kbankwith.smartbank&hl=ko): 앱 패키지 확인.
+- [케이뱅크 설정 화면을 캡처한 2023년 사용기](https://pjhhh.tistory.com/1280): 카드 승인·취소와 입출금 알림 설정 구분, 잔액 옵션. **현재 메뉴나 알림 본문 형식의 증거는 아님**.
+- [다른 2023년 설정 사용기](https://laystory.tistory.com/627): 계좌 관리 → 입출금통지 → 푸시 알림. 최신 화면과 다를 수 있음.
+
+현재 케이뱅크 카드 알림의 정확한 전문과 쿠팡이츠 알림에 포함되는 메뉴 목록은 공개 자료만으로 확인하지 못했습니다.

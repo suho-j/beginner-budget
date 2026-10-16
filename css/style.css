@@ -555,3 +555,12 @@ dialog::backdrop { background: rgb(15 23 42 / 0.58); }
     overflow-x: clip;
   }
 }
+
+/* Phone capture setup and review. */
+#phone-config { box-sizing: border-box; width: 100%; max-width: 100%; font: inherit; font-size: .85rem; }
+.phone-event { border-top: 1px solid var(--border, #dce1e7); padding: 1.2rem 0; min-width: 0; }
+.phone-raw { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; font-size: .9rem; background: #f4f6fa; padding: .75rem; border-radius: .5rem; }
+.phone-record-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .75rem; }
+.phone-duplicate-check { grid-column: 1 / -1; display: flex; align-items: flex-start; gap: .5rem; }
+.phone-duplicate-check input { width: auto; flex: 0 0 auto; }
+@media (max-width: 480px) { .phone-record-form { grid-template-columns: minmax(0, 1fr); } }

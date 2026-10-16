@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>처음 가계부</title>
-  <link rel="stylesheet" href="css/style.css?v=20260812-v2">
+  <link rel="stylesheet" href="css/style.css?v=20261016-phone">
 </head>
 <body id="top">
   <a class="skip-link" href="#main-content">본문으로 바로가기</a>
@@ -323,6 +323,25 @@
       <ul id="recurring-template-list" class="recurring-list"></ul>
     </section>
 
+    <section id="phone-panel" class="panel" aria-labelledby="phone-title">
+      <h2 id="phone-title">휴대폰 알림 연결</h2>
+      <p>Tasker로 케이뱅크 알림과 쿠팡이츠 주문 정보를 모아요. 처음에는 알림 내용을 확인한 뒤 지출로 기록해요.</p>
+      <p class="hint">연결 설정을 다시 만들면 이전 휴대폰 연결키는 사용할 수 없어요.</p>
+      <div class="data-actions">
+        <button id="phone-connect" type="button" class="secondary" data-cloud-write>연결 설정 만들기</button>
+        <button id="phone-refresh" type="button" class="secondary" data-cloud-write>받은 알림 불러오기</button>
+        <button id="phone-revoke" type="button" class="secondary" data-cloud-write>휴대폰 연결 해제</button>
+      </div>
+      <p><a href="docs/TASKER_SETUP.md">Tasker 설정 안내</a></p>
+      <div id="phone-config-wrap" hidden>
+        <label for="phone-config">Tasker에 복사할 연결 설정</label>
+        <textarea id="phone-config" rows="7" readonly spellcheck="false" autocomplete="off" aria-describedby="phone-config-help"></textarea>
+        <p id="phone-config-help" class="hint">휴대폰 전송용 키가 들어 있어요. 로그아웃하면 이 화면에서 지워져요.</p>
+      </div>
+      <p id="phone-message" tabindex="-1" class="message" role="status" aria-live="polite" aria-atomic="true"></p>
+      <div id="phone-inbox"></div>
+    </section>
+
     <section class="panel" aria-labelledby="tools-title">
       <div class="section-heading section-heading-spread">
         <h2 id="tools-title">보기와 데이터 도구</h2>
@@ -395,6 +414,8 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="js/cloud.js?v=20260812-v2"></script>
   <script src="js/ui.js?v=20260812-v2"></script>
-  <script src="js/app.js?v=20260812-v2"></script>
+  <script src="js/phone-import.js?v=20261016"></script>
+  <script src="js/phone-sync.js?v=20261016"></script>
+  <script src="js/app.js?v=20261016-phone"></script>
 </body>
 </html>
