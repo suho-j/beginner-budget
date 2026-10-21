@@ -52,7 +52,8 @@
       ...(state.categoryBudgets || {}),
       __month_start_day: state.monthStartDay,
       __monthly_budgets: state.monthlyBudgets || {},
-      __recurring_expense_templates: state.recurringExpenseTemplates || []
+      __recurring_expense_templates: state.recurringExpenseTemplates || [],
+      __cashflow_plans: state.cashflowPlans || {}
     };
   }
 
@@ -154,6 +155,7 @@
       monthStartDay: remoteBudgets.__month_start_day,
       monthlyBudgets: remoteBudgets.__monthly_budgets,
       recurringExpenseTemplates: remoteBudgets.__recurring_expense_templates,
+      cashflowPlans: remoteBudgets.__cashflow_plans,
       transactions: (rows || []).map((row) => ({
         id: row.id,
         date: row.date,

@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>처음 가계부</title>
   <link rel="icon" href="data:,">
-  <link rel="stylesheet" href="css/style.css?v=20261017-review">
+  <link rel="stylesheet" href="css/style.css?v=20261021-cashflow">
 </head>
 <body id="top">
   <a class="skip-link" href="#main-content">본문으로 바로가기</a>
@@ -31,6 +31,7 @@
         <button id="tab-review" type="button" role="tab" aria-selected="false" aria-controls="panel-review" data-tab="review" tabindex="-1">분류 <span id="review-count" class="review-badge" hidden>0</span></button>
         <button id="tab-history" type="button" role="tab" aria-selected="false" aria-controls="panel-history" data-tab="history" tabindex="-1">내역</button>
         <button id="tab-calendar" type="button" role="tab" aria-selected="false" aria-controls="panel-calendar" data-tab="calendar" tabindex="-1">캘린더</button>
+        <button id="tab-cashflow" type="button" role="tab" aria-selected="false" aria-controls="panel-cashflow" data-tab="cashflow" tabindex="-1">현금흐름</button>
         <button id="tab-settings" type="button" role="tab" aria-selected="false" aria-controls="panel-settings" data-tab="settings" tabindex="-1">설정</button>
       </div>
     </nav>
@@ -47,6 +48,40 @@
   <p id="global-message" class="container message global-message" role="status" aria-live="polite" aria-atomic="true"></p>
 
   <main id="main-content" class="container layout" tabindex="-1">
+    <section id="panel-cashflow" class="tab-panel" role="tabpanel" aria-labelledby="tab-cashflow" hidden>
+      <section class="panel" aria-labelledby="cashflow-month">
+        <h2 id="cashflow-month">월 현금흐름</h2>
+        <p class="muted">수입에서 먼저 확보할 돈을 빼고, 생활비와 추가 저축에 쓸 금액을 확인하세요.</p>
+        <p class="hint">월별 계획이에요. 실제 거래·반복지출·생활비 예산 설정은 변경하지 않아요. 계좌 간 이체와 카드대금은 사용 내역과 중복해서 넣지 마세요.</p>
+        <div class="cashflow-summary" aria-live="polite">
+          <div><span>월 수입</span><strong id="cashflow-income">0원</strong></div>
+          <div><span>먼저 확보할 돈</span><strong id="cashflow-committed">0원</strong></div>
+          <div><span>생활비 + 추가 저축</span><strong id="cashflow-available">0원</strong></div>
+          <div class="cashflow-result"><span>추가 저축 가능액</span><strong id="cashflow-additionalSaving">0원</strong></div>
+        </div>
+        <p id="cashflow-shortfall" class="message error" role="status"></p>
+        <form id="cashflow-form" novalidate>
+          <fieldset id="cashflow-editor">
+            <legend>월별 수입과 배분 계획</legend>
+            <p class="hint">고정 납부에는 대출 원금·이자를 포함하세요. 용돈, 나중에 쓸 목적 적립, 기존 저축은 각각 구분하세요. 변동 요금은 예상액을 입력하세요.</p>
+            <div id="cashflow-rows"></div>
+            <div class="form-actions">
+              <button id="cashflow-add" type="button" class="secondary">항목 추가</button>
+              <button id="cashflow-copy" type="button" class="secondary">이전 달 계획 복사</button>
+              <button id="cashflow-undo" type="button" class="secondary">수정 취소</button>
+            </div>
+            <label class="cashflow-living-label" for="cashflow-living">생활비 예산 (고정 납부·용돈 제외)</label>
+            <input id="cashflow-living" type="text" inputmode="numeric" value="0" aria-describedby="cashflow-message">
+            <details class="cashflow-import-area"><summary>계획 파일 불러오기</summary>
+              <p class="hint">현금흐름 JSON 파일을 선택하세요. 입력을 확인하고 저장하면 이 달에만 반영돼요.</p>
+              <label for="cashflow-import">계획 JSON 파일</label><input id="cashflow-import" type="file" accept=".json,application/json">
+            </details>
+          </fieldset>
+          <p id="cashflow-message" class="message" role="status" aria-live="polite"></p>
+          <button id="cashflow-save" type="submit" data-cloud-write>이 달 계획 저장</button>
+        </form>
+      </section>
+    </section>
     <section id="panel-home" class="tab-panel" role="tabpanel" aria-labelledby="tab-home">
     <section id="cloud-panel" class="panel cloud-panel" aria-labelledby="cloud-title">
       <div class="cloud-heading">
@@ -423,15 +458,16 @@
     <div class="container">데이터는 Supabase에 저장됩니다. 로그인 전 변경은 새로고침하면 사라질 수 있으니 먼저 로그인하세요.</div>
   </footer>
 
-  <script src="js/storage.js?v=20260812-v2"></script>
-  <script src="js/transactions.js?v=20260812-v2"></script>
+  <script src="js/storage.js?v=20261021-cashflow"></script>
+  <script src="js/transactions.js?v=20261021-cashflow"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="js/cloud.js?v=20260812-v2"></script>
+  <script src="js/cloud.js?v=20261021-cashflow"></script>
   <script src="js/ui.js?v=20260812-v2"></script>
   <script src="js/phone-import.js?v=20261016-2"></script>
   <script src="js/phone-sync.js?v=20261016-2"></script>
   <script src="js/phone-review.js?v=20261017-1"></script>
   <script src="js/phone-review-ui.js?v=20261017-2"></script>
-  <script src="js/app.js?v=20261017-review"></script>
+  <script src="js/cashflow-ui.js?v=20261021-cashflow"></script>
+  <script src="js/app.js?v=20261021-cashflow"></script>
 </body>
 </html>

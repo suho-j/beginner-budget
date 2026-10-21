@@ -34,6 +34,7 @@
       monthStartDay: DEFAULT_MONTH_START_DAY,
       monthlyBudgets: {},
       recurringExpenseTemplates: [],
+      cashflowPlans: {},
       transactions: []
     };
   }
@@ -261,6 +262,7 @@
     state.monthStartDay = normalizeMonthStartDay(raw.monthStartDay);
     state.monthlyBudgets = normalizeMonthlyBudgets(raw.monthlyBudgets);
     state.recurringExpenseTemplates = normalizeRecurringExpenseTemplates(raw.recurringExpenseTemplates);
+    state.cashflowPlans = normalizeCashflowPlans(raw.cashflowPlans);
 
     if (Array.isArray(raw.transactions)) {
       const seenIds = new Set();
@@ -274,6 +276,52 @@
     }
 
     return state;
+  }
+
+  const CASHFLOW_KINDS = {income: '수입', fixed: '고정 납부', allowance: '용돈', reserve: '목적 적립', saving: '기존 저축'};
+
+  function cashflowAmount(value) {
+    if (typeof value !== 'number' && typeof value !== 'string') return null;
+    const text = String(value).trim();
+    if (!/^(?:\d+|\d{1,3}(?:,\d{3})+)$/.test(text)) return null;
+    const amount = Number(text.replaceAll(',', ''));
+    return Number.isSafeInteger(amount) && amount >= 0 && amount <= MAX_DB_INTEGER ? amount : null;
+  }
+
+  function normalizeCashflowPlan(raw) {
+    if (!raw || !Array.isArray(raw.items) || raw.items.length > 100) return null;
+    const livingBudget = cashflowAmount(raw.livingBudget);
+    if (livingBudget === null) return null;
+    const items = [];
+    for (const item of raw.items) {
+      if (!item || typeof item.name !== 'string' || !Object.hasOwn(CASHFLOW_KINDS, item.kind)) return null;
+      const name = item.name.trim();
+      const amount = cashflowAmount(item.amount);
+      if (!name || name.length > 80 || amount === null) return null;
+      items.push({name, kind: item.kind, amount});
+    }
+    return {items, livingBudget};
+  }
+
+  function normalizeCashflowPlans(raw) {
+    const plans = {};
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return plans;
+    for (const month of Object.keys(raw)) {
+      if (!isValidMonthString(month)) continue;
+      const plan = normalizeCashflowPlan(raw[month]);
+      if (plan) plans[month] = plan;
+    }
+    return plans;
+  }
+
+  function summarizeCashflow(raw) {
+    const plan = normalizeCashflowPlan(raw);
+    if (!plan) return null;
+    const totals = {income: 0, fixed: 0, allowance: 0, reserve: 0, saving: 0};
+    for (const item of plan.items) totals[item.kind] += item.amount;
+    const committed = totals.fixed + totals.allowance + totals.reserve + totals.saving;
+    return {...totals, committed, available: totals.income - committed,
+      livingBudget: plan.livingBudget, additionalSaving: totals.income - committed - plan.livingBudget};
   }
 
   function loadState() {
@@ -305,6 +353,10 @@
   }
 
   window.BudgetStorage = {
+    CASHFLOW_KINDS,
+    normalizeCashflowPlan,
+    normalizeCashflowPlans,
+    summarizeCashflow,
     STORAGE_KEY,
     CURRENT_STATE_VERSION,
     DEFAULT_BUDGET,
