@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>처음 가계부</title>
   <link rel="icon" href="data:,">
-  <link rel="stylesheet" href="css/style.css?v=20261021-cashflow">
+  <link rel="stylesheet" href="css/style.css?v=20261021-fixed-costs">
 </head>
 <body id="top">
   <a class="skip-link" href="#main-content">본문으로 바로가기</a>
@@ -60,10 +60,24 @@
           <div class="cashflow-result"><span>추가 저축 가능액</span><strong id="cashflow-additionalSaving">0원</strong></div>
         </div>
         <p id="cashflow-shortfall" class="message error" role="status"></p>
+        <section class="fixed-cost-overview" aria-labelledby="fixed-cost-heading">
+          <h3 id="fixed-cost-heading">고정비 점검</h3>
+          <p class="hint">고정 납부 항목의 상세를 열어 납부일과 절감 계획을 관리하세요. 보험 등 필요한 지출은 유지하고, 줄이기로 정한 항목만 절감 예정으로 표시하세요.</p>
+          <div class="cashflow-summary fixed-cost-summary" aria-live="polite">
+            <div><span>이번 달 고정 납부</span><strong id="fixed-cost-monthly">0원</strong><small id="fixed-cost-ratio"></small></div>
+            <div><span>예상 월 절감액</span><strong id="fixed-cost-monthlySaving">0원</strong><small>절감 예정 항목만 합산</small></div>
+            <div><span>12개월 유지 시 절감액</span><strong id="fixed-cost-annualSaving">0원</strong></div>
+            <div><span>절감 후 추가 저축 가능액</span><strong id="fixed-cost-afterAdditionalSaving">0원</strong></div>
+          </div>
+          <p id="fixed-cost-after" class="hint" role="status"></p>
+          <p class="hint">목표금액은 예상치예요. 위의 현재 현금흐름에는 아직 반영하지 않아요. 용돈·목적 적립·기존 저축은 고정비 합계에서 제외해요.</p>
+        </section>
         <form id="cashflow-form" novalidate>
           <fieldset id="cashflow-editor">
             <legend>월별 수입과 배분 계획</legend>
             <p class="hint">고정 납부에는 대출 원금·이자를 포함하세요. 용돈, 나중에 쓸 목적 적립, 기존 저축은 각각 구분하세요. 변동 요금은 예상액을 입력하세요.</p>
+            <label class="cashflow-filter"><input id="cashflow-fixed-only" type="checkbox">고정비만 보기</label>
+            <p id="cashflow-empty" class="hint" hidden></p>
             <div id="cashflow-rows"></div>
             <div class="form-actions">
               <button id="cashflow-add" type="button" class="secondary">항목 추가</button>
@@ -458,16 +472,16 @@
     <div class="container">데이터는 Supabase에 저장됩니다. 로그인 전 변경은 새로고침하면 사라질 수 있으니 먼저 로그인하세요.</div>
   </footer>
 
-  <script src="js/storage.js?v=20261021-cashflow"></script>
-  <script src="js/transactions.js?v=20261021-cashflow"></script>
+  <script src="js/storage.js?v=20261021-fixed-costs"></script>
+  <script src="js/transactions.js?v=20261021-fixed-costs"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="js/cloud.js?v=20261021-cashflow"></script>
+  <script src="js/cloud.js?v=20261021-fixed-costs"></script>
   <script src="js/ui.js?v=20260812-v2"></script>
   <script src="js/phone-import.js?v=20261016-2"></script>
   <script src="js/phone-sync.js?v=20261016-2"></script>
   <script src="js/phone-review.js?v=20261017-1"></script>
   <script src="js/phone-review-ui.js?v=20261017-2"></script>
-  <script src="js/cashflow-ui.js?v=20261021-cashflow"></script>
-  <script src="js/app.js?v=20261021-cashflow"></script>
+  <script src="js/cashflow-ui.js?v=20261021-fixed-costs"></script>
+  <script src="js/app.js?v=20261021-fixed-costs"></script>
 </body>
 </html>

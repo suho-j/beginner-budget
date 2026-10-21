@@ -279,6 +279,7 @@
   }
 
   const CASHFLOW_KINDS = {income: '수입', fixed: '고정 납부', allowance: '용돈', reserve: '목적 적립', saving: '기존 저축'};
+  const FIXED_COST_STATUSES = {keep: '유지', review: '검토 중', reduce: '절감 예정'};
 
   function cashflowAmount(value) {
     if (typeof value !== 'number' && typeof value !== 'string') return null;
@@ -298,9 +299,33 @@
       const name = item.name.trim();
       const amount = cashflowAmount(item.amount);
       if (!name || name.length > 80 || amount === null) return null;
-      items.push({name, kind: item.kind, amount});
+      const normalized = {name, kind: item.kind, amount};
+      if (item.kind === 'fixed' && item.fixedCost !== undefined) {
+        const detail = normalizeFixedCost(item.fixedCost, amount);
+        if (!detail) return null;
+        normalized.fixedCost = detail;
+      }
+      items.push(normalized);
     }
     return {items, livingBudget};
+  }
+
+  function normalizeFixedCost(raw, currentAmount) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+    const status = raw.status === undefined ? 'keep' : raw.status;
+    if (typeof status !== 'string' || !Object.hasOwn(FIXED_COST_STATUSES, status)) return null;
+    const emptyTarget = raw.targetAmount === undefined || raw.targetAmount === null ||
+      (typeof raw.targetAmount === 'string' && !raw.targetAmount.trim());
+    const targetAmount = emptyTarget ? null : cashflowAmount(raw.targetAmount);
+    if (!emptyTarget && targetAmount === null) return null;
+    if (status === 'reduce' && (targetAmount === null || targetAmount > currentAmount)) return null;
+    const result = {status, targetAmount};
+    for (const [field, maxLength] of [['paymentDay',40],['paymentMethod',40],['memo',200]]) {
+      const value = raw[field] === undefined ? '' : raw[field];
+      if (typeof value !== 'string' || value.trim().length > maxLength) return null;
+      result[field] = value.trim();
+    }
+    return result;
   }
 
   function normalizeCashflowPlans(raw) {
@@ -322,6 +347,17 @@
     const committed = totals.fixed + totals.allowance + totals.reserve + totals.saving;
     return {...totals, committed, available: totals.income - committed,
       livingBudget: plan.livingBudget, additionalSaving: totals.income - committed - plan.livingBudget};
+  }
+
+  function summarizeFixedCosts(raw) {
+    const plan = normalizeCashflowPlan(raw);
+    if (!plan) return null;
+    const totals = summarizeCashflow(plan);
+    const monthlySaving = plan.items.reduce((sum, item) => sum +
+      (item.kind === 'fixed' && item.fixedCost?.status === 'reduce' ? item.amount - item.fixedCost.targetAmount : 0), 0);
+    return {monthly: totals.fixed, incomeRatio: totals.income > 0 ? totals.fixed / totals.income * 100 : null,
+      monthlySaving, annualSaving: monthlySaving * 12, afterMonthly: totals.fixed - monthlySaving,
+      afterAdditionalSaving: totals.additionalSaving + monthlySaving};
   }
 
   function loadState() {
@@ -354,9 +390,11 @@
 
   window.BudgetStorage = {
     CASHFLOW_KINDS,
+    FIXED_COST_STATUSES,
     normalizeCashflowPlan,
     normalizeCashflowPlans,
     summarizeCashflow,
+    summarizeFixedCosts,
     STORAGE_KEY,
     CURRENT_STATE_VERSION,
     DEFAULT_BUDGET,

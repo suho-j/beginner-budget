@@ -6,21 +6,77 @@
   const money = n => new Intl.NumberFormat('ko-KR').format(n) + '원';
   function message(text) { el('cashflow-message').textContent = text; }
   function read() {
-    return {livingBudget: el('cashflow-living').value, items: Array.from(el('cashflow-rows').children).map(row => ({
-      name: row.querySelector('[data-field="name"]').value,
-      kind: row.querySelector('select').value,
-      amount: row.querySelector('[data-field="amount"]').value
-    }))};
+    return {livingBudget: el('cashflow-living').value, items: Array.from(el('cashflow-rows').children).map(row => {
+      const value = field => row.querySelector('[data-field="' + field + '"]')?.value;
+      const item = {name: value('name'), kind: value('kind'), amount: value('amount')};
+      if (item.kind === 'fixed') item.fixedCost = Object.fromEntries(
+        ['status','targetAmount','paymentDay','paymentMethod','memo'].map(field => [field, value(field)]));
+      return item;
+    })};
   }
   function summary() {
-    const totals = S.summarizeCashflow(read());
+    const plan = read();
+    const totals = S.summarizeCashflow(plan);
     for (const key of ['income', 'committed', 'available', 'additionalSaving']) {
       el('cashflow-' + key).textContent = totals ? money(totals[key]) : '입력 확인';
     }
     el('cashflow-shortfall').textContent = totals && totals.additionalSaving < 0
       ? '예산이 수입을 넘었어요. 생활비나 다른 배분액을 줄여 주세요.' : '';
+    const fixed = S.summarizeFixedCosts(plan);
+    for (const key of ['monthly','monthlySaving','annualSaving','afterAdditionalSaving']) {
+      el('fixed-cost-' + key).textContent = fixed ? money(fixed[key]) : '입력 확인';
+    }
+    el('fixed-cost-ratio').textContent = fixed?.incomeRatio != null ? '수입 대비 ' + fixed.incomeRatio.toFixed(1) + '%' : '수입을 입력하면 비율을 볼 수 있어요.';
+    el('fixed-cost-after').textContent = fixed ? '절감 적용 후 고정 납부 예상액 ' + money(fixed.afterMonthly) : '절감 예정 항목의 목표금액은 현재 월 금액 이하로 입력하세요.';
   }
-  function changed() { dirty = true; message('수정 중 · 저장하면 선택한 달의 계획에 반영돼요.'); summary(); }
+  function fixedDetails(detail = {}) {
+    const details = document.createElement('details'); details.className = 'fixed-cost-details';
+    const title = document.createElement('summary'); details.append(title);
+    const grid = document.createElement('div'); grid.className = 'fixed-cost-fields';
+    for (const [field, label, placeholder, maxLength] of [
+      ['status','점검 상태','',''], ['targetAmount','목표 월 금액','미정이면 비워 두세요',''],
+      ['paymentDay','납부일','예: 25일~말일',40], ['paymentMethod','결제수단','예: 카드 또는 계좌',40],
+      ['memo','점검 메모','예: 약정 만료 후 요금제 변경',200]
+    ]) {
+      const wrapper = document.createElement('label');
+      const caption = document.createElement('span'); caption.textContent = label;
+      const input = document.createElement(field === 'status' ? 'select' : 'input'); input.dataset.field = field;
+      if (field === 'status') {
+        for (const [value, text] of Object.entries(S.FIXED_COST_STATUSES)) {
+          const option = document.createElement('option'); option.value = value; option.textContent = text; input.append(option);
+        }
+      } else {
+        input.type = 'text'; input.placeholder = placeholder;
+        if (field === 'targetAmount') input.inputMode = 'numeric'; else input.maxLength = maxLength;
+      }
+      input.value = detail[field] ?? (field === 'status' ? 'keep' : '');
+      if (field === 'memo') wrapper.className = 'fixed-cost-memo';
+      wrapper.append(caption,input); grid.append(wrapper);
+    }
+    const hint = document.createElement('p'); hint.className = 'hint';
+    hint.textContent = '유지·검토 중은 절감액에서 제외해요. 절감 예정은 목표금액을 입력하세요(해지 예정은 0원). 변경이 적용되면 월 금액을 수정하고 유지로 바꿔 주세요.';
+    details.append(grid,hint); return details;
+  }
+  function syncRows() {
+    let visible = 0;
+    for (const row of el('cashflow-rows').children) {
+      const fixed = row.querySelector('[data-field="kind"]').value === 'fixed';
+      let details = row.querySelector('details');
+      if (fixed && !details) {details = fixedDetails(); row.append(details);}
+      if (details) {
+        details.hidden = !fixed;
+        const name = row.querySelector('[data-field="name"]').value.trim() || '새 항목';
+        const status = details.querySelector('[data-field="status"]').value;
+        details.querySelector('summary').textContent = name + ' 고정비 상세 · ' + S.FIXED_COST_STATUSES[status];
+      }
+      row.hidden = el('cashflow-fixed-only').checked && !fixed;
+      if (!row.hidden) visible++;
+      if (row.hidden && row.contains(document.activeElement)) el('cashflow-add').focus();
+    }
+    el('cashflow-empty').hidden = visible > 0;
+    el('cashflow-empty').textContent = el('cashflow-fixed-only').checked ? '고정 납부 항목이 없어요. 항목 추가로 시작하세요.' : '수입과 지출 항목을 추가하거나 계획 파일을 불러오세요.';
+  }
+  function changed() { dirty = true; syncRows(); message('수정 중 · 저장하면 선택한 달의 계획에 반영돼요.'); summary(); }
   function row(item) {
     const container = document.createElement('div'); container.className = 'cashflow-row';
     for (const [field, label] of [['kind','구분'], ['name','항목'], ['amount','월 금액']]) {
@@ -41,11 +97,13 @@
     remove.type = 'button'; remove.className = 'secondary'; remove.textContent = '삭제';
     remove.setAttribute('aria-label', (item.name || '새 항목') + ' 삭제');
     remove.addEventListener('click', () => {container.remove(); changed(); el('cashflow-add').focus();});
-    container.append(remove); el('cashflow-rows').append(container);
+    container.append(remove);
+    if (item.kind === 'fixed') container.append(fixedDetails(item.fixedCost));
+    el('cashflow-rows').append(container);
   }
   function fill(plan) {
     el('cashflow-rows').replaceChildren(); plan.items.forEach(row);
-    el('cashflow-living').value = plan.livingBudget; summary();
+    el('cashflow-living').value = plan.livingBudget; syncRows(); summary();
   }
   function render(state, selectedMonth) {
     const plan = state.cashflowPlans[selectedMonth] || {items: [], livingBudget: 0};
@@ -57,6 +115,7 @@
   }
   function init(callbacks) {
     api = callbacks;
+    el('cashflow-fixed-only').addEventListener('change', syncRows);
     el('cashflow-rows').addEventListener('input', changed);
     el('cashflow-living').addEventListener('input', changed);
     el('cashflow-add').addEventListener('click', () => {
@@ -87,7 +146,7 @@
     el('cashflow-form').addEventListener('submit', async event => {
       event.preventDefault(); if (saving) return;
       const plan = S.normalizeCashflowPlan(read());
-      if (!plan) {message('항목명과 금액을 확인해 주세요. 금액은 쉼표를 포함한 0 이상의 정수로 입력해 주세요.'); return;}
+      if (!plan) {message('항목명과 금액을 확인해 주세요. 금액은 0 이상의 정수이며, 절감 예정은 현재 월 금액 이하의 목표금액이 필요해요.'); return;}
       saving = true; el('cashflow-editor').disabled = true;
       el('cashflow-save').setAttribute('aria-busy', 'true');
       try {
