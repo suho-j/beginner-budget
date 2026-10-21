@@ -21,9 +21,11 @@ test('알림을 먼저 보관하고 실패하면 남겨두며 같은 ID의 성�
   const queue = JSON.parse(phone.globals.BUDGETOUTBOX);
   assert.equal(queue.length, 1);
   assert.ok(!queue[0].text.includes('500,000'));
+  assert.equal(queue[0].balance_amount,500000);
   phone.run('prepare-send');
   const firstBody = JSON.parse(phone.locals.budget_body);
   assert.equal(firstBody.p_event.event_id, queue[0].event_id);
+  assert.equal(firstBody.p_event.balance_amount,500000);
   phone.context.http_response_code = '500'; phone.context.http_data = '{}';
   phone.run('acknowledge');
   assert.equal(JSON.parse(phone.globals.BUDGETOUTBOX).length, 1);

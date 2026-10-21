@@ -20,10 +20,17 @@
 
   function redactText(text) {
     return text
-      .replace(/(?:잔액|잔여한도|누적사용액)\s*[:：]?\s*[\d,]+\s*원?/g, &apos;[잔액 숨김]&apos;)
+      .replace(/(?:잔액|잔여한도|누적사용액)\s*[:：]?\s*-?[\d,.]+\s*원?/g, &apos;[잔액 숨김]&apos;)
       .replace(/(?:계좌번호|카드번호)\s*[:：]?\s*[\d* -]{8,}/g, &apos;[번호 숨김]&apos;)
       .replace(/\b\d{3,6}-\d{2,6}-\d{3,8}\b/g, &apos;[번호 숨김]&apos;)
       .replace(/\b(?:\d[ -]?){15}\d\b/g, &apos;[번호 숨김]&apos;);
+  }
+
+  function extractBalance(text) {
+    const matches = [...text.matchAll(/잔액\s*[:：]?\s*(-?[\d,.]+)\s*원?/g)];
+    if (matches.length !== 1 || !/^-?(?:\d+|\d{1,3}(?:,\d{3})+)$/.test(matches[0][1])) return null;
+    const amount = Number(matches[0][1].replace(/,/g, &apos;&apos;));
+    return Number.isInteger(amount) &amp;&amp; Math.abs(amount) &lt;= 2147483647 ? amount : null;
   }
 
   function normalizeEvent(input) {
@@ -40,11 +47,18 @@
       || /인증\s*번호|일회용\s*비밀번호|\bOTP\b|보안\s*코드/i.test(input.text)) {
       throw new Error(&apos;수신할 알림 정보가 올바르지 않아요.&apos;);
     }
-    return {
+    const result = {
       version: 1, event_id: input.event_id, kind: input.kind,
       package_name: input.package_name, captured_at: input.captured_at,
       text: redactText(input.text.replace(/\r\n?/g, &apos;\n&apos;).trim())
     };
+    const balance = input.balance_amount === undefined ? extractBalance(input.text) : input.balance_amount;
+    if (input.balance_amount !== undefined &amp;&amp; (typeof balance !== &apos;number&apos; || !Number.isInteger(balance) || Math.abs(balance) &gt; 2147483647)) {
+      throw new Error(&apos;잔액이 올바르지 않아요.&apos;);
+    }
+    // Preserve the original v1 payload when there is no balance, including old retries.
+    if (balance !== null &amp;&amp; input.kind === &apos;kbank_notification&apos;) result.balance_amount = balance;
+    return result;
   }
 
   function paymentDraft(event) {
@@ -114,7 +128,7 @@
     };
   }
 
-  return { PACKAGES, normalizeEvent, redactText, paymentDraft, matchOrder };
+  return { PACKAGES, normalizeEvent, redactText, extractBalance, paymentDraft, matchOrder };
 });
 (function () {
 var budget_kind = &quot;kbank_notification&quot;;
@@ -184,10 +198,17 @@ if (global(&quot;BUDGETOUTBOX&quot;) !== before) performTask(&quot;BB 보내기&
 
   function redactText(text) {
     return text
-      .replace(/(?:잔액|잔여한도|누적사용액)\s*[:：]?\s*[\d,]+\s*원?/g, &apos;[잔액 숨김]&apos;)
+      .replace(/(?:잔액|잔여한도|누적사용액)\s*[:：]?\s*-?[\d,.]+\s*원?/g, &apos;[잔액 숨김]&apos;)
       .replace(/(?:계좌번호|카드번호)\s*[:：]?\s*[\d* -]{8,}/g, &apos;[번호 숨김]&apos;)
       .replace(/\b\d{3,6}-\d{2,6}-\d{3,8}\b/g, &apos;[번호 숨김]&apos;)
       .replace(/\b(?:\d[ -]?){15}\d\b/g, &apos;[번호 숨김]&apos;);
+  }
+
+  function extractBalance(text) {
+    const matches = [...text.matchAll(/잔액\s*[:：]?\s*(-?[\d,.]+)\s*원?/g)];
+    if (matches.length !== 1 || !/^-?(?:\d+|\d{1,3}(?:,\d{3})+)$/.test(matches[0][1])) return null;
+    const amount = Number(matches[0][1].replace(/,/g, &apos;&apos;));
+    return Number.isInteger(amount) &amp;&amp; Math.abs(amount) &lt;= 2147483647 ? amount : null;
   }
 
   function normalizeEvent(input) {
@@ -204,11 +225,18 @@ if (global(&quot;BUDGETOUTBOX&quot;) !== before) performTask(&quot;BB 보내기&
       || /인증\s*번호|일회용\s*비밀번호|\bOTP\b|보안\s*코드/i.test(input.text)) {
       throw new Error(&apos;수신할 알림 정보가 올바르지 않아요.&apos;);
     }
-    return {
+    const result = {
       version: 1, event_id: input.event_id, kind: input.kind,
       package_name: input.package_name, captured_at: input.captured_at,
       text: redactText(input.text.replace(/\r\n?/g, &apos;\n&apos;).trim())
     };
+    const balance = input.balance_amount === undefined ? extractBalance(input.text) : input.balance_amount;
+    if (input.balance_amount !== undefined &amp;&amp; (typeof balance !== &apos;number&apos; || !Number.isInteger(balance) || Math.abs(balance) &gt; 2147483647)) {
+      throw new Error(&apos;잔액이 올바르지 않아요.&apos;);
+    }
+    // Preserve the original v1 payload when there is no balance, including old retries.
+    if (balance !== null &amp;&amp; input.kind === &apos;kbank_notification&apos;) result.balance_amount = balance;
+    return result;
   }
 
   function paymentDraft(event) {
@@ -278,7 +306,7 @@ if (global(&quot;BUDGETOUTBOX&quot;) !== before) performTask(&quot;BB 보내기&
     };
   }
 
-  return { PACKAGES, normalizeEvent, redactText, paymentDraft, matchOrder };
+  return { PACKAGES, normalizeEvent, redactText, extractBalance, paymentDraft, matchOrder };
 });
 (function () {
 var budget_kind = &quot;eats_notification&quot;;
@@ -348,10 +376,17 @@ if (global(&quot;BUDGETOUTBOX&quot;) !== before) performTask(&quot;BB 보내기&
 
   function redactText(text) {
     return text
-      .replace(/(?:잔액|잔여한도|누적사용액)\s*[:：]?\s*[\d,]+\s*원?/g, &apos;[잔액 숨김]&apos;)
+      .replace(/(?:잔액|잔여한도|누적사용액)\s*[:：]?\s*-?[\d,.]+\s*원?/g, &apos;[잔액 숨김]&apos;)
       .replace(/(?:계좌번호|카드번호)\s*[:：]?\s*[\d* -]{8,}/g, &apos;[번호 숨김]&apos;)
       .replace(/\b\d{3,6}-\d{2,6}-\d{3,8}\b/g, &apos;[번호 숨김]&apos;)
       .replace(/\b(?:\d[ -]?){15}\d\b/g, &apos;[번호 숨김]&apos;);
+  }
+
+  function extractBalance(text) {
+    const matches = [...text.matchAll(/잔액\s*[:：]?\s*(-?[\d,.]+)\s*원?/g)];
+    if (matches.length !== 1 || !/^-?(?:\d+|\d{1,3}(?:,\d{3})+)$/.test(matches[0][1])) return null;
+    const amount = Number(matches[0][1].replace(/,/g, &apos;&apos;));
+    return Number.isInteger(amount) &amp;&amp; Math.abs(amount) &lt;= 2147483647 ? amount : null;
   }
 
   function normalizeEvent(input) {
@@ -368,11 +403,18 @@ if (global(&quot;BUDGETOUTBOX&quot;) !== before) performTask(&quot;BB 보내기&
       || /인증\s*번호|일회용\s*비밀번호|\bOTP\b|보안\s*코드/i.test(input.text)) {
       throw new Error(&apos;수신할 알림 정보가 올바르지 않아요.&apos;);
     }
-    return {
+    const result = {
       version: 1, event_id: input.event_id, kind: input.kind,
       package_name: input.package_name, captured_at: input.captured_at,
       text: redactText(input.text.replace(/\r\n?/g, &apos;\n&apos;).trim())
     };
+    const balance = input.balance_amount === undefined ? extractBalance(input.text) : input.balance_amount;
+    if (input.balance_amount !== undefined &amp;&amp; (typeof balance !== &apos;number&apos; || !Number.isInteger(balance) || Math.abs(balance) &gt; 2147483647)) {
+      throw new Error(&apos;잔액이 올바르지 않아요.&apos;);
+    }
+    // Preserve the original v1 payload when there is no balance, including old retries.
+    if (balance !== null &amp;&amp; input.kind === &apos;kbank_notification&apos;) result.balance_amount = balance;
+    return result;
   }
 
   function paymentDraft(event) {
@@ -442,7 +484,7 @@ if (global(&quot;BUDGETOUTBOX&quot;) !== before) performTask(&quot;BB 보내기&
     };
   }
 
-  return { PACKAGES, normalizeEvent, redactText, paymentDraft, matchOrder };
+  return { PACKAGES, normalizeEvent, redactText, extractBalance, paymentDraft, matchOrder };
 });
 (function () {
 var budget_kind = &quot;eats_screen&quot;;
