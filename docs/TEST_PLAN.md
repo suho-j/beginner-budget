@@ -517,3 +517,7 @@ phone-browser 테스트는 별도 headless Chrome과 시험용 Cloud 응답을 �
 - 운영 DB 적용 후 RLS·권한·비공개 버킷을 조회합니다. 브라우저의 합성 저장 테스트와 실제 사용자 로그인·파일 업로드 성공은 구분합니다. 사용자 가계부에 테스트 거래를 쓰지 않습니다.
 
 보안 Advisor의 SECURITY DEFINER 경고는 소유자 검사·역할별 EXECUTE 제한·수신용 토큰 검사를 확인했습니다. 알림 처리 함수는 직접 쓰기를 막은 수신함/잔액을 원자적으로 갱신하므로 의도된 권한 경계입니다. phone_devices의 정책 없음은 직접 접근 금지 설계입니다. 기존 유출 비밀번호 검사 비활성 경고는 이번 변경 범위 밖이며 [공식 안내](https://supabase.com/docs/guides/auth/password-security#password-strength-and-leaked-password-protection)를 참고합니다.
+
+### Tasker 이름 중복 회귀
+
+`node --test tests/tasker-clean-project.test.cjs`는 이전 BB 작업이 남은 설치를 모델링합니다. 새 이름/ID와 내부 참조, 이전 연결/큐 불변, 새 연결 시험 전 수집 차단, 새 잔액 전송을 검증합니다. `tests/tasker-installer-browser.cjs`는 수정 안내의 가져오기 URL과 다운로드 파일이 이 새 전체 프로젝트와 동일한지 검증합니다. Android 가져오기 성공을 대신하지 않습니다.

@@ -127,6 +127,19 @@ function buildCaptureRestoreProject() {
   return {xml,uri:'taskerproject://' + zlib.gzipSync(Buffer.from(xml)).toString('base64')};
 }
 
+function buildCleanProject() {
+  // Project imports do not reliably offer replacement for existing named tasks.
+  // Give the full new installation its own names, IDs, pairing state and outbox.
+  const legacy=buildProject();
+  const rename=text=>text.replaceAll('BB ','가계부21 ').replaceAll('BUDGET','BUDGET21');
+  let xml=rename(legacy.xml).replace('<name>가계부 자동수집</name>','<name>처음가계부 21</name>');
+  const ids={5101:8101,5102:8102,5103:8103,5201:8201,5202:8202,5203:8203,5204:8204,5205:8205,5206:8206};
+  xml=xml.replace(/(sr="(?:prof|task))(\d+)(")/g,(_,before,id,after)=>before+(ids[id]||id)+after)
+    .replace(/<(id|mid0|pids|tids)>([\d,]+)<\/\1>/g,(_,tag,value)=>'<'+tag+'>'+value.split(',').map(id=>ids[id]||id).join(',')+'</'+tag+'>');
+  return {xml,uri:'taskerproject://'+zlib.gzipSync(Buffer.from(xml)).toString('base64'),
+    scripts:Object.fromEntries(Object.entries(legacy.scripts).map(([key,value])=>[key,rename(value)]))};
+}
+
 if (require.main === module) {
   const out = path.join(root,'artifacts/tasker-guide');
   fs.mkdirSync(out,{recursive:true});
@@ -147,8 +160,10 @@ if (require.main === module) {
   fs.writeFileSync(path.join(out,'Budget-Capture.prj.xml'),restore.xml);
   fs.writeFileSync(path.join(out,'restore.html'),read('tasker/restore-template.html')
     .replaceAll('{{RESTORE_URI}}',restore.uri).replaceAll('{{RESTORE_XML}}',Buffer.from(restore.xml).toString('base64')));
+  const clean=buildCleanProject();
+  fs.writeFileSync(path.join(out,'Budget-Clean-21.prj.xml'),clean.xml);
   fs.writeFileSync(path.join(out,'reset.html'),read('tasker/reset-template.html')
-    .replaceAll('{{TASKER_URI}}',project.uri).replaceAll('{{XML_BASE64}}',Buffer.from(project.xml).toString('base64')));
+    .replaceAll('{{TASKER_URI}}',clean.uri).replaceAll('{{XML_BASE64}}',Buffer.from(clean.xml).toString('base64')));
   console.log('Created capture, status and repair projects and installer pages; no connection keys included.');
 }
-module.exports = {buildProject,buildStatusProject,buildRepairProject,buildCaptureRestoreProject};
+module.exports = {buildProject,buildStatusProject,buildRepairProject,buildCaptureRestoreProject,buildCleanProject};

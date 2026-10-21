@@ -3,7 +3,7 @@ const path = require('node:path');
 const http = require('node:http');
 const assert = require('node:assert/strict');
 const {chromium} = require('playwright');
-const {buildProject} = require('../tasker/build-project.cjs');
+const {buildProject,buildCleanProject} = require('../tasker/build-project.cjs');
 
 (async () => {
   const output = path.resolve(__dirname,'../artifacts/tasker-guide/install.html');
@@ -30,13 +30,17 @@ const {buildProject} = require('../tasker/build-project.cjs');
     assert.ok(await page.getByText('가계부 서버 연결 준비 완료',{exact:true}).isVisible());
     assert.ok(await page.getByText('실제 갤럭시 알림 수신은 폰에서 확인해야 합니다.',{exact:false}).isVisible());
     await page.goto('http://127.0.0.1:'+server.address().port+'/reset');
-    const update=project;
+    const update=buildCleanProject();
     assert.equal(await page.locator('#import-reset').getAttribute('href'),update.uri);
     for(const width of [800,360,320]){await page.setViewportSize({width,height:1000});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);}
     await page.locator('details').first().locator('summary').click();
     const updatePromise=page.waitForEvent('download');await page.locator('#download-reset').click();
     const updateDownload=await updatePromise;
-    assert.equal(updateDownload.suggestedFilename(),'Budget-Auto.prj.xml');
+    assert.equal(updateDownload.suggestedFilename(),'Budget-Clean-21.prj.xml');
+    assert.match(await page.locator('#duplicate-help').textContent(),/초기화를 반복하지 말고/);
+    assert.match(await page.locator('#install-step').textContent(),/가계부21 케이뱅크/);
+    assert.ok(!update.xml.includes('<nme>BB 케이뱅크 받기</nme>'));
+    await page.screenshot({path:path.join(__dirname,'../.tmp/phone-tests/tasker-name-fix.png'),fullPage:true});
     assert.equal(fs.readFileSync(await updateDownload.path(),'utf8'),update.xml);
     assert.deepEqual(errors,[]);
     console.log('PASS: installer 800/360/320px, native import URI, exact XML download, no script errors. Android launch is not tested.');

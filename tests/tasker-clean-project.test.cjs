@@ -1,0 +1,31 @@
+const test=require('node:test'),assert=require('node:assert/strict'),vm=require('node:vm'),zlib=require('node:zlib');
+const {buildProject,buildCleanProject}=require('../tasker/build-project.cjs');
+test('새 설치본은 남아 있는 BB 작업과 이름·ID가 겹치지 않고 내부 참조가 연결된다',()=>{
+  const old=buildProject(),fresh=buildCleanProject();
+  const names=x=>[...x.matchAll(/<nme>([^<]+)<\/nme>/g)].map(m=>m[1]);
+  const ids=x=>[...x.matchAll(/<(?:Task|Profile) sr="(?:task|prof)(\d+)"/g)].map(m=>m[1]);
+  assert.equal(names(fresh.xml).length,9);assert.equal(new Set(names(fresh.xml)).size,9);
+  assert.ok(names(fresh.xml).every(n=>!names(old.xml).includes(n)));
+  assert.ok(ids(fresh.xml).every(id=>!ids(old.xml).includes(id)));
+  for(const [,id]of fresh.xml.matchAll(/<mid0>(\d+)<\/mid0>/g))assert.ok(ids(fresh.xml).includes(id));
+  assert.ok(fresh.scripts.bank.includes('performTask("가계부21 보내기"'));
+  assert.ok(fresh.scripts.setup.includes("taskRunning('가계부21 보내기')"));
+  assert.ok(!fresh.xml.includes('BB '));
+  assert.equal(zlib.gunzipSync(Buffer.from(fresh.uri.slice('taskerproject://'.length),'base64')).toString(),fresh.xml);
+});
+test('이전 연결이 남아도 새 수집은 자체 연결 시험 전까지 꺼져 있고 이전 대기열을 건드리지 않는다',()=>{
+  const fresh=buildCleanProject(),config={endpoint:'https://test.supabase.co/rest/v1/rpc/receive_phone_event',public_key:'sb_publishable_test',device_token:'a'.repeat(64),connection_id:'b'.repeat(64)};
+  const globals={BUDGETCONFIG:JSON.stringify(config),BUDGETREADY:config.connection_id,BUDGETOUTBOX:'[{"event_id":"old-pending"}]'},before={...globals},calls=[];
+  const context=vm.createContext({global:n=>globals[n]||'',setGlobal:(n,v)=>{globals[n]=String(v);},prompt:()=>JSON.stringify(config),flashLong:()=>{},confirm:()=>true,taskRunning:()=>false,performTask:name=>calls.push(name),evtprm:['케이뱅크','출금 1,000원 잔액 10,000원']});
+  vm.runInContext(fresh.scripts.bank,context);
+  assert.equal(globals.BUDGET21OUTBOX,undefined);assert.deepEqual(globals,before);
+  vm.runInContext(fresh.scripts.setup,context);
+  assert.equal(JSON.parse(globals.BUDGET21OUTBOX).length,1);assert.equal(calls[0],'가계부21 보내기');
+  for(const key of Object.keys(before))assert.equal(globals[key],before[key]);
+  vm.runInContext(fresh.scripts.bank,context);assert.equal(JSON.parse(globals.BUDGET21OUTBOX).length,1);
+  globals.BUDGET21READY=config.connection_id;globals.BUDGET21OUTBOX='[]';
+  vm.runInContext(fresh.scripts.bank,context);vm.runInContext(fresh.scripts.prepare,context);
+  assert.equal(JSON.parse(context.budget_body).p_event.balance_amount,10000);
+  for(const key of Object.keys(before))assert.equal(globals[key],before[key]);
+  for(const source of Object.values(fresh.scripts))new vm.Script(source);
+});
