@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>처음 가계부</title>
   <link rel="icon" href="data:,">
-  <link rel="stylesheet" href="css/style.css?v=deck-20261021-review-deck">
+  <link rel="stylesheet" href="css/style.css?v=cashflow-20261022">
 </head>
 <body id="top">
   <a class="skip-link" href="#main-content">본문으로 바로가기</a>
@@ -60,6 +60,22 @@
           <div class="cashflow-result"><span>추가 저축 가능액</span><strong id="cashflow-additionalSaving">0원</strong></div>
         </div>
         <p id="cashflow-shortfall" class="message error" role="status"></p>
+        <section aria-labelledby="cashflow-schedule-title" class="cashflow-schedule">
+          <div class="cashflow-schedule-heading">
+            <h3 id="cashflow-schedule-title">날짜별 입출금 계획</h3>
+            <div class="cashflow-view-toggle" role="group" aria-label="현금흐름 보기 방식">
+              <button type="button" id="cashflow-view-table" aria-pressed="true" aria-controls="cashflow-table-view">표</button>
+              <button type="button" id="cashflow-view-calendar" aria-pressed="false" aria-controls="cashflow-calendar-view">캘린더</button>
+            </div>
+          </div>
+          <p class="hint">급여는 이전 영업일, 나머지는 다음 영업일로 조정할 수 있어요. 예정일이며 실제 거래일은 바꾸지 않아요.</p>
+          <p id="cashflow-date-warning" class="hint"></p>
+          <p id="cashflow-date-totals" class="hint" aria-live="polite"></p>
+          <div id="cashflow-table-view" class="cashflow-table-scroll" tabindex="0" aria-label="날짜별 현금흐름 표"></div>
+          <div id="cashflow-calendar-view" tabindex="0" aria-label="날짜별 현금흐름 달력, 좌우 스크롤 가능" hidden></div>
+          <div id="cashflow-unscheduled"></div>
+          <div id="cashflow-shifted"></div>
+        </section>
         <section class="fixed-cost-overview" aria-labelledby="fixed-cost-heading">
           <h3 id="fixed-cost-heading">고정비 점검</h3>
           <p class="hint">고정 납부 항목의 상세를 열어 납부일과 절감 계획을 관리하세요. 보험 등 필요한 지출은 유지하고, 줄이기로 정한 항목만 절감 예정으로 표시하세요.</p>
@@ -72,6 +88,7 @@
           <p id="fixed-cost-after" class="hint" role="status"></p>
           <p class="hint">목표금액은 예상치예요. 위의 현재 현금흐름에는 아직 반영하지 않아요. 용돈·목적 적립·기존 저축은 고정비 합계에서 제외해요.</p>
         </section>
+        <details class="cashflow-plan-editor"><summary>항목·금액·예정일 수정</summary>
         <form id="cashflow-form" novalidate>
           <fieldset id="cashflow-editor">
             <legend>월별 수입과 배분 계획</legend>
@@ -94,6 +111,7 @@
           <p id="cashflow-message" class="message" role="status" aria-live="polite"></p>
           <button id="cashflow-save" type="submit" data-cloud-write>이 달 계획 저장</button>
         </form>
+        </details>
       </section>
     </section>
     <section id="panel-home" class="tab-panel" role="tabpanel" aria-labelledby="tab-home">
@@ -483,7 +501,7 @@
     <div class="container">데이터는 Supabase에 저장됩니다. 로그인 전 변경은 새로고침하면 사라질 수 있으니 먼저 로그인하세요.</div>
   </footer>
 
-  <script src="js/storage.js?v=20261021-fixed-costs"></script>
+  <script src="js/storage.js?v=20261022-schedule"></script>
   <script src="js/transactions.js?v=20261021-fixed-costs"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="js/cloud.js?v=20261021-fixed-costs"></script>
@@ -492,7 +510,8 @@
   <script src="js/phone-sync.js?v=20261021-review-deck"></script>
   <script src="js/phone-review.js?v=20261021-review-deck"></script>
   <script src="js/phone-review-ui.js?v=20261021-review-deck"></script>
-  <script src="js/cashflow-ui.js?v=20261021-fixed-costs"></script>
+  <script src="js/cashflow-schedule.js?v=20261022"></script>
+  <script src="js/cashflow-ui.js?v=20261022-schedule"></script>
   <script src="js/app.js?v=20261021-review-deck"></script>
 </body>
 </html>

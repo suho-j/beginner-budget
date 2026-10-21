@@ -614,6 +614,38 @@ body:has(#tab-review[aria-selected="true"]) .site-header .eyebrow { display:none
 .cashflow-row label { min-width:0; display:grid; gap:5px; }
 .cashflow-row input, .cashflow-row select { width:100%; min-width:0; }
 .cashflow-row label span { font-size:.85rem; }
+.cashflow-schedule { margin:24px 0; padding:20px; border:1px solid var(--border); border-radius:16px; background:#fff; min-width:0; }
+.cashflow-schedule-heading { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+.cashflow-schedule-heading h3 { margin:0; }
+.cashflow-view-toggle { display:flex; gap:4px; padding:4px; border-radius:12px; background:#edf2f5; }
+.cashflow-view-toggle button { color:#3f5260; background:transparent; border:0; min-height:44px; }
+.cashflow-view-toggle button[aria-pressed="true"] { color:#fff; background:#2457d6; box-shadow:0 2px 5px #182a4a22; }
+#cashflow-table-view[hidden],#cashflow-calendar-view[hidden] { display:none; }
+.cashflow-table-scroll,#cashflow-calendar-view { max-width:100%; overflow-x:auto; }
+.cashflow-table-scroll table { width:100%; min-width:580px; border-collapse:collapse; }
+.cashflow-table-scroll caption { text-align:left; margin:12px 0; font-weight:600; }
+.cashflow-table-scroll th,.cashflow-table-scroll td { text-align:left; padding:14px 10px; border-bottom:1px solid #e6ebef; vertical-align:top; }
+.cashflow-table-scroll th { background:#f2f5f9; font-size:.85rem; }
+.cashflow-table-scroll small { display:block; color:var(--muted); margin-top:5px; }
+.cashflow-money { white-space:nowrap; font-variant-numeric:tabular-nums; font-weight:700; }
+.cashflow-money.income { color:#087652; }
+.cashflow-money.transfer { color:#6e59a4; }
+.cashflow-calendar { display:grid; grid-template-columns:repeat(7,minmax(105px,1fr)); min-width:735px; gap:1px; background:#dce3ea; border:1px solid #dce3ea; border-radius:10px; overflow:hidden; }
+.cashflow-weekday { background:#eef2f7; padding:10px; text-align:center; font-weight:600; }
+.cashflow-day { background:#fff; min-height:125px; padding:6px; min-width:0; }
+.cashflow-day.blank { background:#f6f8fa; }
+.cashflow-day h4 { margin:3px 4px 8px; font-size:.85rem; }
+.cashflow-day.holiday h4 { color:#b13d35; }
+.cashflow-event { padding:7px 6px; margin-bottom:5px; border-radius:6px; background:#edf2fc; border-left:3px solid #7899df; font-size:.75rem; overflow-wrap:anywhere; }
+.cashflow-event span,.cashflow-event strong,.cashflow-event small { display:block; }
+.cashflow-event strong { margin-top:4px; font-size:.78rem; font-variant-numeric:tabular-nums; }
+.cashflow-event.income { background:#e6f5ed; border-color:#319a6b; }
+.cashflow-event.transfer { background:#f1ebfa; border-color:#9874cb; }
+#cashflow-unscheduled,#cashflow-shifted { font-size:.85rem; overflow-wrap:anywhere; }
+#cashflow-unscheduled li,#cashflow-shifted li { margin:8px 0; }
+.cashflow-plan-editor > summary { min-height:48px; padding:14px 0; font-weight:700; cursor:pointer; }
+.cashflow-date-fields { grid-column:1 / -1; display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px; padding:10px; background:#f5f7fa; border-radius:10px; }
+@media(max-width:600px) { .cashflow-schedule { padding:12px; } .cashflow-date-fields { grid-template-columns:repeat(2,minmax(0,1fr)); } }
 .cashflow-living-label { display:block; margin:24px 0 8px; }
 .cashflow-import-area { margin:20px 0; }
 .fixed-cost-overview { border:1px solid var(--border); border-radius:14px; padding:18px; margin:24px 0; background:#fafbff; }

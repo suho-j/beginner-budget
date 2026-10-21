@@ -278,7 +278,7 @@
     return state;
   }
 
-  const CASHFLOW_KINDS = {income: '수입', fixed: '고정 납부', allowance: '용돈', reserve: '목적 적립', saving: '기존 저축'};
+  const CASHFLOW_KINDS = {income: '수입', fixed: '고정 납부', allowance: '용돈', reserve: '목적 적립', saving: '기존 저축', transfer: '계좌 간 이동'};
   const FIXED_COST_STATUSES = {keep: '유지', review: '검토 중', reduce: '절감 예정'};
 
   function cashflowAmount(value) {
@@ -300,6 +300,15 @@
       const amount = cashflowAmount(item.amount);
       if (!name || name.length > 80 || amount === null) return null;
       const normalized = {name, kind: item.kind, amount};
+      if (item.schedule !== undefined) {
+        const s = item.schedule;
+        if (!s || typeof s !== 'object' || Array.isArray(s) ||
+          typeof s.day !== 'string' || !/^(?:|last|[1-9]|[12]\d|3[01])$/.test(s.day) ||
+          !['previous','next','none'].includes(s.rule) ||
+          typeof s.account !== 'string' || s.account.length > 80 ||
+          typeof s.note !== 'string' || s.note.length > 200) return null;
+        normalized.schedule = {day:s.day,rule:s.rule,account:s.account.trim(),note:s.note.trim()};
+      }
       if (item.kind === 'fixed' && item.fixedCost !== undefined) {
         const detail = normalizeFixedCost(item.fixedCost, amount);
         if (!detail) return null;
@@ -342,7 +351,7 @@
   function summarizeCashflow(raw) {
     const plan = normalizeCashflowPlan(raw);
     if (!plan) return null;
-    const totals = {income: 0, fixed: 0, allowance: 0, reserve: 0, saving: 0};
+    const totals = {income: 0, fixed: 0, allowance: 0, reserve: 0, saving: 0, transfer: 0};
     for (const item of plan.items) totals[item.kind] += item.amount;
     const committed = totals.fixed + totals.allowance + totals.reserve + totals.saving;
     return {...totals, committed, available: totals.income - committed,

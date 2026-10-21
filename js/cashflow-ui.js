@@ -1,7 +1,7 @@
 (function (window, document) {
   'use strict';
   const S = window.BudgetStorage;
-  let api, month = '', source = '', dirty = false, saving = false;
+  let api, month = '', source = '', dirty = false, saving = false, plans = {}, view = 'table';
   const el = id => document.getElementById(id);
   const money = n => new Intl.NumberFormat('ko-KR').format(n) + '원';
   function message(text) { el('cashflow-message').textContent = text; }
@@ -9,6 +9,7 @@
     return {livingBudget: el('cashflow-living').value, items: Array.from(el('cashflow-rows').children).map(row => {
       const value = field => row.querySelector('[data-field="' + field + '"]')?.value;
       const item = {name: value('name'), kind: value('kind'), amount: value('amount')};
+      item.schedule = Object.fromEntries(['day','rule','account','note'].map(field => [field,value(field)]));
       if (item.kind === 'fixed') item.fixedCost = Object.fromEntries(
         ['status','targetAmount','paymentDay','paymentMethod','memo'].map(field => [field, value(field)]));
       return item;
@@ -28,6 +29,76 @@
     }
     el('fixed-cost-ratio').textContent = fixed?.incomeRatio != null ? '수입 대비 ' + fixed.incomeRatio.toFixed(1) + '%' : '수입을 입력하면 비율을 볼 수 있어요.';
     el('fixed-cost-after').textContent = fixed ? '절감 적용 후 고정 납부 예상액 ' + money(fixed.afterMonthly) : '절감 예정 항목의 목표금액은 현재 월 금액 이하로 입력하세요.';
+    schedule(plan);
+  }
+  function node(tag,text,className) {
+    const n=document.createElement(tag); if(text!==undefined)n.textContent=text;
+    if(className)n.className=className; return n;
+  }
+  function amountLabel(item) {
+    const prefix=item.kind==='income'?'+':item.kind==='transfer'?'↔':'−';
+    return prefix+money(item.amount);
+  }
+  function schedule(raw) {
+    const plan=S.normalizeCashflowPlan(raw);
+    const tableHost=el('cashflow-table-view'), calendarHost=el('cashflow-calendar-view');
+    tableHost.hidden=view!=='table'; calendarHost.hidden=view!=='calendar';
+    for(const key of ['table','calendar']) el('cashflow-view-'+key).setAttribute('aria-pressed',String(view===key));
+    for(const id of ['cashflow-table-view','cashflow-calendar-view','cashflow-unscheduled','cashflow-shifted']) el(id).replaceChildren();
+    el('cashflow-date-warning').textContent=month.startsWith('2026-')
+      ? '2026년 대한민국 공휴일·은행 휴무일 기준 · 월 합계는 계획 귀속월, 아래 일정은 조정된 입출금일 기준이에요.'
+      : '이 연도의 공휴일 자료는 아직 없어요. 주말만 조정되므로 공휴일과 예정일을 확인해 주세요.';
+    if(!plan) {el('cashflow-date-totals').textContent='항목명과 금액을 확인하면 일정을 볼 수 있어요.';return;}
+    const data=window.BudgetCashflowSchedule.events({...plans,[month]:plan},month);
+    const sum=kind=>data.dated.filter(i=>kind==='income'?i.kind==='income':!['income','transfer'].includes(i.kind)).reduce((n,i)=>n+i.amount,0);
+    el('cashflow-date-totals').textContent='날짜 지정분 · 수입 '+money(sum('income'))+' · 지출·배분 '+money(sum('out'))+' · 계좌 이동은 합계 제외';
+    const table=node('table'); table.append(node('caption',month+' 예정 입출금'));
+    const head=node('thead'), hr=node('tr');
+    for(const title of ['예정일','항목 / 구분','금액','계좌·메모']) {const th=node('th',title);th.scope='col';hr.append(th);}
+    head.append(hr);table.append(head);const body=node('tbody');
+    for(const item of data.dated) {
+      const tr=node('tr');tr.append(node('td',item.date.slice(5)));
+      const name=node('td');name.append(node('strong',item.name),node('small',S.CASHFLOW_KINDS[item.kind]+(item.planMonth!==month?' · '+item.planMonth+'분':'')));
+      tr.append(name,node('td',amountLabel(item),'cashflow-money '+item.kind),node('td',[item.schedule.account,item.schedule.note].filter(Boolean).join(' · ')||'—'));body.append(tr);
+    }
+    table.append(body);tableHost.append(table);
+    if(!data.dated.length)tableHost.append(node('p','날짜가 지정된 항목이 없어요. 아래 항목·금액·예정일 수정에서 입력하세요.','hint'));
+    const grid=node('div',undefined,'cashflow-calendar');
+    for(const day of ['일','월','화','수','목','금','토']) grid.append(node('div',day,'cashflow-weekday'));
+    const [y,m]=month.split('-').map(Number), start=new Date(Date.UTC(y,m-1,1)).getUTCDay(), last=new Date(Date.UTC(y,m,0)).getUTCDate();
+    for(let i=0;i<start;i++) {const blank=node('div',undefined,'cashflow-day blank');blank.setAttribute('aria-hidden','true');grid.append(blank);}
+    for(let d=1;d<=last;d++) {
+      const date=month+'-'+String(d).padStart(2,'0'), box=node('section',undefined,'cashflow-day');
+      box.setAttribute('aria-label',date);box.append(node('h4',String(d)));
+      if(window.BudgetCashflowSchedule.holidays.has(date))box.classList.add('holiday');
+      for(const item of data.dated.filter(i=>i.date===date)) {
+        const card=node('div',undefined,'cashflow-event '+item.kind);
+        card.append(node('span',item.name),node('strong',amountLabel(item)));
+        if(item.planMonth!==month)card.append(node('small',item.planMonth+'분'));
+        card.title=[S.CASHFLOW_KINDS[item.kind],item.schedule.account,item.schedule.note].filter(Boolean).join(' · ');box.append(card);
+      }
+      grid.append(box);
+    }
+    calendarHost.append(node('p','수입 + / 지출·배분 − / 계좌 이동 ↔ · 모바일에서는 달력을 좌우로 움직여 보세요.','hint'),grid);
+    for(const [id,title,items] of [['cashflow-unscheduled','날짜 미정 · 월 합계에는 포함',data.undated],['cashflow-shifted','다른 달로 이동한 이달 계획',data.shifted]]) {
+      if(!items.length)continue;
+      el(id).append(node('h4',title));const list=node('ul');
+      for(const item of items) list.append(node('li',(item.date?item.date+' · ':'')+item.name+' · '+amountLabel(item)+(item.schedule?.note?' · '+item.schedule.note:'')));
+      el(id).append(list);
+    }
+  }
+  function scheduleFields(s={}) {
+    const grid=node('div',undefined,'cashflow-date-fields');
+    for(const [field,label] of [['day','기준일'],['rule','휴일 처리'],['account','계좌 / 결제수단'],['note','일정 메모']]) {
+      const wrap=node('label');wrap.append(node('span',label));
+      const input=document.createElement(['day','rule'].includes(field)?'select':'input');input.dataset.field=field;
+      if(field==='day'||field==='rule') {
+        const choices=field==='day'?[['','날짜 미정'],...Array.from({length:31},(_,i)=>[String(i+1),(i+1)+'일']),['last','말일']]:[['next','다음 영업일'],['previous','이전 영업일 (급여)'],['none','조정 안 함']];
+        for(const [value,text] of choices){const option=node('option',text);option.value=value;input.append(option);}
+      }else{input.type='text';input.maxLength=field==='note'?200:80;}
+      input.value=s[field]??(field==='rule'?'next':'');wrap.append(input);grid.append(wrap);
+    }
+    return grid;
   }
   function fixedDetails(detail = {}) {
     const details = document.createElement('details'); details.className = 'fixed-cost-details';
@@ -98,6 +169,7 @@
     remove.setAttribute('aria-label', (item.name || '새 항목') + ' 삭제');
     remove.addEventListener('click', () => {container.remove(); changed(); el('cashflow-add').focus();});
     container.append(remove);
+    container.append(scheduleFields(item.schedule));
     if (item.kind === 'fixed') container.append(fixedDetails(item.fixedCost));
     el('cashflow-rows').append(container);
   }
@@ -106,15 +178,18 @@
     el('cashflow-living').value = plan.livingBudget; syncRows(); summary();
   }
   function render(state, selectedMonth) {
+    plans=state.cashflowPlans;
     const plan = state.cashflowPlans[selectedMonth] || {items: [], livingBudget: 0};
     const nextSource = JSON.stringify(plan);
     if (month !== selectedMonth || source !== nextSource) {
       month = selectedMonth; source = nextSource; dirty = false;
       el('cashflow-month').textContent = selectedMonth + ' 월 현금흐름'; fill(plan); message('');
     }
+    else schedule(read());
   }
   function init(callbacks) {
     api = callbacks;
+    for(const mode of ['table','calendar']) el('cashflow-view-'+mode).addEventListener('click',()=>{view=mode;schedule(read());});
     el('cashflow-fixed-only').addEventListener('change', syncRows);
     el('cashflow-rows').addEventListener('input', changed);
     el('cashflow-living').addEventListener('input', changed);
