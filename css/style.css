@@ -603,7 +603,21 @@ body:has(#tab-review[aria-selected="true"]) .site-header .eyebrow { display:none
 .cashflow-row label span { font-size:.85rem; }
 .cashflow-living-label { display:block; margin:24px 0 8px; }
 .cashflow-import-area { margin:20px 0; }
+.fixed-cost-overview { border:1px solid var(--border); border-radius:14px; padding:18px; margin:24px 0; background:#fafbff; }
+.fixed-cost-overview h3 { margin-top:0; }
+.fixed-cost-summary { margin:16px 0; }
+.fixed-cost-summary small { display:block; color:var(--muted); margin-top:6px; }
+.cashflow-filter { display:flex; align-items:center; gap:10px; min-height:44px; cursor:pointer; }
+.cashflow-filter input { width:20px; min-height:20px; height:20px; }
+.cashflow-row[hidden], .fixed-cost-details[hidden] { display:none; }
+.fixed-cost-details { grid-column:1 / -1; min-width:0; background:#f6f8fc; border-radius:10px; padding:0 12px; }
+.fixed-cost-details summary { padding:12px 0; min-height:44px; cursor:pointer; overflow-wrap:anywhere; }
+.fixed-cost-details summary:focus-visible { outline:3px solid rgba(36,87,214,.25); outline-offset:2px; }
+.fixed-cost-fields { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; margin:8px 0 12px; }
+.fixed-cost-memo { grid-column:1 / -1; }
 @media(max-width:600px) {
+ .fixed-cost-overview { padding:12px; }
+ .fixed-cost-fields { grid-template-columns:minmax(0,1fr); }
  .cashflow-row { grid-template-columns:minmax(0,1fr) minmax(0,1fr); padding:16px 0; }
  .cashflow-summary > div { padding:12px; }
  .cashflow-summary { gap:8px; }
