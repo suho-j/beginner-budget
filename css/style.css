@@ -497,7 +497,7 @@ h2[id], h3[id] { scroll-margin-top: 6.5rem; }
 .month-picker { display: grid; gap: 0.35rem; font-weight: 800; }
 .month-toolbar #selected-month-label { grid-column: 1 / -1; margin: 0; }
 .app-tabs { position: static; padding-top: 0.75rem; padding-bottom: 0.75rem; background: transparent; }
-.app-tabs [role="tablist"] { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 0.4rem; padding: 0.35rem; border: 1px solid var(--border); border-radius: 14px; background: var(--panel); }
+.app-tabs [role="tablist"] { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.4rem; padding: 0.35rem; border: 1px solid var(--border); border-radius: 14px; background: var(--panel); }
 .app-tabs [role="tab"] { background: transparent; color: var(--muted); }
 .app-tabs [role="tab"][aria-selected="true"] { background: var(--primary); color: #fff; }
 .app-tabs [role="tab"]:hover { background: #e2e8f0; color: var(--text); }
@@ -589,3 +589,24 @@ body:has(#tab-review[aria-selected="true"]) .site-header .eyebrow { display:none
 .phone-duplicate-check { grid-column: 1 / -1; display: flex; align-items: flex-start; gap: .5rem; }
 .phone-duplicate-check input { width: auto; flex: 0 0 auto; }
 @media (max-width: 480px) { .phone-record-form { grid-template-columns: minmax(0, 1fr); } }
+
+/* Monthly cashflow planning */
+.cashflow-summary { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; margin:24px 0; }
+.cashflow-summary > div { padding:18px; border:1px solid #d4dfdc; border-radius:14px; background:#f4f8f7; min-width:0; }
+.cashflow-summary span { display:block; color:#415b54; font-size:.9rem; }
+.cashflow-summary strong { display:block; font-size:clamp(1.1rem,3vw,1.6rem); margin-top:8px; overflow-wrap:anywhere; }
+.cashflow-summary .cashflow-result { background:#e0f3eb; border-color:#91cbb4; }
+#cashflow-editor { border:0; padding:0; min-width:0; }
+.cashflow-row { display:grid; grid-template-columns:140px minmax(120px,1fr) minmax(120px,180px) auto; gap:10px; align-items:end; padding:12px 0; border-bottom:1px solid #e1e7e4; }
+.cashflow-row label { min-width:0; display:grid; gap:5px; }
+.cashflow-row input, .cashflow-row select { width:100%; min-width:0; }
+.cashflow-row label span { font-size:.85rem; }
+.cashflow-living-label { display:block; margin:24px 0 8px; }
+.cashflow-import-area { margin:20px 0; }
+@media(max-width:600px) {
+ .cashflow-row { grid-template-columns:minmax(0,1fr) minmax(0,1fr); padding:16px 0; }
+ .cashflow-summary > div { padding:12px; }
+ .cashflow-summary { gap:8px; }
+}
+
+@media(min-width:600px) { .app-tabs [role="tablist"] { grid-template-columns:repeat(6,minmax(0,1fr)); } }

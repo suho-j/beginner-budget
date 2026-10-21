@@ -213,6 +213,7 @@
     );
     window.BudgetUI.renderUpcomingRecurringExpenses(elements, recurringOccurrences);
     window.BudgetUI.renderRecurringExpenseTemplates(elements, state.recurringExpenseTemplates);
+    if (window.BudgetCashflowUI) window.BudgetCashflowUI.render(state, viewState.month);
     window.BudgetUI.setActiveTab(elements, viewState.tab);
     elements.calendarPeriodLabel.textContent = `${period.start} ~ ${period.end}`;
     syncMutationAvailability();
@@ -1020,6 +1021,14 @@
 
   async function init() {
     elements = window.BudgetUI.getElements();
+    if (window.BudgetCashflowUI) window.BudgetCashflowUI.init({
+      getState: () => state,
+      save: async (month, plan) => {
+        const nextState = {...state, cashflowPlans: {...state.cashflowPlans, [month]: plan}};
+        return persistRemoteFirst(nextState, () => window.BudgetCloud.saveSettings(nextState),
+          document.getElementById('cashflow-message'));
+      }
+    });
     window.BudgetUI.initDefaults(elements, state);
     viewState.month = currentBudgetMonth();
     window.BudgetUI.fillFilterCategoryOptions(elements.filterCategory, 'all', 'all');

@@ -746,7 +746,8 @@
         };
       }
       const eligibleTemplates = sourceVersion >= 2 ? rawTemplates : [];
-      if (rawTransactions.length === 0 && eligibleTemplates.length === 0) {
+      const hasCashflow = Object.keys(window.BudgetStorage.normalizeCashflowPlans(parsed.cashflowPlans)).length > 0;
+      if (rawTransactions.length === 0 && eligibleTemplates.length === 0 && !hasCashflow) {
         return { ok: false, state: null, errors: [error('importData', '가져올 거래나 반복 지출이 없어요. 현재 데이터는 그대로 둡니다.')] };
       }
       const normalized = window.BudgetStorage.normalizeState({
@@ -764,7 +765,7 @@
           errors: [error('importData', '반복 지출로 연결된 거래는 지출 유형이어야 해요.')]
         };
       }
-      if (normalized.transactions.length === 0 && normalized.recurringExpenseTemplates.length === 0) {
+      if (normalized.transactions.length === 0 && normalized.recurringExpenseTemplates.length === 0 && !hasCashflow) {
         return { ok: false, state: null, errors: [error('importData', '유효한 거래나 반복 지출이 없어 가져오기를 중단했어요.')] };
       }
       const sourceTransactionCount = rawTransactions.length;

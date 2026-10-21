@@ -2345,7 +2345,7 @@ function testCloudStateMappingKeepsBudgetAndTransactions() {
   state = win.BudgetTransactions.setMonthlyBudget(state, 900000, '2026-06').state;
   const mapped = win.BudgetCloud.stateToRemote(state, 'user-1');
   assert.strictEqual(JSON.stringify(mapped.settings), JSON.stringify({
-    user_id: 'user-1', monthly_budget: 800000, category_budgets: { 생활비: 200000, __month_start_day: 25, __monthly_budgets: { '2026-06': { monthlyBudget: 900000, categoryBudgets: { 생활비: 200000 } } }, __recurring_expense_templates: [] }
+    user_id: 'user-1', monthly_budget: 800000, category_budgets: { 생활비: 200000, __month_start_day: 25, __monthly_budgets: { '2026-06': { monthlyBudget: 900000, categoryBudgets: { 생활비: 200000 } } }, __recurring_expense_templates: [], __cashflow_plans: {} }
   }));
   assert.strictEqual(JSON.stringify(mapped.transactions), JSON.stringify([
     { id: 'tx-a', user_id: 'user-1', date: '2026-05-02', type: 'expense', category: '생활비', amount: 120000, memo: '마트', source: 'user' }
@@ -2957,7 +2957,7 @@ function testAppMarkupProvidesRecurringSectionsAndDialogContracts() {
   const sectionByLabel = (id) => elementFromStart(source.match(new RegExp(`<(section)\\b[^>]*\\baria-labelledby="${id}"[^>]*>`, 'i')));
 
   const upcomingSection = elementById('recurring-upcoming-section');
-  const expectedTabs = ['tab-home', 'tab-review', 'tab-history', 'tab-calendar', 'tab-settings'];
+  const expectedTabs = ['tab-home', 'tab-review', 'tab-history', 'tab-calendar', 'tab-cashflow', 'tab-settings'];
   const actualTabs = [...source.matchAll(/<button\b[^>]*>/gi)]
     .filter((match) => attributeValue(match[0], 'role') === 'tab')
     .map((match) => attributeValue(match[0], 'id'));
@@ -4411,7 +4411,7 @@ async function testCloudReplacesWholeStateWithOneRpc() {
       __monthly_budgets: {
         '2026-05': { monthlyBudget: 800000, categoryBudgets: { 배달비: 100000 } }
       },
-      __recurring_expense_templates: []
+      __recurring_expense_templates: [], __cashflow_plans: {}
     },
     p_transactions: [
       { id: 'tx-a', date: '2026-05-25', type: 'expense', category: '생활비', amount: 12000, memo: '마트', source: 'user' }
