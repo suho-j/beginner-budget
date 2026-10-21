@@ -1,5 +1,13 @@
 # 개선 진단 및 반복 로그
 
+## 2026-10-22 · 항목별 예산 관리를 없애고 월 총예산만 관리 (브랜치 feature/total-budget-only)
+
+- 예산은 월 총예산(200만원) 하나로만 관리한다. 카테고리는 예산을 배정하지 않고 카테고리별 사용액만 본다. 사용자 결정에 따른 구조 단순화다.
+- 홈의 '카테고리별 남은 예산' 블록과 설정의 '항목별 잔액' 섹션(항목별 예산 입력 폼·예산 옮겨 쓰기 폼)을 제거했다. '카테고리별 지출' 블록은 그대로 둔다. 안내 문구는 "카테고리별 사용액" 기준으로 바꿨다.
+- transactions에서 setCategoryBudgets·transferCategoryBudget·categoryBudgetAvailability와 summarize의 categoryBudgetStatus를 제거했다. summarize는 categoryBreakdown(카테고리별 사용액)만 제공한다. 분류 탭의 카테고리 라벨에도 예산 잔액을 붙이지 않는다.
+- 저장 데이터의 categoryBudgets 정규화와 클라우드 동기화는 기존 데이터 호환을 위해 그대로 뒀다. 남아 있는 과거 카테고리 예산 값은 화면에 표시되지 않을 뿐 삭제되지 않는다.
+- 검증: TDD로 관련 테스트를 새 스펙으로 교체(제거된 API 부재, summarize의 categoryBreakdown 제공·categoryBudgetStatus 부재)한 뒤 전체 91개 회귀와 폰 관련 테스트 25개가 통과했다.
+
 ## 2026-10-21 · 쿠팡 웹 주문 상세를 수신함에 연결 (브랜치 feature/coupang-order-import)
 
 - 쿠팡 웹(www.coupang.com) 주문 상세를 새 수신 종류 coupang_order로 받는다. 주문번호를 이벤트 ID로, 주문 결제일시를 수신 시각으로 써서 같은 주문을 다시 수집해도 중복 카드가 생기지 않는다. docs/supabase-coupang-order.sql을 기존 폰 SQL 다음에 한 번 실행해야 하며, 아직 운영 Supabase에는 실행하지 않았다.

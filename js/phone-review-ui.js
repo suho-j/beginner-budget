@@ -113,12 +113,8 @@
     }
     $('review-held-title').textContent='처리한 알림 '+history.length+'건 · 메모와 캡처';$('review-held-wrap').hidden=!history.length;controls();
   }
-  function categoryLabel(category,date){
-    if(!budgetState||!date)return category;
-    const storage=window.BudgetStorage,month=storage.monthKeyForDate(date,budgetState.monthStartDay),budget=storage.budgetForMonth(budgetState,month).categoryBudgets[category];
-    if(!budget)return category;
-    const spent=transactions.filter(t=>t.type==='expense'&&t.category===category&&storage.isDateInBudgetMonth(t.date,month,budgetState.monthStartDay)).reduce((sum,t)=>sum+t.amount,0);
-    return category+' · '+money(budget-spent)+' 남음';
+  function categoryLabel(category){
+    return category;
   }
   function createEditor(row){
     const value=model().draft(row),prior=row.decision||{},card=node('article',undefined,'review-card review-focus-card');card.dataset.eventId=row.event_id;

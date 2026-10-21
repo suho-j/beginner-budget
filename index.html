@@ -138,7 +138,7 @@
       <div><p class="review-eyebrow">계좌 하나 · 카테고리로 나누어 쓰기</p><h2 id="account-overview-title">생활비 계좌</h2></div>
       <strong id="account-observed-amount">아직 확인 전</strong>
       <p id="account-observed-at" class="hint">케이뱅크 알림을 반영하면 마지막 확인 금액을 표시해요.</p>
-      <p class="hint">실제 돈은 한 계좌에 두고, 아래 카테고리별로 남은 예산을 확인하세요.</p>
+      <p class="hint">실제 돈은 한 계좌에 두고, 아래에서 카테고리별 사용액을 확인하세요.</p>
     </section>
     <section class="summary-section" aria-labelledby="summary-title">
       <div class="section-heading section-heading-spread">
@@ -187,10 +187,6 @@
           <strong id="top-category">아직 없음</strong>
           <small id="top-category-help">선택한 달의 지출 기준</small>
         </article>
-      </div>
-      <div class="category-breakdown" aria-labelledby="category-budget-status-title">
-        <h3 id="category-budget-status-title">카테고리별 남은 예산</h3><p class="hint">선택한 달의 배정 예산 − 반영한 지출이에요. 은행 계좌를 따로 나누지 않아요.</p>
-        <div id="category-budget-status-list" class="category-budget-status-list" aria-live="polite"></div>
       </div>
       <div class="category-breakdown" aria-labelledby="category-breakdown-title">
         <h3 id="category-breakdown-title">카테고리별 지출</h3>
@@ -262,7 +258,7 @@
         <div id="review-list" aria-label="분류할 알림" tabindex="0"></div>
         <button id="review-dismiss-notices" type="button" class="secondary" hidden>안내 알림 제외</button>
         <p id="review-updated" class="muted">로그인 후 자동으로 확인해요.</p>
-        <section id="review-balance-wrap" hidden aria-labelledby="review-balance-title"><h3 id="review-balance-title">생활비 계좌 · 마지막 확인 금액</h3><p class="hint">잔액·출금가능액을 알림 시각 기준으로 표시해요. 카테고리별 남은 예산은 홈에서 확인하세요.</p><div id="review-balances"></div></section>
+        <section id="review-balance-wrap" hidden aria-labelledby="review-balance-title"><h3 id="review-balance-title">생활비 계좌 · 마지막 확인 금액</h3><p class="hint">잔액·출금가능액을 알림 시각 기준으로 표시해요. 카테고리별 사용액은 홈에서 확인하세요.</p><div id="review-balances"></div></section>
         <details id="review-held-wrap" hidden><summary id="review-held-title">처리한 알림 · 메모와 캡처</summary><div id="review-held"></div></details>
       </section>
     </section>
@@ -330,51 +326,6 @@
       <p id="budget-message" class="message" role="status" aria-live="polite"></p>
     </section>
 
-    <section class="panel" aria-labelledby="category-budget-title">
-      <div class="section-heading section-heading-spread">
-        <h2 id="category-budget-title">항목별 잔액</h2>
-        <a class="back-to-top" href="#top">위로 ↑</a>
-      </div>
-      <p id="category-budget-help" class="hint">월별 보기에서 선택한 달에만 적용됩니다. 비워둔 항목은 예산 없이 사용액만 보여줘요.</p>
-      <form id="category-budget-form" novalidate>
-        <div id="category-budget-fields" class="category-budget-fields"></div>
-        <div class="form-actions category-budget-actions">
-          <button id="category-budget-save" type="submit" data-cloud-write>항목별 예산 저장</button>
-        </div>
-      </form>
-      <p id="category-budget-message" class="message" role="status" aria-live="polite"></p>
-
-      <div class="budget-transfer-box">
-        <div class="budget-transfer-heading">
-          <div>
-            <h3 id="budget-transfer-title">예산 옮겨 쓰기</h3>
-            <p id="budget-transfer-help" class="hint">총예산은 그대로이고 항목별 예산만 바뀌어요. 예: 비상금 → 생활비</p>
-          </div>
-          <span class="budget-transfer-mark" aria-hidden="true">↔</span>
-        </div>
-        <form id="budget-transfer-form" class="budget-transfer-form" aria-labelledby="budget-transfer-title" novalidate>
-          <div class="budget-transfer-fields">
-            <div class="field">
-              <label for="budget-transfer-from">어디에서</label>
-              <select id="budget-transfer-from" name="fromCategory" required aria-describedby="budget-transfer-help budget-transfer-available budget-transfer-message"></select>
-            </div>
-            <div class="field">
-              <label for="budget-transfer-to">어디로</label>
-              <select id="budget-transfer-to" name="toCategory" required aria-describedby="budget-transfer-help budget-transfer-message"></select>
-            </div>
-            <div class="field">
-              <label for="budget-transfer-amount">얼마를</label>
-              <input id="budget-transfer-amount" name="amount" type="text" inputmode="numeric" pattern="[0-9,]*" placeholder="예: 50,000" required aria-describedby="budget-transfer-help budget-transfer-available budget-transfer-message">
-            </div>
-          </div>
-          <p id="budget-transfer-available" class="budget-transfer-available" aria-live="polite" aria-atomic="true"></p>
-          <div class="form-actions budget-transfer-actions">
-            <button id="budget-transfer-save" type="submit" data-cloud-write>예산 옮기기</button>
-          </div>
-        </form>
-        <p id="budget-transfer-message" class="message" role="status" aria-live="polite" aria-atomic="true"></p>
-      </div>
-    </section>
 
     <section id="recurring-template-section" class="panel recurring-template-section" aria-labelledby="recurring-template-heading">
       <div class="section-heading section-heading-spread">
