@@ -70,6 +70,27 @@ test('존재하지 않는 날짜를 정상 날짜로 보정해서 주문과 연�
   assert.equal(phone.matchOrder(payment, [order]).status, 'needs_review');
 });
 
+test('쿠팡 웹 주문은 www.coupang.com 출처로만 수신하고 지출로 기록하지 않는다', () => {
+  const phone = require('../js/phone-import.js');
+  const event = phone.normalizeEvent({
+    version: 1, event_id: 'coupang-20000009999999', kind: 'coupang_order',
+    package_name: 'www.coupang.com', captured_at: '2026-10-21T11:31:00.000Z',
+    text: '주문 상세\n주문번호 20000009999999\n카드 결제 금액 18,900원'
+  });
+  assert.equal(event.kind, 'coupang_order');
+  assert.equal(event.package_name, 'www.coupang.com');
+  assert.equal(phone.paymentDraft(event).canRecordExpense, false);
+  for (const patch of [
+    { package_name:'com.coupang.mobile.eats' },
+    { package_name:'com.coupang.mobile' },
+    { kind:'eats_screen', package_name:'www.coupang.com' }
+  ]) assert.throws(() => phone.normalizeEvent({
+    version: 1, event_id: 'coupang-20000009999999', kind: 'coupang_order',
+    package_name: 'www.coupang.com', captured_at: '2026-10-21T11:31:00.000Z',
+    text: '주문 상세', ...patch
+  }));
+});
+
 test('자금이동·이체·출금·미확인 알림은 지출 후보에서 제외하고 명시적 카드 승인만 확인한다', () => {
   const phone = require('../js/phone-import.js');
   const cases = require('./fixtures/phone-notifications.cjs');

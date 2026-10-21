@@ -123,7 +123,7 @@
   function createEditor(row){
     const value=model().draft(row),prior=row.decision||{},card=node('article',undefined,'review-card review-focus-card');card.dataset.eventId=row.event_id;
     const editor={card,dirty:false,clean:()=>objectUrls.forEach(url=>URL.revokeObjectURL(url))};
-    const source=node('div',undefined,'review-source');source.append(node('span',row.kind==='kbank_notification'?'케이뱅크 · 생활비 계좌':row.kind==='eats_screen'?'쿠팡이츠 · 주문 화면':'쿠팡이츠 · 알림','review-source-name'));
+    const source=node('div',undefined,'review-source');source.append(node('span',row.kind==='kbank_notification'?'케이뱅크 · 생활비 계좌':row.kind==='eats_screen'?'쿠팡이츠 · 주문 화면':row.kind==='coupang_order'?'쿠팡 · 주문 상세':'쿠팡이츠 · 알림','review-source-name'));
     source.append(node('span','미반영','review-state'));card.append(source);
     const form=node('form',undefined,'review-form');form.noValidate=true;card.append(form);
     const fields={},wraps={};

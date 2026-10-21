@@ -9,7 +9,8 @@
   const PACKAGES = Object.freeze({
     kbank_notification: 'com.kbankwith.smartbank',
     eats_notification: 'com.coupang.mobile.eats',
-    eats_screen: 'com.coupang.mobile.eats'
+    eats_screen: 'com.coupang.mobile.eats',
+    coupang_order: 'www.coupang.com'
   });
 
   function redactText(text) {

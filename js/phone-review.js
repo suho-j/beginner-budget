@@ -13,7 +13,7 @@
   function readAmount(text,order=false){
     const money=new RegExp('(?<![\\d,.-])('+MONEY+')\\s*원','g');
     if(order){
-      for(const label of ['카드\\s*(?:실제\\s*)?결제(?:금액)?','(?:최종|총|실제)\\s*결제\\s*(?:금액)?','결제\\s*금액']){
+      for(const label of ['카드\\s*(?:실제\\s*)?결제\\s*(?:금액)?','(?:최종|총|실제)\\s*결제\\s*(?:금액)?','결제\\s*금액']){
         const matches=[...text.matchAll(new RegExp('(?:^|\\n)\\s*'+label+'\\s*[:：]?\\s*('+MONEY+')\\s*원','g'))];
         if(matches.length)return {amount:uniqueAmount(matches),source:label.startsWith('카드')?'카드 결제액':'최종 결제액'};
       }
@@ -43,25 +43,28 @@
     const values=[...new Set(matches.map(m=>integer(m[1],true)))];
     return values.length===1?values[0]:null;
   }
-  function orderInfo(text){
-    const list=/과거 주문 내역|이전에 주문했던 맛집|아직 리뷰를 작성하지 않은 주문/.test(text);
+  function orderInfo(text,platform='eats'){
+    const coupang=platform==='coupang';
+    const list=coupang?/주문\s*목록|주문내역\s*조회|마이쿠팡/.test(text):/과거 주문 내역|이전에 주문했던 맛집|아직 리뷰를 작성하지 않은 주문/.test(text);
     const valid=!list&&/주문\s*상세|주문번호|결제\s*금액/.test(text);
-    const clean=lines(text).filter(s=>!/(?:주문\s*상세|주문번호|결제|금액|할인|쿠폰|배달비|배송|주소|전화|연락처|요청사항|영수증|재주문|리뷰|도움|배달 완료|홈$|검색$|즐겨찾기$|My 이츠|주문내역|카드|쿠페이|^\d|원$)/.test(s));
-    return {valid,list,memo:valid?['쿠팡이츠',...clean.slice(0,4)].join(' · ').slice(0,80):'쿠팡이츠 주문 화면'};
+    const clean=lines(text).filter(s=>!/(?:주문\s*상세|주문번호|주문\s*일시|주문\s*상태|결제|금액|할인|쿠폰|배달비|배송|주소|전화|연락처|요청사항|영수증|재주문|리뷰|도움|배달 완료|홈$|검색$|즐겨찾기$|My 이츠|주문내역|카드|쿠페이|^\d|원$)/.test(s));
+    return {valid,list,memo:valid?[coupang?'쿠팡':'쿠팡이츠',...clean.slice(0,4)].join(' · ').slice(0,80):coupang?'쿠팡 주문':'쿠팡이츠 주문 화면'};
   }
   function draft(event){
     const text=lines(phone.redactText(String(event.text||'')).replace(/출금가능액\s*[:：]?\s*-?[\d,.]+\s*원?/g,'[잔액 숨김]')).join('\n');
-    const isOrder=event.kind==='eats_screen',order=isOrder?orderInfo(text):null;
+    const orderPlatform=event.kind==='coupang_order'?'coupang':event.kind==='eats_screen'?'eats':null;
+    const isOrder=orderPlatform!==null,order=isOrder?orderInfo(text,orderPlatform):null;
     const parsed=readAmount(text,isOrder);
     const result={...phone.paymentDraft(event),...notificationDate(text,event.captured_at),amount:parsed.amount,amountSource:parsed.source,balanceAmount:bankBalance(event),suggestedAction:'',category:'생활비',notice:false,warning:'',order,quick:false};
     const cleaned=lines(text).map(line=>line.replace(/\[[^\]]*\]/g,'').replace(/20\d{2}[-/.]\d{1,2}[-/.]\d{1,2}/g,'').replace(/\b\d{1,2}\/\d{1,2}\b/g,'').replace(/\d{1,2}:\d{2}(?::\d{2})?/g,'').replace(/[\d,]+\s*원/g,'').replace(/(?:체크)?카드\s*(?:승인|결제)\s*(?:완료)?/g,'').replace(/^(?:승인|출금|입금|결제금액)\s*[:：]?\s*/,'').replace(/\s*\|.*$/,'').trim()).filter(line=>line&&!/^(케이뱅크|승인|완료|카드\(|체크카드\(|생활통장\()/.test(line));
     result.memo=cleaned.join(' · ').slice(0,80);
     if(/\[연결 시험\]/.test(text)){result.notice=true;result.suggestedAction='ignore';result.memo='휴대폰 연결 시험';}
     else if(isOrder){
-      result.memo=order.memo;result.category='배달비';result.suggestedAction='link';
-      if(!order.valid){result.amount=null;result.warning='주문 목록을 받았어요. 주문 한 건의 상세 화면에서 다시 보내 주세요.';}
+      result.memo=order.memo;result.category=orderPlatform==='coupang'?'생활비':'배달비';result.suggestedAction='link';
+      if(!order.valid){result.amount=null;result.warning=orderPlatform==='coupang'?'주문 목록을 받았어요. 주문 한 건의 상세를 보내 주세요.':'주문 목록을 받았어요. 주문 한 건의 상세 화면에서 다시 보내 주세요.';}
       else if(!result.amount)result.warning='실제 결제금액이 보이지 않아요. 주문 상세의 결제 정보를 확인해 주세요.';
       if(result.dateSource==='received'){result.date='';result.warning='주문일이 보이지 않아요. 실제 주문 날짜를 확인해 주세요.';}
+      if(/취소|환불|반환/.test(text)){result.suggestedAction='ignore';result.warning='취소·환불된 주문이에요. 결제 연결 없이 제외해 주세요.';}
     }else if(event.kind==='eats_notification'){
       result.category='배달비';
       if(!result.amount){result.notice=true;result.suggestedAction='ignore';}
