@@ -9,9 +9,9 @@ const {buildProject} = require('../tasker/build-project.cjs');
   const output = path.resolve(__dirname,'../artifacts/tasker-guide/install.html');
   const html=fs.readFileSync(output);
   const project=buildProject();
-  const server=http.createServer((req,res)=>{res.writeHead(200,{'Content-Type':'text/html; charset=utf-8'});res.end(html);});
+  const server=http.createServer((req,res)=>{res.writeHead(200,{'Content-Type':'text/html; charset=utf-8'});res.end(req.url.startsWith('/reset')?fs.readFileSync(path.resolve(__dirname,'../artifacts/tasker-guide/reset.html')):html);});
   await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
-  const browser=await chromium.launch({channel:'chrome',headless:true});
+  const browser=await chromium.launch({executablePath:process.env.PHONE_CHROMIUM_PATH||'/tmp/budget-chromium',headless:true,args:['--no-sandbox']});
   try {
     const page=await browser.newPage({viewport:{width:800,height:1000},acceptDownloads:true});
     const errors=[];page.on('pageerror',e=>errors.push(e.message));
@@ -29,6 +29,15 @@ const {buildProject} = require('../tasker/build-project.cjs');
     assert.equal(fs.readFileSync(await download.path(),'utf8'),project.xml);
     assert.ok(await page.getByText('가계부 서버 연결 준비 완료',{exact:true}).isVisible());
     assert.ok(await page.getByText('실제 갤럭시 알림 수신은 폰에서 확인해야 합니다.',{exact:false}).isVisible());
+    await page.goto('http://127.0.0.1:'+server.address().port+'/reset');
+    const update=project;
+    assert.equal(await page.locator('#import-reset').getAttribute('href'),update.uri);
+    for(const width of [800,360,320]){await page.setViewportSize({width,height:1000});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);}
+    await page.locator('details').first().locator('summary').click();
+    const updatePromise=page.waitForEvent('download');await page.locator('#download-reset').click();
+    const updateDownload=await updatePromise;
+    assert.equal(updateDownload.suggestedFilename(),'Budget-Auto.prj.xml');
+    assert.equal(fs.readFileSync(await updateDownload.path(),'utf8'),update.xml);
     assert.deepEqual(errors,[]);
     console.log('PASS: installer 800/360/320px, native import URI, exact XML download, no script errors. Android launch is not tested.');
   } finally {

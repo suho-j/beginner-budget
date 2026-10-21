@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>처음 가계부</title>
   <link rel="icon" href="data:,">
-  <link rel="stylesheet" href="css/style.css?v=20261021-fixed-costs">
+  <link rel="stylesheet" href="css/style.css?v=20261021-decisions">
 </head>
 <body id="top">
   <a class="skip-link" href="#main-content">본문으로 바로가기</a>
@@ -230,12 +230,13 @@
       <section class="panel review-panel" aria-labelledby="review-title">
         <div class="review-heading"><div><p class="review-eyebrow">내가 고를 것만</p><h2 id="review-title">분류할 것</h2></div><button id="review-refresh" type="button" class="secondary">새로고침</button></div>
         <p id="review-total" class="review-total">불러오는 중이에요</p>
-        <p class="hint">금액과 내용을 보고 분류를 누르면 기록돼요. 이체·플러스박스·연결 시험은 제외했어요.</p>
+        <p class="hint">각 알림을 지출·수입·내 계좌 이체·잔액만 반영·반영하지 않음 중에서 선택하세요. 내용과 메모를 고치고 캡처도 붙일 수 있어요.</p>
         <p id="review-updated" class="muted">로그인 후 자동으로 확인해요.</p>
         <p id="review-message" role="status" aria-live="polite" aria-atomic="true" tabindex="-1"></p>
-        <div id="review-empty" class="empty-state">분류할 결제를 확인하고 있어요.</div>
+        <div id="review-empty" class="empty-state">받은 알림을 확인하고 있어요.</div>
         <div id="review-list"></div>
-        <details id="review-held-wrap" hidden><summary id="review-held-title">지출로 더하지 않은 알림</summary><div id="review-held"></div></details>
+        <section id="review-balance-wrap" hidden aria-labelledby="review-balance-title"><h3 id="review-balance-title">마지막으로 확인한 계좌 잔액</h3><p class="hint">선택한 알림 시점의 잔액이에요. 실시간 잔액이나 가계부의 수입·지출 합계와는 다를 수 있어요.</p><div id="review-balances"></div></section>
+        <details id="review-held-wrap" hidden><summary id="review-held-title">처리한 알림 · 메모와 캡처</summary><div id="review-held"></div></details>
       </section>
     </section>
     <section id="panel-history" class="tab-panel" role="tabpanel" aria-labelledby="tab-history" hidden>
@@ -388,7 +389,7 @@
 
     <section id="phone-panel" class="panel" aria-labelledby="phone-title">
       <h2 id="phone-title">휴대폰 알림 연결</h2>
-      <p>Tasker로 케이뱅크 알림과 쿠팡이츠 주문 정보를 모아요. 카드 결제 후보만 확인한 뒤 지출로 기록해요. 이체·플러스박스 이동·미확인 알림은 합계에 넣지 않아요.</p>
+      <p>Tasker로 받은 모든 알림은 분류 탭에서 검토할 수 있어요. 반영 방법은 직접 선택하며, 선택하기 전에는 가계부나 잔액을 바꾸지 않아요.</p>
       <p class="hint">연결 설정을 다시 만들면 이전 휴대폰 연결키는 사용할 수 없어요.</p>
       <div class="data-actions">
         <button id="phone-connect" type="button" class="secondary" data-cloud-write>연결 설정 만들기</button>
@@ -396,6 +397,7 @@
         <button id="phone-revoke" type="button" class="secondary" data-cloud-write>휴대폰 연결 해제</button>
       </div>
       <p><a href="artifacts/tasker-guide/install.html" target="_blank" rel="noopener">Tasker 한 번에 설치하기 (새 창)</a></p>
+      <p><a href="artifacts/tasker-guide/reset.html" target="_blank" rel="noopener">Tasker 처음부터 다시 설치하기 (새 창)</a></p>
       <div id="phone-config-wrap" hidden>
         <label for="phone-config">Tasker에 복사할 연결 설정</label>
         <textarea id="phone-config" rows="7" readonly spellcheck="false" autocomplete="off" aria-describedby="phone-config-help"></textarea>
@@ -477,10 +479,10 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="js/cloud.js?v=20261021-fixed-costs"></script>
   <script src="js/ui.js?v=20260812-v2"></script>
-  <script src="js/phone-import.js?v=20261016-2"></script>
-  <script src="js/phone-sync.js?v=20261016-2"></script>
-  <script src="js/phone-review.js?v=20261017-1"></script>
-  <script src="js/phone-review-ui.js?v=20261017-2"></script>
+  <script src="js/phone-import.js?v=20261021-decisions"></script>
+  <script src="js/phone-sync.js?v=20261021-decisions"></script>
+  <script src="js/phone-review.js?v=20261021-decisions"></script>
+  <script src="js/phone-review-ui.js?v=20261021-decisions"></script>
   <script src="js/cashflow-ui.js?v=20261021-fixed-costs"></script>
   <script src="js/app.js?v=20261021-fixed-costs"></script>
 </body>

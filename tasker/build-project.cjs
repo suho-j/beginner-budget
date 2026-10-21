@@ -147,6 +147,8 @@ if (require.main === module) {
   fs.writeFileSync(path.join(out,'Budget-Capture.prj.xml'),restore.xml);
   fs.writeFileSync(path.join(out,'restore.html'),read('tasker/restore-template.html')
     .replaceAll('{{RESTORE_URI}}',restore.uri).replaceAll('{{RESTORE_XML}}',Buffer.from(restore.xml).toString('base64')));
+  fs.writeFileSync(path.join(out,'reset.html'),read('tasker/reset-template.html')
+    .replaceAll('{{TASKER_URI}}',project.uri).replaceAll('{{XML_BASE64}}',Buffer.from(project.xml).toString('base64')));
   console.log('Created capture, status and repair projects and installer pages; no connection keys included.');
 }
 module.exports = {buildProject,buildStatusProject,buildRepairProject,buildCaptureRestoreProject};

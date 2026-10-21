@@ -500,9 +500,20 @@ phone-browser 테스트는 별도 headless Chrome과 시험용 Cloud 응답을 �
 
 최종 실기기 게이트는 TASKER_SETUP.md의 연결 시험과 실제 알림·주문 화면 시험입니다. 실제 폰에서 Tasker JavaScript 라이브러리 로드, 권한, 백그라운드 지속성까지 통과하기 전에는 수집 완료로 표시하지 않습니다.
 
-### 이체·플러스박스 오등록 방지 회귀
+### 이전 카드 전용 API 회귀 (호환용, 새 화면에서는 호출하지 않음)
 
 - tests/fixtures/phone-notifications.cjs는 실제 고객 자료가 아닌 합성 알림 29종입니다. 카드 승인/완료, 박스 원금 이동, 이체/송금, 중복 출금, 이자, 취소/환불, 결제 예정/실패, 문구 미확인을 포함합니다.
 - 같은 사례를 JavaScript 분류와 PostgreSQL 직접 기록 RPC에서 모두 확인합니다. 알림 수신 자체는 가능하지만 제외 알림의 기록 요청은 거절되어야 합니다.
-- 브라우저에서 카드 후보 1건과 보관 알림 4건을 함께 표시하고, 등록 폼은 1개만 나타나며 수신만으로 합계가 늘지 않는지 확인합니다. 카드 후보 기록 후에는 폼이 0개이고 그 결제액만 합계에 남아야 합니다.
+- 기존 record_phone_event의 제한은 구버전 호환용으로 유지합니다. 새 화면의 사용자 선택은 resolve_phone_event로 검증합니다.
 - 실제 케이뱅크 앱의 전경/배경 알림 차이와 플러스박스 알림 문구는 실기기 게이트로 남습니다.
+
+## 2026-10-21 알림별 사용자 선택
+
+- `node --test tests/phone-decisions.test.cjs tests/phone-review.test.cjs tests/phone-import.test.cjs tests/tasker-scripts.test.cjs tests/tasker-project.test.cjs`
+- `node tests/phone-decisions-sql.test.cjs`: PGlite에서 실제 SQL 실행. 수입/지출/이체/무시/잔액, 재시도, 부분 실패 롤백, RLS, 첨부 경로, 메모 유지, 오래된 잔액, 환경 분리.
+- `node tests/phone-review-browser.cjs`: 합성 Cloud 응답으로 모든 알림 표시, 명시적 선택, 내용 수정, 메모·파일 업로드·실패 재시도, 처리 내역 열람, 무시 되돌리기, 설정 연결, 320/360/1080px, 로그아웃.
+- `node tests/phone-browser.cjs`: 연결 설정 생성과 설정→통합 분류 이동, 안전한 원문 렌더링.
+- `PHONE_CHROMIUM_PATH`로 테스트용 Chromium 실행 경로를 지정할 수 있습니다. Playwright가 외부 설치된 환경은 NODE_PATH를 지정합니다.
+- 운영 DB 적용 후 RLS·권한·비공개 버킷을 조회합니다. 브라우저의 합성 저장 테스트와 실제 사용자 로그인·파일 업로드 성공은 구분합니다. 사용자 가계부에 테스트 거래를 쓰지 않습니다.
+
+보안 Advisor의 SECURITY DEFINER 경고는 소유자 검사·역할별 EXECUTE 제한·수신용 토큰 검사를 확인했습니다. 알림 처리 함수는 직접 쓰기를 막은 수신함/잔액을 원자적으로 갱신하므로 의도된 권한 경계입니다. phone_devices의 정책 없음은 직접 접근 금지 설계입니다. 기존 유출 비밀번호 검사 비활성 경고는 이번 변경 범위 밖이며 [공식 안내](https://supabase.com/docs/guides/auth/password-security#password-strength-and-leaked-password-protection)를 참고합니다.

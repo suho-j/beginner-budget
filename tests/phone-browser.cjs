@@ -15,47 +15,13 @@ const root = path.resolve(__dirname, '..');
     });
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-  const browser = await chromium.launch({ channel:'chrome', headless:true });
+  const browser = await chromium.launch({ executablePath:process.env.PHONE_CHROMIUM_PATH||'/tmp/budget-chromium', headless:true, args:['--no-sandbox'] });
   try {
     const page = await browser.newPage();
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
     await page.route('https://cdn.jsdelivr.net/**', route => route.fulfill({body:''}));
-    await page.route('**/js/cloud.js*', route => route.fulfill({contentType:'application/javascript', body: '(' + function () {
-      const event = { event_id:'test-event', kind:'kbank_notification', status:'pending',
-        captured_at:'2026-10-16T01:30:00.000Z', text:'합성 테스트: 카드 승인 18,900원\n<script>throw Error("XSS")</script>' };
-      const heldEvents = [
-        '플러스박스 빼기 완료 100,000원',
-        '계좌이체 완료 100,000원',
-        '출금 18,900원 쿠팡 주식회사',
-        '쿠팡 주식회사 18,900원'
-      ].map((text, index) => ({...event, event_id:'held-' + index, text}));
-      let transactions = [];
-      let user = {id:'test-user'};
-      window.BudgetCloud = {
-        ENVIRONMENT:{name:'preview-v2', isPreview:true},
-        SUPABASE_URL:'https://example.invalid', SUPABASE_ANON_KEY:'public-test-key',
-        isConfigured:() => true, currentUser:async () => user, signOut:async () => { user = null; },
-        downloadState:async () => window.BudgetStorage.normalizeState({transactions}),
-        saveSettings:async () => {}, isDuplicateTransactionError:() => false,
-        getClient:() => ({
-          rpc:async (name, args) => {
-            if (name === 'record_phone_event') {
-              if (args.p_event_id !== event.event_id) throw new Error('Held notification must not be recorded');
-              transactions.push({id:'phone-test', type:'expense', source:'user', ...args.p_transaction});
-              event.status = 'recorded';
-              return {data:{id:'phone-test', already_recorded:false}, error:null};
-            }
-            return {data:null, error:null};
-          },
-          from:() => {
-            const query = {select:() => query, eq:() => query, order:() => query,
-              limit:async () => ({data:[{...event}, ...heldEvents], error:null})};
-            return query;
-          }
-        })
-      };
-    } + ')();'}));
+    await page.route('**/js/cloud.js*',route=>route.fulfill({contentType:'application/javascript',body:fs.readFileSync(path.join(__dirname,'helpers/phone-cloud-fixture.js'),'utf8')}));
     await page.goto('http://127.0.0.1:' + server.address().port + '/');
     await page.locator('#filter-month').fill('2026-10');
     await page.getByRole('tab', {name:'설정', exact:true}).click();
@@ -63,21 +29,16 @@ const root = path.resolve(__dirname, '..');
     const config = JSON.parse(await page.locator('#phone-config').inputValue());
     assert.match(config.device_token, /^[0-9a-f]{64}$/);
     await page.getByRole('button', {name:'받은 알림 불러오기', exact:true}).click();
-    await page.locator('#phone-panel').getByText('합성 테스트: 카드 승인 18,900원', {exact:false}).waitFor();
-    assert.equal(await page.locator('.phone-event').count(), 5);
-    assert.equal(await page.locator('.phone-record-form').count(), 1);
-    assert.equal(await page.locator('#summary-expense').textContent(), '₩0');
-    await page.locator('#phone-panel').getByText('플러스박스의 원금 이동은 내 돈을 옮기는 것이에요.', {exact:false}).waitFor();
-    await page.getByLabel('결제일', {exact:true}).fill('2026-10-16');
-    await page.getByLabel('결제금액', {exact:true}).fill('18,900');
-    await page.getByLabel('내용', {exact:true}).fill('쿠팡이츠 · 비빔밥');
-    await page.getByLabel('이 결제가 아직 가계부에 없는 것을 확인했어요.').check();
-    await page.getByRole('button', {name:'확인한 지출 기록', exact:true}).click();
-    await page.getByText('기록한 알림').waitFor();
-    assert.equal(await page.locator('.phone-record-form').count(), 0);
-    await page.waitForFunction(() => /18,900/.test(document.querySelector('#summary-expense').textContent), null, {timeout:5000});
-    assert.equal(await page.evaluate(() => document.activeElement.id), 'phone-message');
-    await page.waitForFunction(() => !document.querySelector('#phone-connect').disabled);
+    await page.locator('#phone-inbox .phone-event').first().waitFor();
+    assert.equal(await page.locator('.phone-event').count(),7);
+    assert.equal(await page.locator('#phone-inbox form').count(),0);
+    assert.equal(await page.locator('#summary-expense').textContent(),'₩0');
+    assert.match(await page.locator('#phone-inbox').textContent(),/<script>throw Error/);
+    await page.locator('#phone-inbox').getByRole('button',{name:'분류 탭에서 검토'}).nth(3).click();
+    assert.equal(await page.locator('#tab-review').getAttribute('aria-selected'),'true');
+    await page.locator('[data-event-id="event-3"]').getByRole('button',{name:'검토하고 반영'}).click();
+    assert.equal(await page.locator('#review-edit-action option').count(),6);
+    await page.getByRole('button',{name:'취소',exact:true}).click();
     await page.setViewportSize({width:360, height:800});
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);
     await page.screenshot({path:path.join(root, '.tmp/phone-tests/phone-mobile.png'), fullPage:true});
@@ -85,7 +46,7 @@ const root = path.resolve(__dirname, '..');
     assert.equal(await page.locator('#phone-config').inputValue(), '');
     assert.equal(await page.locator('#phone-inbox').textContent(), '');
     assert.deepEqual(errors, []);
-    console.log('PASS: browser fixture pairing, safe text, comma amount, record, transfer exclusion, unchanged sums for held events, 360px, logout cleanup');
+    console.log('PASS: pairing, all notifications route to unified review, safe text, unchanged sums, 360px and logout cleanup');
   } finally {
     await browser.close();
     server.close();

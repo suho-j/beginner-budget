@@ -15,50 +15,13 @@ const root = path.resolve(__dirname, '..');
     });
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-  const browser = await chromium.launch({ channel:'chrome', headless:true });
+  const browser = await chromium.launch({ executablePath:process.env.PHONE_CHROMIUM_PATH||'/tmp/budget-chromium', headless:true, args:['--no-sandbox'] });
   try {
     const page = await browser.newPage();
     const errors = [];
-    page.on('pageerror', error => errors.push(error.message));
+    page.on('pageerror', error => {errors.push(error.message);console.error(error.message);});
     await page.route('https://cdn.jsdelivr.net/**', route => route.fulfill({body:''}));
-    await page.route('**/js/cloud.js*', route => route.fulfill({contentType:'application/javascript', body: '(' + function () {
-      const event = { event_id:'test-event', kind:'kbank_notification', status:'pending',
-        captured_at:'2026-10-16T01:30:00.000Z', text:'체크카드 승인\n테스트 상점 18,900원' };
-      const heldEvents = [
-        '플러스박스 빼기 완료 100,000원',
-        '계좌이체 완료 100,000원',
-        '출금 18,900원 쿠팡 주식회사',
-        '쿠팡 주식회사 18,900원'
-      ].map((text, index) => ({...event, event_id:'held-' + index, text}));
-      let transactions = [];
-      let user = {id:'test-user'};
-      const fixture=window.reviewFixture={fail:false,calls:0,downloads:0,next:()=>{event.event_id='next-event';event.status='pending';}};
-      window.BudgetCloud = {
-        ENVIRONMENT:{name:'preview-v2', isPreview:true,transactionsTable:'preview_v2_transactions'},
-        SUPABASE_URL:'https://example.invalid', SUPABASE_ANON_KEY:'public-test-key',
-        isConfigured:() => true, currentUser:async () => user, signOut:async () => { user = null; },
-        downloadState:async () => {fixture.downloads++;return window.BudgetStorage.normalizeState({transactions});},
-        saveSettings:async () => {}, isDuplicateTransactionError:() => false,
-        getClient:() => ({
-          rpc:async (name, args) => {
-            if (name === 'record_phone_event') {
-              fixture.calls++;
-              if(fixture.fail)return {data:null,error:{code:'503'}};
-              if (args.p_event_id !== event.event_id) throw new Error('Held notification must not be recorded');
-              transactions.push({id:'phone-test', type:'expense', source:'user', ...args.p_transaction});
-              event.status = 'recorded';
-              return {data:{id:'phone-test', already_recorded:false}, error:null};
-            }
-            return {data:null, error:null};
-          },
-          from:table => {
-            const query = {select:() => query, eq:() => query, order:() => query,
-              limit:async () => ({data:table==='phone_inbox'?[{...event}, ...heldEvents]:transactions, error:null})};
-            return query;
-          }
-        })
-      };
-    } + ')();'}));
+    await page.route('**/js/cloud.js*', route => route.fulfill({contentType:'application/javascript',body:fs.readFileSync(path.join(__dirname,'helpers/phone-cloud-fixture.js'),'utf8')}));
     await page.goto('http://127.0.0.1:' + server.address().port + '/');
     await page.locator('#filter-month').fill('2026-10');
     await page.getByRole('tab', {name:'설정', exact:true}).click();
@@ -66,50 +29,65 @@ const root = path.resolve(__dirname, '..');
     const config = JSON.parse(await page.locator('#phone-config').inputValue());
     assert.match(config.device_token, /^[0-9a-f]{64}$/);
 
-    await page.getByRole('tab', {name:/분류/}).click({timeout:3000});
-    await page.locator('#review-list .review-card').waitFor();
-    assert.equal(await page.locator('#review-list .review-card').count(),1);
-    assert.equal(await page.locator('#review-count').innerText(),'1');
-    assert.equal(await page.locator('#review-held-wrap').isVisible(),true);
-    assert.equal(await page.locator('#review-held').isVisible(),false);
+    await page.getByRole('tab', {name:/분류/}).click();
+    await page.waitForFunction(()=>document.querySelectorAll('#review-list .review-card').length===7);
     assert.equal(await page.locator('#summary-expense').textContent(),'₩0');
+    assert.equal(await page.locator('#review-held-wrap').isVisible(),false);
+    const card=id=>page.locator('[data-event-id="event-'+id+'"]');
+    const form=()=>page.locator('#review-list form');
+    const open=async id=>card(id).getByRole('button',{name:'검토하고 반영'}).click();
+    const save=async()=>{await form().getByRole('button',{name:'선택한 방법으로 반영'}).click();await page.waitForFunction(()=>!document.querySelector('#review-list form'));};
+    await open(3);
+    assert.equal(await form().getByLabel('반영 방법',{exact:true}).inputValue(),'');
+    await form().getByLabel('반영 방법',{exact:true}).selectOption('expense');
+    await form().getByLabel('항목명 / 내용',{exact:true}).fill('생필품 · 수정한 항목');
+    await form().getByLabel('리마크 / 메모',{exact:true}).fill('주방용품 구매\n캡처 참조');
+    await form().getByLabel('금액',{exact:true}).fill('18,900');
+    await form().getByLabel('계좌 잔액도 반영',{exact:true}).check();
+    await form().getByLabel('잔액을 반영할 계좌 이름',{exact:true}).fill('생활비 계좌');
+    await form().getByLabel('캡처 첨부 (선택)',{exact:true}).setInputFiles({name:'capture.png',mimeType:'image/png',buffer:Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6Jx8AAAAASUVORK5CYII=','base64')});
+    for(const width of [320,360,1080]){await page.setViewportSize({width,height:800});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);}
     await page.setViewportSize({width:360,height:800});
-    await page.evaluate(()=>scrollTo(0,0));
-    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
     await page.screenshot({path:path.join(root,'.tmp/phone-tests/review-mobile.png'),fullPage:true});
-    await page.getByRole('button',{name:'테스트 상점 생활비로 기록',exact:true}).click();
-    await page.waitForFunction(()=>/18,900/.test(document.querySelector('#summary-expense').textContent));
-    assert.equal(await page.locator('#review-list .review-card').count(),0);
-    assert.equal(await page.locator('#review-count').isVisible(),false);
-    assert.ok((await page.locator('#review-message').innerText()).includes('생활비로 기록'));
-    await page.waitForFunction(()=>!document.querySelector('#phone-connect').disabled);
-    assert.equal(await page.evaluate(()=>window.reviewFixture.downloads),2,'Only initial load and post-save reload may advance the shared cloud snapshot');
-    await page.evaluate(()=>window.reviewFixture.next());
     await page.getByRole('button',{name:'새로고침',exact:true}).click();
-    await page.getByRole('button',{name:'확인하고 분류',exact:true}).waitFor();
-    assert.equal(await page.locator('.review-choices').count(),0);
-    assert.equal(await page.evaluate(()=>window.reviewFixture.calls),1);
-    await page.getByRole('button',{name:'확인하고 분류',exact:true}).click();
-    await page.locator('#review-list').getByLabel('내용',{exact:true}).fill('수정 중인 내용');
-    await page.getByRole('button',{name:'새로고침',exact:true}).click();
-    assert.equal(await page.locator('#review-list').getByLabel('내용',{exact:true}).inputValue(),'수정 중인 내용');
-    await page.getByLabel('금액·날짜와 중복 여부를 확인했어요.').check();
+    assert.equal(await form().getByLabel('항목명 / 내용',{exact:true}).inputValue(),'생필품 · 수정한 항목');
     await page.evaluate(()=>window.reviewFixture.fail=true);
-    await page.getByRole('button',{name:'분류해서 기록',exact:true}).click();
-    await page.waitForFunction(()=>document.querySelector('#review-message').textContent.includes('기록 여부를 확인하지 못'));
-    assert.equal(await page.locator('#review-list').getByLabel('내용',{exact:true}).inputValue(),'수정 중인 내용');
-    assert.equal(await page.locator('#review-list .review-card').count(),1);
-    for(const width of [320,360,1080]){
-      await page.setViewportSize({width,height:800});
-      assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+    await form().getByRole('button',{name:'선택한 방법으로 반영'}).click();
+    await page.waitForFunction(()=>document.querySelector('#review-message').textContent.includes('반영을 확인하지 못'));
+    assert.equal(await form().getByLabel('리마크 / 메모',{exact:true}).inputValue(),'주방용품 구매\n캡처 참조');
+    await page.evaluate(()=>window.reviewFixture.fail=false);
+    await save();
+    await page.waitForFunction(()=>/18,900/.test(document.querySelector('#summary-expense').textContent));
+    assert.equal(await page.evaluate(()=>window.reviewFixture.uploads.length),1,'retry reuses the uploaded private attachment');
+    assert.match(await page.locator('#review-balances').textContent(),/50,000/);
+    await page.locator('#review-held-title').click();
+    await page.getByRole('button',{name:'첨부 캡처 1장 보기'}).click();
+    await page.locator('#review-held img').waitFor();
+    assert.match(await page.locator('#review-held').textContent(),/주방용품 구매/);
+    for(const [id,action] of [[5,'income'],[2,'transfer'],[1,'balance'],[4,'ignore']]){
+      await open(id);await form().getByLabel('반영 방법',{exact:true}).selectOption(action);
+      if(action==='balance'){await form().getByLabel('잔액을 반영할 계좌 이름',{exact:true}).fill('생활비 계좌');await form().getByLabel('확인한 계좌 잔액',{exact:true}).fill('0');}
+      await save();
+      await page.waitForFunction(id=>!document.querySelector('[data-event-id="event-'+id+'"]'),id);
     }
+    await page.waitForFunction(()=>/1,000/.test(document.querySelector('#summary-income').textContent));
+    assert.match(await page.locator('#review-balances').textContent(),/0원/);
+    assert.equal(await page.locator('#summary-expense').textContent(),'₩18,900');
+    await page.getByRole('button',{name:'다시 검토',exact:true}).click();
+    await card(4).waitFor();
+    await page.getByRole('tab',{name:'설정',exact:true}).click();
+    await page.getByRole('button',{name:'받은 알림 불러오기'}).click();
+    await page.locator('#phone-inbox .phone-event').first().waitFor();
+    assert.equal(await page.locator('#phone-inbox form').count(),0);
+    await page.locator('#phone-inbox').getByRole('button',{name:'분류 탭에서 검토'}).first().click();
+    assert.equal(await page.getByRole('tab',{name:/분류/}).getAttribute('aria-selected'),'true');
     await page.getByRole('button', {name:'로그아웃', exact:true}).click();
     assert.equal(await page.locator('#phone-config').inputValue(), '');
     assert.equal(await page.locator('#phone-inbox').textContent(), '');
     assert.equal(await page.locator('#review-list').textContent(),'');
     assert.equal(await page.locator('#review-held').textContent(),'');
     assert.deepEqual(errors, []);
-    console.log('PASS: auto load, one-touch save, duplicate gate, retained edits on refresh/failure, 320/360/1080px, logout cleanup');
+    console.log('PASS: all pending notifications, explicit actions, edits, remarks, private captures, retry, balances, reopening, settings route, mobile and logout');
   } finally {
     await browser.close();
     server.close();

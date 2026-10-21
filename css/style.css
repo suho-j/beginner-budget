@@ -586,6 +586,19 @@ body:has(#tab-review[aria-selected="true"]) .site-header .eyebrow { display:none
 .phone-event { border-top: 1px solid var(--border, #dce1e7); padding: 1.2rem 0; min-width: 0; }
 .phone-raw { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; font-size: .9rem; background: #f4f6fa; padding: .75rem; border-radius: .5rem; }
 .phone-record-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .75rem; }
+.phone-record-form > .field { display:grid; gap:.4rem; min-width:0; }
+.phone-record-form [hidden] { display:none; }
+.phone-record-form input,.phone-record-form select,.phone-record-form textarea { min-width:0; width:100%; box-sizing:border-box; }
+.phone-record-form textarea { resize:vertical; font:inherit; }
+.phone-record-form > p,.phone-record-form > .review-evidence { grid-column:1 / -1; }
+.phone-record-form > .phone-duplicate-check { display:flex; }
+.phone-record-form > .phone-duplicate-check[hidden] { display:none; }
+.review-evidence { display:flex; flex-wrap:wrap; gap:.75rem; min-width:0; }
+.review-evidence img { width:100%; max-width:240px; height:auto; object-fit:contain; border:1px solid var(--border); border-radius:8px; }
+.review-remark { white-space:pre-wrap; overflow-wrap:anywhere; }
+#review-balance-wrap { margin-top:1.5rem; }
+.review-balance { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:.5rem; padding:1rem; background:#edf6f1; border-radius:10px; margin:.5rem 0; overflow-wrap:anywhere; }
+.review-balance small { grid-column:1 / -1; color:var(--muted); }
 .phone-duplicate-check { grid-column: 1 / -1; display: flex; align-items: flex-start; gap: .5rem; }
 .phone-duplicate-check input { width: auto; flex: 0 0 auto; }
 @media (max-width: 480px) { .phone-record-form { grid-template-columns: minmax(0, 1fr); } }
