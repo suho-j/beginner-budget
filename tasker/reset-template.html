@@ -23,35 +23,37 @@
   </style>
 </head>
 <body><main>
-<p class="eyebrow">갤럭시에서 진행 · 새 설치본 2026.10.21</p>
-<h1>Tasker를 비우고,<br>처음부터 연결해요.</h1>
+<p class="eyebrow">갤럭시에서 진행 · 이름 충돌 수정본 · 처음가계부 21</p>
+<h1>이름 충돌 없이,<br>새 가계부를 연결해요.</h1>
 <p class="sub">앱을 다시 사거나 코드를 직접 입력할 필요는 없어요. 이 페이지를 휴대폰 Chrome에서 열고 1번부터 순서대로 따라 하세요.</p>
-<div class="status"><strong>삭제되는 것:</strong> Tasker의 모든 설정·자동화와 휴대폰에만 남은 미전송 알림.<br><strong>유지되는 것:</strong> 웹 가계부에 이미 들어온 내역, 은행·카드 앱의 내역.<br>다른 용도로 만든 Tasker 자동화도 있다면 초기화 전에 따로 보관하세요.</div>
-<section><h2>1. 기존 Tasker 설정 지우기</h2>
+<div class="status" id="duplicate-help"><strong>“BB 케이뱅크 받기 이름이 이미 존재합니다” 오류라면</strong><br>최신 버전 안내보다 아래 오류 정보가 원인이에요. 이전 작업과 이름이 겹친 상태입니다. 초기화를 반복하지 말고 Tasker <strong>프로필</strong>에서 <strong>BB 케이뱅크 알림 · BB 쿠팡이츠 알림 · BB 15분 재전송</strong>을 끄세요. 그런 다음 <a href="#install-step">3번 새 설치본 가져오기</a>부터 진행하세요. 이번 작업 이름은 전부 <strong>가계부21</strong>로 시작합니다.</div>
+<div class="status"><strong>1번 초기화를 선택하면 삭제되는 것:</strong> Tasker의 모든 설정·자동화와 휴대폰에만 남은 미전송 알림.<br><strong>유지되는 것:</strong> 웹 가계부에 이미 들어온 내역, 은행·카드 앱의 내역.<br>다른 용도로 만든 Tasker 자동화도 있다면 초기화 전에 따로 보관하세요.</div>
+<section><h2>1. 처음부터 비우고 싶을 때만</h2>
 <p>갤럭시 <strong>설정 → 애플리케이션 → Tasker → 저장공간 → 데이터 삭제 → 확인</strong>을 누르세요. 캐시 삭제만으로는 설정이 지워지지 않아요.</p>
 <p>Tasker를 한 번 열고 처음 시작 안내를 마치세요. 예전 설정을 복원할지 물으면 복원하지 않고 새로 시작하세요. 앱 자체를 삭제할 필요는 없어요.</p></section>
 <section><h2>2. 알림을 읽을 권한 켜기</h2>
 <p>갤럭시 설정의 검색창에서 <strong>알림 접근</strong>을 검색하고 Tasker를 허용하세요. 이어 <strong>설정 → 애플리케이션 → Tasker → 배터리 → 제한 없음</strong>으로 설정하세요. 휴대폰 버전에 따라 메뉴 이름은 조금 다를 수 있어요.</p>
 <p>케이뱅크·쿠팡이츠 앱의 알림도 켜져 있어야 해요. Tasker가 알림 표시 허용을 물으면 허용하세요.</p></section>
-<section><h2>3. 새 가계부 코드 넣기</h2>
-<p>이 페이지로 돌아와 아래 버튼을 누르세요. Tasker가 열리면 <strong>가계부 자동수집</strong> 가져오기를 확인하고, 프로필 활성화도 허용하세요. 상단에 ✓가 나타나면 누르세요.</p>
-<a class="primary" id="import-reset" href="{{TASKER_URI}}">새 가계부 코드 가져오기</a>
+<section id="install-step"><h2>3. 새 가계부 코드 넣기</h2>
+<p>이 페이지로 돌아와 아래 버튼을 누르세요. Tasker가 열리면 <strong>처음가계부 21</strong> 가져오기를 확인하고, 프로필 활성화도 허용하세요. 상단에 ✓가 나타나면 누르세요.</p>
+<a class="primary" id="import-reset" href="{{TASKER_URI}}">처음가계부 21 가져오기</a>
 <details><summary>버튼을 눌러도 Tasker가 안 열리면</summary>
-<a class="secondary" id="download-reset" href="data:application/xml;base64,{{XML_BASE64}}" download="Budget-Auto.prj.xml">설치 파일 받기 · Budget-Auto.prj.xml</a>
-<p>Tasker 화면 맨 아래 <strong>집 아이콘 또는 프로젝트 이름</strong>을 길게 누르고 <strong>Import / 가져오기</strong>를 선택하세요. 다운로드 폴더의 <strong>Budget-Auto.prj.xml</strong>을 고르세요.</p></details>
-<p>프로필 탭에 <strong>BB 케이뱅크 알림 · BB 쿠팡이츠 알림 · BB 15분 재전송</strong> 세 개가 있고 켜져 있으면 됩니다. 잔액 수집 코드도 포함되어 있어요.</p></section>
+<a class="secondary" id="download-reset" href="data:application/xml;base64,{{XML_BASE64}}" download="Budget-Clean-21.prj.xml">설치 파일 받기 · Budget-Clean-21.prj.xml</a>
+<p>Tasker 화면 맨 아래 <strong>집 아이콘 또는 프로젝트 이름</strong>을 길게 누르고 <strong>Import / 가져오기</strong>를 선택하세요. 다운로드 폴더의 <strong>Budget-Clean-21.prj.xml</strong>을 고르세요.</p></details>
+<p>프로필 탭에 <strong>가계부21 케이뱅크 알림 · 가계부21 쿠팡이츠 알림 · 가계부21 15분 재전송</strong> 세 개가 있고 켜져 있으면 됩니다. 잔액 수집 코드도 포함되어 있어요.</p></section>
 <section><h2>4. 웹에서 연결 설정 복사</h2>
 <a class="secondary" href="../../" target="_blank" rel="noopener">웹 가계부 열기 (새 창)</a>
 <p>로그인 후 <strong>설정 → 휴대폰 알림 연결 → 연결 설정 만들기</strong>를 누르세요. 아래에 표시되는 글상자를 길게 눌러 <strong>전체 선택 → 복사</strong>하세요.</p>
-<p>이 설정은 내 휴대폰 전용 연결키예요. 다른 사람에게 보내지 말고 다음 단계에만 붙여 넣으세요.</p></section>
+<p>새 설치본은 별도 연결을 사용하므로 이 단계를 진행해 주세요. 연결 설정을 다시 만들면 이전 전송키는 사용할 수 없어요. 이 설정은 내 휴대폰 전용 연결키예요. 다른 사람에게 보내지 말고 다음 단계에만 붙여 넣으세요.</p></section>
 <section><h2>5. Tasker에 붙여 넣기</h2>
-<p>Tasker로 돌아가 상단 <strong>작업 / Tasks → BB 시작</strong>을 누르세요. 작업 화면 아래쪽 <strong>▶</strong>를 누르면 입력창이 나옵니다. 4번에서 복사한 내용을 전부 붙여 넣고 확인하세요.</p>
+<p>Tasker로 돌아가 상단 <strong>작업 / Tasks → 가계부21 시작</strong>을 누르세요. 작업 화면 아래쪽 <strong>▶</strong>를 누르면 입력창이 나옵니다. 4번에서 복사한 내용을 전부 붙여 넣고 확인하세요.</p>
 <p>다른 코드를 편집하거나 변수를 직접 만들 필요는 없어요. 연결 시험을 보낸 뒤부터 새 알림을 모읍니다.</p></section>
 <section><h2>6. 연결됐는지 확인</h2>
-<p>Tasker의 <strong>작업 → BB 상태 → ▶</strong>를 누르세요. 브라우저에 연결 시험 통과 기록이 나오는지 확인하세요.</p>
+<p>Tasker의 <strong>작업 → 가계부21 상태 → ▶</strong>를 누르세요. 브라우저에 연결 시험 통과 기록이 나오는지 확인하세요.</p>
 <p>웹 가계부의 <strong>분류</strong> 탭에서 <strong>[연결 시험]</strong> 알림이 보이면 서버까지 도착한 거예요. 이 알림은 <strong>검토하고 반영 → 반영하지 않음</strong>으로 정리하세요.</p>
 <p>다음에 평소처럼 은행 알림이 오면 분류 탭에서 확인하세요. 지출·수입·이체·잔액 반영 여부를 직접 고르고 메모나 캡처도 붙일 수 있어요. 확인하려고 결제나 이체를 할 필요는 없어요.</p></section>
 <div class="status">과거 알림은 다시 가져오지 않아요. 이미 숨겨진 잔액도 복구되지 않습니다. 새 알림에 잔액이 있을 때 읽으며, 알림에 없으면 직접 입력할 수 있어요.</div>
+<details><summary>가계부21도 이미 있다고 나오면</summary><p>가져오기 버튼을 반복해서 누르지 말고 Tasker의 작업 탭에 <strong>가계부21 시작</strong>과 <strong>가계부21 상태</strong>가 있는지 확인하세요. 있다면 4번부터 연결을 진행하세요. 없다면 작업 탭 화면을 보여주세요.</p></details>
 <details><summary>중간에 다른 화면이나 오류가 나오면</summary><p>멈춘 단계 번호와 오류 화면을 알려주세요. 연결키가 들어 있는 글상자는 캡처에서 가려 주세요. 예전 수정판·복원판을 추가로 설치하지 않아도 됩니다.</p></details>
 <footer>코드·설치 링크·파일·웹 화면은 PC에서 검증했습니다. 실제 휴대폰의 가져오기·연결 시험·새 알림 수집은 위 순서로 확인해야 합니다.<br>초기화 메뉴: <a href="https://www.samsungsvc.co.kr/solution/39985">삼성전자서비스 안내</a> · 가져오기: <a href="https://tasker.joaoapps.com/import/import.html">Tasker 공식 예시</a></footer>
 </main></body></html>
