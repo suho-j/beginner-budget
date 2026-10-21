@@ -30,51 +30,65 @@ const root = path.resolve(__dirname, '..');
     assert.match(config.device_token, /^[0-9a-f]{64}$/);
 
     await page.getByRole('tab', {name:/분류/}).click();
-    await page.waitForFunction(()=>document.querySelectorAll('#review-list .review-card').length===7);
-    assert.equal(await page.locator('#summary-expense').textContent(),'₩0');
-    assert.equal(await page.locator('#review-held-wrap').isVisible(),false);
-    const card=id=>page.locator('[data-event-id="event-'+id+'"]');
+    await page.locator('#review-list .review-focus-card').waitFor();
+    const card=()=>page.locator('#review-list .review-focus-card');
     const form=()=>page.locator('#review-list form');
-    const open=async id=>card(id).getByRole('button',{name:'검토하고 반영'}).click();
-    const save=async()=>{await form().getByRole('button',{name:'선택한 방법으로 반영'}).click();await page.waitForFunction(()=>!document.querySelector('#review-list form'));};
-    await open(3);
-    assert.equal(await form().getByLabel('반영 방법',{exact:true}).inputValue(),'');
-    await form().getByLabel('반영 방법',{exact:true}).selectOption('expense');
+    const open=async id=>{
+      if(await page.locator('#review-filter-main').getAttribute('aria-pressed')!=='true')await page.locator('#review-filter-main').click();
+      for(let i=0;i<20&&await page.locator('#review-prev').isEnabled();i++)await page.locator('#review-prev').click();
+      for(let i=0;i<20;i++){if(await card().getAttribute('data-event-id')===id)return;if(await page.locator('#review-next').isDisabled())break;await page.locator('#review-next').click();}
+      throw Error('Missing card '+id);
+    };
+    const save=async()=>{const id=await card().getAttribute('data-event-id');await form().locator('.review-submit').click();await page.waitForFunction(id=>!document.querySelector('[data-event-id="'+id+'"]'),id);};
+    assert.equal(await card().count(),1,'one visible decision');
+    assert.equal(await page.locator('#summary-expense').textContent(),'₩0');
+    await open('event-3');
+    assert.equal(await form().getByLabel('금액',{exact:true}).inputValue(),'18,900');
+    assert.equal(await form().locator('[data-action="expense"]').getAttribute('aria-pressed'),'true');
     await form().getByLabel('항목명 / 내용',{exact:true}).fill('생필품 · 수정한 항목');
+    await card().evaluate(el=>el.dispatchEvent(new TouchEvent('touchstart',{touches:[new Touch({identifier:1,target:el,clientX:290,clientY:200})]})));
+    await card().evaluate(el=>el.dispatchEvent(new TouchEvent('touchend',{changedTouches:[new Touch({identifier:1,target:el,clientX:90,clientY:205})]})));
+    assert.equal(await card().getAttribute('data-event-id'),'event-4');
+    assert.equal(await page.evaluate(()=>reviewFixture.calls.length),0,'swiping never writes');
+    await page.locator('#review-prev').click();
+    assert.equal(await form().getByLabel('항목명 / 내용',{exact:true}).inputValue(),'생필품 · 수정한 항목','draft survives swipe');
+    await form().locator('.review-extras summary').click();
     await form().getByLabel('리마크 / 메모',{exact:true}).fill('주방용품 구매\n캡처 참조');
-    await form().getByLabel('금액',{exact:true}).fill('18,900');
-    await form().getByLabel('계좌 잔액도 반영',{exact:true}).check();
-    await form().getByLabel('잔액을 반영할 계좌 이름',{exact:true}).fill('생활비 계좌');
     await form().getByLabel('캡처 첨부 (선택)',{exact:true}).setInputFiles({name:'capture.png',mimeType:'image/png',buffer:Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6Jx8AAAAASUVORK5CYII=','base64')});
-    for(const width of [320,360,1080]){await page.setViewportSize({width,height:800});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);}
-    await page.setViewportSize({width:360,height:800});
-    await page.screenshot({path:path.join(root,'.tmp/phone-tests/review-mobile.png'),fullPage:true});
+    for(const width of [320,360,1080]){await page.setViewportSize({width,height:900});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true,'mobile overflow at '+width);}
+    await page.setViewportSize({width:360,height:900});
+    await form().locator('.review-extras summary').click();await page.evaluate(()=>scrollTo(0,0));await page.waitForTimeout(200);await page.screenshot({path:path.join(root,'.tmp/phone-tests/review-deck-mobile.png'),fullPage:true});await form().locator('.review-extras summary').click();
     await page.getByRole('button',{name:'새로고침',exact:true}).click();
     assert.equal(await form().getByLabel('항목명 / 내용',{exact:true}).inputValue(),'생필품 · 수정한 항목');
     await page.evaluate(()=>window.reviewFixture.fail=true);
-    await form().getByRole('button',{name:'선택한 방법으로 반영'}).click();
+    await form().locator('.review-submit').click();
     await page.waitForFunction(()=>document.querySelector('#review-message').textContent.includes('반영을 확인하지 못'));
     assert.equal(await form().getByLabel('리마크 / 메모',{exact:true}).inputValue(),'주방용품 구매\n캡처 참조');
-    await page.evaluate(()=>window.reviewFixture.fail=false);
-    await save();
+    await page.evaluate(()=>window.reviewFixture.fail=false);await save();
     await page.waitForFunction(()=>/18,900/.test(document.querySelector('#summary-expense').textContent));
-    assert.equal(await page.evaluate(()=>window.reviewFixture.uploads.length),1,'retry reuses the uploaded private attachment');
+    assert.equal(await page.evaluate(()=>window.reviewFixture.uploads.length),1,'retry reuses private attachment');
     assert.match(await page.locator('#review-balances').textContent(),/50,000/);
-    await page.locator('#review-held-title').click();
-    await page.getByRole('button',{name:'첨부 캡처 1장 보기'}).click();
-    await page.locator('#review-held img').waitFor();
-    assert.match(await page.locator('#review-held').textContent(),/주방용품 구매/);
-    for(const [id,action] of [[5,'income'],[2,'transfer'],[1,'balance'],[4,'ignore']]){
-      await open(id);await form().getByLabel('반영 방법',{exact:true}).selectOption(action);
-      if(action==='balance'){await form().getByLabel('잔액을 반영할 계좌 이름',{exact:true}).fill('생활비 계좌');await form().getByLabel('확인한 계좌 잔액',{exact:true}).fill('0');}
+    assert.match(await page.locator('#account-observed-amount').textContent(),/50,000/);
+    assert.equal(await page.evaluate(()=>reviewFixture.calls.find(c=>c.p_event_id==='event-3').p_decision.account_label),'생활비 계좌');
+    await page.locator('#review-held-title').click();await page.getByRole('button',{name:'첨부 캡처 1장 보기'}).click();await page.locator('#review-held img').waitFor();
+    for(const [id,action] of [['event-5','income'],['event-2','transfer'],['event-1','balance'],['event-4','ignore']]){
+      await open(id);if(!await form().locator('.review-methods').evaluate(el=>el.open))await form().locator('.review-methods summary').click();await form().locator('[data-action="'+action+'"]').click();
+      if(action==='balance'){await form().locator('.review-extras summary').click();await form().getByLabel('확인한 계좌 잔액',{exact:true}).fill('0');}
       await save();
-      await page.waitForFunction(id=>!document.querySelector('[data-event-id="event-'+id+'"]'),id);
     }
     await page.waitForFunction(()=>/1,000/.test(document.querySelector('#summary-income').textContent));
-    assert.match(await page.locator('#review-balances').textContent(),/0원/);
-    assert.equal(await page.locator('#summary-expense').textContent(),'₩18,900');
-    await page.getByRole('button',{name:'다시 검토',exact:true}).click();
-    await card(4).waitFor();
+    await open('order-7');
+    assert.equal(await form().getByLabel('금액',{exact:true}).inputValue(),'26,000');
+    assert.equal(await form().getByLabel('날짜',{exact:true}).inputValue(),'2026-10-20');
+    assert.equal(await form().getByLabel('연결할 결제',{exact:true}).inputValue(),'0');
+    await page.locator('#review-held').evaluate(el=>el.parentElement.open=false);await page.evaluate(()=>scrollTo(0,0));await page.waitForTimeout(200);await page.screenshot({path:path.join(root,'.tmp/phone-tests/review-order-mobile.png'),fullPage:true});
+    await save();await page.waitForFunction(()=>/44,900/.test(document.querySelector('#summary-expense').textContent));
+    assert.equal(await page.evaluate(()=>reviewFixture.rows.find(r=>r.event_id==='bank-8').status),'recorded');
+    await page.locator('#review-filter-notice').click();assert.equal(await card().getAttribute('data-event-id'),'notice-9');
+    page.once('dialog',d=>d.accept());await page.locator('#review-dismiss-notices').click();
+    await page.waitForFunction(()=>document.querySelector('#review-empty').textContent.includes('정리할 안내'));
+    await page.locator('#review-held-title').click();await page.locator('#review-held').getByRole('button',{name:'다시 검토',exact:true}).first().click();
+    await page.waitForFunction(()=>window.reviewFixture.rows.some(r=>r.status==='pending'&&r.decision?.action==='ignore'));
     await page.getByRole('tab',{name:'설정',exact:true}).click();
     await page.getByRole('button',{name:'받은 알림 불러오기'}).click();
     await page.locator('#phone-inbox .phone-event').first().waitFor();
@@ -87,7 +101,7 @@ const root = path.resolve(__dirname, '..');
     assert.equal(await page.locator('#review-list').textContent(),'');
     assert.equal(await page.locator('#review-held').textContent(),'');
     assert.deepEqual(errors, []);
-    console.log('PASS: all pending notifications, explicit actions, edits, remarks, private captures, retry, balances, reopening, settings route, mobile and logout');
+    console.log('PASS: swipe deck, prefill, preserved drafts, order-to-payment linking, single account balance, private captures/retry, notice grouping, keyboard buttons, mobile, reopening and logout');
   } finally {
     await browser.close();
     server.close();
