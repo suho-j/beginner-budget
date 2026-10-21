@@ -521,3 +521,11 @@ phone-browser 테스트는 별도 headless Chrome과 시험용 Cloud 응답을 �
 ### Tasker 이름 중복 회귀
 
 `node --test tests/tasker-clean-project.test.cjs`는 이전 BB 작업이 남은 설치를 모델링합니다. 새 이름/ID와 내부 참조, 이전 연결/큐 불변, 새 연결 시험 전 수집 차단, 새 잔액 전송을 검증합니다. `tests/tasker-installer-browser.cjs`는 수정 안내의 가져오기 URL과 다운로드 파일이 이 새 전체 프로젝트와 동일한지 검증합니다. Android 가져오기 성공을 대신하지 않습니다.
+
+
+## 분류 카드·주문 연결 회귀 검증
+
+- `node --test tests/phone-smart-review.test.cjs tests/phone-review.test.cjs tests/phone-decisions.test.cjs tests/phone-import.test.cjs`: 승인액/잔액 분리, 반복 알림, 할인·복합 결제, 주문 목록 광고 제외, 날짜·금액 매칭, 모호한 후보.
+- `node tests/phone-order-link-sql.test.cjs`: 로컬 PGlite의 실제 SQL로 기존 금액 보존, 미반영 결제 한 번만 기록, 재시도, 사용자/환경 격리, 금액·날짜·변경된 대상 및 첨부 검증. 실제 사용자 자료는 쓰지 않는다.
+- `NODE_PATH=... node tests/phone-review-browser.cjs`: 모의 클라우드로 한 카드, 스와이프 무저장, 초안 보존, 자동 금액·날짜·연결 선택, 메모·캡처·실패 재시도, 단일 계좌 잔액, 안내 분리, 다시 검토, 로그아웃, 320/360/1080px 가로 넘침을 확인한다.
+- 기존 `node tests/run-tests.cjs` 97개 계약도 유지한다. 폰의 주문 상세 추출 성공과 브라우저 모의 검증은 구분한다.

@@ -1,0 +1,44 @@
+const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict'),crypto=require('node:crypto');
+const {PGlite}=require('../.tmp/phone-tests/node_modules/@electric-sql/pglite');
+(async()=>{
+  const db=new PGlite();
+  await db.exec(`create role anon; create role authenticated; create schema auth; create schema storage;
+  create table auth.users(id uuid primary key);
+  create function auth.uid() returns uuid language sql stable as $$select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid$$;
+  grant usage on schema public,auth,storage to anon,authenticated; grant execute on function auth.uid() to anon,authenticated;
+  create table public.transactions(id text primary key,user_id uuid not null,date date not null,type text not null,category text not null,amount integer not null,memo text not null,source text not null);
+  create table public.preview_v2_transactions(like public.transactions including all);
+  create table storage.buckets(id text primary key,name text,public boolean,file_size_limit bigint,allowed_mime_types text[]);
+  create table storage.objects(id uuid default gen_random_uuid() primary key,bucket_id text,name text,metadata jsonb);
+  alter table storage.objects enable row level security;grant select,insert,delete on storage.objects to authenticated;
+  insert into auth.users values('11111111-1111-4111-8111-111111111111'),('22222222-2222-4222-8222-222222222222');`);
+  for(const filename of ['supabase-phone-import.sql','supabase-phone-decisions.sql','supabase-phone-order-link.sql'])await db.exec(fs.readFileSync(path.join(__dirname,'../docs',filename),'utf8'));
+
+  const user='11111111-1111-4111-8111-111111111111',other='22222222-2222-4222-8222-222222222222',token='a'.repeat(64);
+  const as=async who=>db.exec(`reset role;set role ${who?'authenticated':'anon'};select set_config('request.jwt.claim.sub','${who||''}',false)`);
+  await as(user);await db.query('select public.register_phone_device($1,$2)',[crypto.createHash('sha256').update(token).digest('hex'),'preview-v2']);
+  const receive=async(id,kind='eats_screen',text='주문 상세\n테스트 식당\n2026-10-20 오후 11:28\n총 결제금액 26,000원')=>{
+    await as(null);await db.query('select public.receive_phone_event($1,$2::jsonb)',[token,JSON.stringify({version:1,event_id:id,kind,package_name:kind==='eats_screen'?'com.coupang.mobile.eats':'com.kbankwith.smartbank',captured_at:'2026-10-20T14:28:28.000Z',text})]);await as(user);
+  };
+  const decision={action:'link',target_kind:'transaction',target_id:'existing',expected_memo:'쿠팡 주식회사',date:'2026-10-20',amount:26000,category:'배달비',memo:'쿠팡이츠 · 테스트 식당 · 치킨',remark:'가족 저녁',include_balance:false,balance_amount:null,account_label:'생활비 계좌',attachments:[]};
+  const link=(id,patch={},environment='preview-v2')=>db.query('select public.link_phone_order($1,$2,$3::jsonb) as result',[environment,id,JSON.stringify({...decision,...patch})]);
+  await db.exec(`reset role;insert into preview_v2_transactions values('existing','${user}','2026-10-20','expense','생활비',26000,'쿠팡 주식회사','user'),('foreign','${other}','2026-10-20','expense','생활비',26000,'쿠팡 주식회사','user');`);
+  await receive('order-a');await link('order-a');assert.equal((await link('order-a')).rows[0].result.already_recorded,true);
+  await db.exec('reset role');let tx=(await db.query("select * from preview_v2_transactions where id='existing'")).rows[0];
+  assert.equal(tx.amount,26000);assert.equal(tx.memo,decision.memo);assert.equal(tx.category,'배달비');
+  await receive('order-b');await receive('bank-b','kbank_notification','케이뱅크\n승인 26,000원\n쿠팡 주식회사\n카드(1111) | 10/20 23:28\n출금가능액 123,456원');
+  await link('order-b',{target_kind:'notification',target_id:'bank-b'});
+  await link('order-b',{target_kind:'notification',target_id:'bank-b'});
+  await db.exec('reset role');assert.equal((await db.query(`select count(*)::int as n from preview_v2_transactions where user_id='${user}'`)).rows[0].n,2);
+  const bankRow=(await db.query("select * from phone_inbox where event_id='bank-b'")).rows[0];assert.equal(bankRow.status,'recorded');
+  await receive('invalid');
+  for(const patch of [{target_id:'foreign'},{amount:25000},{date:'2026-10-19'},{date:'2026-02-31'},{include_balance:true},{target_id:''},{action:'expense'},{target_kind:'notification',target_id:'invalid'},{memo:'x'.repeat(81)},{attachments:['another/user.png']}])await assert.rejects(link('invalid',patch));
+  await assert.rejects(link('invalid',{target_kind:'notification',target_id:'bank-b'}));
+  await as(other);await assert.rejects(link('invalid'));await as(null);await assert.rejects(link('invalid'));
+  await as(user);await assert.rejects(link('invalid',{},'production'));
+  await receive('bad-amount');await receive('bank-c','kbank_notification','승인 25,000원\n쿠팡 주식회사\n10/20 23:28');await assert.rejects(link('bad-amount',{target_kind:'notification',target_id:'bank-c'}));
+  await receive('bad-date');await receive('bank-d','kbank_notification','승인 26,000원\n쿠팡 주식회사\n10/19 23:28');await assert.rejects(link('bad-date',{target_kind:'notification',target_id:'bank-d'}));
+  await db.exec('reset role');assert.equal((await db.query("select status from phone_inbox where event_id='bad-amount'")).rows[0].status,'pending');
+  assert.equal((await db.query('select count(*)::int as n from public.transactions')).rows[0].n,0);
+  await db.close();console.log('PASS: order enrichment preserves amount; pending payment records exactly once; ownership, dates, stale targets, duplicates and attachments protected');
+})().catch(e=>{console.error(e);process.exitCode=1;});
