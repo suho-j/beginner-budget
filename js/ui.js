@@ -119,6 +119,7 @@
     elements.summaryExpense.textContent = formatWon(summary.expense);
     elements.summaryBalance.textContent = formatWon(summary.balance);
     elements.summaryBudgetRemaining.textContent = formatWon(summary.budgetRemaining);
+    elements.summaryBudgetTotal.textContent = formatWon(summary.monthlyBudget);
     elements.budgetRateLabel.textContent = `${summary.budgetRate}%`;
     elements.budgetMeterFill.style.width = `${meterValue}%`;
     elements.budgetMeter.setAttribute('aria-valuenow', String(meterValue));
@@ -144,6 +145,27 @@
       ? `선택한 달 지출의 ${summary.topExpenseCategory.rate}%`
       : '선택한 달에 지출을 추가하면 표시됩니다';
     renderCategoryBreakdown(elements, summary.categoryBreakdown);
+    renderMerchantBreakdown(elements, summary.merchantBreakdown, summary.coupangTotal, summary.coupangRate);
+    renderYesterdayExpenses(elements, summary.yesterdayExpenses);
+  }
+
+  function renderBarRow(name, amount, maxAmount) {
+    const row = document.createElement('div');
+    row.className = 'bar-row';
+    const label = document.createElement('span');
+    label.className = 'bar-name';
+    label.textContent = name;
+    const track = document.createElement('span');
+    track.className = 'bar-track';
+    const fill = document.createElement('span');
+    fill.className = 'bar-fill';
+    fill.style.width = `${maxAmount > 0 ? Math.min(100, Math.round((amount / maxAmount) * 100)) : 0}%`;
+    track.append(fill);
+    const value = document.createElement('strong');
+    value.className = 'bar-amount';
+    value.textContent = formatWon(amount);
+    row.append(label, track, value);
+    return row;
   }
 
   function renderCategoryBreakdown(elements, breakdown) {
@@ -155,18 +177,43 @@
       elements.categoryBreakdownList.append(empty);
       return;
     }
+    const maxAmount = Math.max(...breakdown.map((item) => item.amount));
     breakdown.slice(0, 5).forEach((item) => {
+      elements.categoryBreakdownList.append(renderBarRow(item.category, item.amount, maxAmount));
+    });
+  }
+
+  function renderMerchantBreakdown(elements, breakdown, coupangTotal = 0, coupangRate = 0) {
+    elements.merchantBreakdownList.innerHTML = '';
+    if (!breakdown || !breakdown.length) {
+      const empty = document.createElement('p');
+      empty.className = 'muted';
+      empty.textContent = '선택한 달의 장소별 지출이 아직 없어요.';
+      elements.merchantBreakdownList.append(empty);
+      elements.merchantCoupangSummary.textContent = '';
+      return;
+    }
+    const maxAmount = Math.max(...breakdown.map((item) => item.amount));
+    breakdown.forEach((item) => {
+      elements.merchantBreakdownList.append(renderBarRow(item.place, item.amount, maxAmount));
+    });
+    elements.merchantCoupangSummary.textContent = `쿠팡 전체 ${formatWon(coupangTotal)} · 지출의 ${coupangRate}%`;
+  }
+
+  function renderYesterdayExpenses(elements, expenses) {
+    elements.yesterdayExpenseList.innerHTML = '';
+    if (!expenses || !expenses.length) {
+      const empty = document.createElement('p');
+      empty.className = 'muted';
+      empty.textContent = '어제 사용 내역이 없어요';
+      elements.yesterdayExpenseList.append(empty);
+      return;
+    }
+    expenses.forEach((item) => {
       const row = document.createElement('div');
-      row.className = 'category-row';
-      const label = document.createElement('span');
-      label.textContent = `${item.category} · ${item.rate}%`;
-      const amount = document.createElement('strong');
-      amount.textContent = formatWon(item.amount);
-      const bar = document.createElement('span');
-      bar.className = 'category-bar';
-      bar.style.width = `${Math.min(item.rate, 100)}%`;
-      row.append(label, amount, bar);
-      elements.categoryBreakdownList.append(row);
+      row.className = 'yesterday-row';
+      row.textContent = `${item.memo ? item.memo : '메모 없음'} — ${formatWon(item.amount)} · ${item.category}`;
+      elements.yesterdayExpenseList.append(row);
     });
   }
 
@@ -788,6 +835,7 @@
       summaryExpense: $('#summary-expense'),
       summaryBalance: $('#summary-balance'),
       summaryBudgetRemaining: $('#summary-budget-remaining'),
+      summaryBudgetTotal: $('#summary-budget-total'),
       budgetStatusText: $('#budget-status-text'),
       balanceHelp: $('#balance-help'),
       budgetCard: $('.budget-card'),
@@ -799,7 +847,10 @@
       dailyAllowanceHelp: $('#daily-allowance-help'),
       topCategory: $('#top-category'),
       topCategoryHelp: $('#top-category-help'),
-      categoryBreakdownList: $('#category-breakdown-list')
+      categoryBreakdownList: $('#category-breakdown-list'),
+      merchantBreakdownList: $('#merchant-breakdown-list'),
+      merchantCoupangSummary: $('#merchant-coupang-summary'),
+      yesterdayExpenseList: $('#yesterday-expense-list')
     };
   }
 
@@ -827,6 +878,8 @@
     initDefaults,
     renderSummary,
     renderCategoryBreakdown,
+    renderMerchantBreakdown,
+    renderYesterdayExpenses,
     renderList,
     updateCloudStatus,
     downloadText,

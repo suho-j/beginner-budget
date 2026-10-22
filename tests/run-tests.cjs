@@ -1667,6 +1667,60 @@ function testSummarizeProvidesCategoryBreakdownWithoutBudgetStatus() {
   assert.strictEqual(summary.categoryBudgetStatus, undefined);
 }
 
+function testMerchantBreakdownNormalizesCoupangAndCapsTopFive() {
+  const win = createContext();
+  const tx = (memo, amount, type = 'expense') => ({
+    id: `tx-${type}-${memo}-${amount}`, date: '2026-05-10', type, category: '생활비', amount, memo, source: 'user'
+  });
+  const breakdown = win.BudgetTransactions.merchantBreakdownFor([
+    tx('쿠팡 주문', 10000),
+    tx(' 쿠팡  로켓배송 ', 5000),
+    tx('쿠팡이츠 배달', 7000),
+    tx('쿠팡이츠', 3000),
+    tx('스타벅스  강남점', 6000),
+    tx('다이소', 5500),
+    tx('올리브영', 5000),
+    tx('편의점', 4500),
+    tx('약국', 4000),
+    tx('', 1000),
+    tx('쿠팡', 999999, 'income')
+  ]);
+  assert.strictEqual(JSON.stringify(breakdown), JSON.stringify([
+    { place: '쿠팡', amount: 15000 },
+    { place: '쿠팡이츠', amount: 10000 },
+    { place: '스타벅스 강남점', amount: 6000 },
+    { place: '다이소', amount: 5500 },
+    { place: '올리브영', amount: 5000 },
+    { place: '기타', amount: 9500 }
+  ]));
+  assert.strictEqual(JSON.stringify(win.BudgetTransactions.merchantBreakdownFor([])), '[]');
+}
+
+function testSummarizeProvidesMerchantCoupangAndYesterday() {
+  const win = createContext();
+  let state = win.BudgetStorage.defaultState();
+  const add = (input) => { state = win.BudgetTransactions.addTransaction(state, input).state; };
+  add({ date: '2026-05-02', type: 'expense', category: '생활비', amount: 20000, memo: '쿠팡' });
+  add({ date: '2026-05-18', type: 'expense', category: '생활비', amount: 3000, memo: '다이소' });
+  add({ date: '2026-05-19', type: 'expense', category: '생활비', amount: 12000, memo: '쿠팡 마트' });
+  add({ date: '2026-05-19', type: 'expense', category: '배달비', amount: 8000, memo: '쿠팡이츠' });
+  add({ date: '2026-05-19', type: 'income', category: '월급', amount: 100000, memo: '월급' });
+
+  const summary = win.BudgetTransactions.summarize(state.transactions, 2000000, '2026-05', new Date(2026, 4, 20));
+  assert.strictEqual(summary.expense, 43000);
+  assert.strictEqual(JSON.stringify(summary.merchantBreakdown), JSON.stringify([
+    { place: '쿠팡', amount: 32000 },
+    { place: '쿠팡이츠', amount: 8000 },
+    { place: '다이소', amount: 3000 }
+  ]));
+  assert.strictEqual(summary.coupangTotal, 40000);
+  assert.strictEqual(summary.coupangRate, 93);
+  assert.strictEqual(JSON.stringify(summary.yesterdayExpenses), JSON.stringify([
+    { memo: '쿠팡이츠', amount: 8000, category: '배달비' },
+    { memo: '쿠팡 마트', amount: 12000, category: '생활비' }
+  ]));
+}
+
 function testBudgetMonthStartAndMonthlyBudgets() {
   const win = createContext();
   let state = win.BudgetStorage.defaultState();
@@ -2460,6 +2514,25 @@ function testUiOmitsCategoryBudgetStatusRendering() {
   assert.ok(!source.includes('BudgetTransfer'));
 }
 
+function testAppMarkupProvidesHomeCardSections() {
+  const source = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+  for (const required of [
+    'id="summary-budget-total"',
+    'id="merchant-breakdown-title"', 'id="merchant-breakdown-list"', 'id="merchant-coupang-summary"',
+    'id="yesterday-expenses-title"', 'id="yesterday-expense-list"',
+    'id="summary-income"', 'id="summary-balance"', 'id="summary-expense"', 'id="summary-budget-remaining"'
+  ]) assert.ok(source.includes(required), `missing home card markup: ${required}`);
+
+  const hero = source.indexOf('id="summary-budget-remaining"');
+  const meter = source.indexOf('class="budget-meter"');
+  assert.ok(hero >= 0 && meter > hero, 'budget meter must follow the hero row');
+  const category = source.indexOf('id="category-breakdown-list"');
+  const merchant = source.indexOf('id="merchant-breakdown-list"');
+  const yesterday = source.indexOf('id="yesterday-expense-list"');
+  assert.ok(category >= 0 && merchant > category, 'merchant breakdown must follow category breakdown');
+  assert.ok(yesterday > merchant, 'yesterday expenses must follow merchant breakdown');
+}
+
 function testAppMarkupProvidesTabsCalendarEditDialogAndPreviewWarning() {
   const source = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
   const startTagById = (id) => {
@@ -3056,6 +3129,71 @@ function testUiTabsAndFilterOptionsBehave() {
   window.BudgetUI.fillFilterCategoryOptions(select, 'income', '생활비');
   assert.strictEqual(JSON.stringify(select.children.map((option) => option.value)), JSON.stringify(['all', '급여', '공통']));
   assert.strictEqual(select.value, 'all');
+}
+
+function testUiRenderSummaryFillsHomeCardSections() {
+  const { window, document } = createUiContext();
+  const originalCreateElement = document.createElement.bind(document);
+  document.createElement = (tag) => { const element = originalCreateElement(tag); element.style = {}; return element; };
+  const make = (tag = 'div') => document.createElement(tag);
+  const elements = {
+    selectedMonthLabel: make('p'),
+    summaryIncome: make('strong'), summaryExpense: make('strong'), summaryBalance: make('strong'),
+    summaryBudgetRemaining: make('strong'), summaryBudgetTotal: make('strong'),
+    budgetStatusText: make('small'), balanceHelp: make('small'),
+    budgetCard: make('article'), balanceCard: make('article'),
+    budgetRateLabel: make('strong'), budgetMeter: make(), budgetMeterFill: make('span'),
+    dailyAllowance: make('strong'), dailyAllowanceHelp: make('small'),
+    topCategory: make('strong'), topCategoryHelp: make('small'),
+    categoryBreakdownList: make(), merchantBreakdownList: make(), merchantCoupangSummary: make('p'),
+    yesterdayExpenseList: make()
+  };
+  const summary = {
+    income: 100000, expense: 43000, balance: 57000,
+    budgetRemaining: 1957000, budgetRate: 2, monthlyBudget: 2000000,
+    dailyAllowance: 163083,
+    categoryBreakdown: [
+      { category: '생활비', amount: 35000, rate: 81 },
+      { category: '배달비', amount: 8000, rate: 19 }
+    ],
+    topExpenseCategory: { category: '생활비', amount: 35000, rate: 81 },
+    merchantBreakdown: [
+      { place: '쿠팡', amount: 32000 },
+      { place: '쿠팡이츠', amount: 8000 },
+      { place: '기타', amount: 3000 }
+    ],
+    coupangTotal: 40000, coupangRate: 93,
+    yesterdayExpenses: [{ memo: '쿠팡 마트', amount: 12000, category: '생활비' }]
+  };
+  window.BudgetUI.renderSummary(elements, summary, '2026-05', { start: '2026-05-01', end: '2026-05-31' });
+  const won = window.BudgetUI.formatWon;
+  assert.strictEqual(elements.summaryBudgetTotal.textContent, won(2000000));
+  assert.strictEqual(elements.summaryBudgetRemaining.textContent, won(1957000));
+  assert.strictEqual(elements.summaryExpense.textContent, won(43000));
+
+  assert.strictEqual(elements.categoryBreakdownList.children.length, 2);
+  const categoryRow = elements.categoryBreakdownList.children[0];
+  assert.strictEqual(categoryRow.children[0].textContent, '생활비');
+  assert.strictEqual(categoryRow.children[1].children[0].style.width, '100%');
+  assert.strictEqual(categoryRow.children[2].textContent, won(35000));
+  assert.strictEqual(elements.categoryBreakdownList.children[1].children[1].children[0].style.width, '23%');
+
+  assert.strictEqual(elements.merchantBreakdownList.children.length, 3);
+  assert.strictEqual(elements.merchantBreakdownList.children[0].children[0].textContent, '쿠팡');
+  assert.strictEqual(elements.merchantBreakdownList.children[0].children[2].textContent, won(32000));
+  assert.strictEqual(elements.merchantCoupangSummary.textContent, `쿠팡 전체 ${won(40000)} · 지출의 93%`);
+
+  assert.strictEqual(elements.yesterdayExpenseList.children.length, 1);
+  assert.ok(elements.yesterdayExpenseList.children[0].textContent.includes('쿠팡 마트'));
+  assert.ok(elements.yesterdayExpenseList.children[0].textContent.includes(won(12000)));
+  assert.ok(elements.yesterdayExpenseList.children[0].textContent.includes('생활비'));
+
+  window.BudgetUI.renderSummary(elements, {
+    ...summary, expense: 0, categoryBreakdown: [], merchantBreakdown: [],
+    coupangTotal: 0, coupangRate: 0, yesterdayExpenses: [], topExpenseCategory: null
+  }, '2026-05', null);
+  assert.strictEqual(elements.yesterdayExpenseList.children[0].textContent, '어제 사용 내역이 없어요');
+  assert.strictEqual(elements.merchantCoupangSummary.textContent, '');
 }
 
 function testUiValidationAndEditDialogFocusFlow() {
@@ -7394,6 +7532,8 @@ const tests = [
   testTransactionIdsUseSafeOpaqueAsciiContract,
   testDatabaseIntegerBoundsAreEnforced,
   testSummarizeProvidesCategoryBreakdownWithoutBudgetStatus,
+  testMerchantBreakdownNormalizesCoupangAndCapsTopFive,
+  testSummarizeProvidesMerchantCoupangAndYesterday,
   testBudgetMonthStartAndMonthlyBudgets,
   testMonthKeyUsesClampedFebruaryStartBoundary,
   testAddTransactionCanonicalizesBeginnerMoneyInput,
@@ -7412,12 +7552,14 @@ const tests = [
   testUiOmitsCategoryBudgetStatusRendering,
   testUiExportsTabEditAndCalendarRenderers,
   testUiTabsAndFilterOptionsBehave,
+  testUiRenderSummaryFillsHomeCardSections,
   testUiValidationAndEditDialogFocusFlow,
   testUiCalendarRenderingPreservesFocusAndExplainsEmptyDates,
   testUiTransactionActionLabelsIncludeType,
   testUiRendersRecurringOccurrencesAndTemplatesSafely,
   testUiRecurringDialogsAndTemplateFocusFlow,
   testAppMarkupProvidesTabsCalendarEditDialogAndPreviewWarning,
+  testAppMarkupProvidesHomeCardSections,
   testAppSkipLinkTargetsFocusableMainContent,
   testAppStylesCoverTabsCalendarDialogAndMobile,
   testAppStylesBudgetTransferForMobileAndDesktop,

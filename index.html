@@ -145,26 +145,21 @@
         <h2 id="summary-title">이번 달 요약</h2>
         <a class="back-to-top" href="#top">위로 ↑</a>
       </div>
-      <div class="summary-grid" aria-live="polite">
-        <article class="summary-card income-card">
-          <span class="card-label">수입 합계</span>
-          <strong id="summary-income">0원</strong>
-          <small>들어온 돈</small>
-        </article>
-        <article class="summary-card expense-card">
-          <span class="card-label">지출 합계</span>
-          <strong id="summary-expense">0원</strong>
-          <small>쓴 돈</small>
-        </article>
-        <article class="summary-card balance-card">
-          <span class="card-label">이번 달 수입 − 지출</span>
-          <strong id="summary-balance">0원</strong>
-          <small id="balance-help">수입 - 지출</small>
-        </article>
-        <article class="summary-card budget-card">
-          <span class="card-label">예산 남은 금액</span>
+      <div class="summary-hero" aria-live="polite">
+        <article class="summary-hero-card summary-hero-main budget-card">
+          <span class="card-label">잔액</span>
           <strong id="summary-budget-remaining">0원</strong>
           <small id="budget-status-text">월 예산에서 지출을 뺀 금액</small>
+        </article>
+        <article class="summary-hero-card expense-card">
+          <span class="card-label">사용</span>
+          <strong id="summary-expense">0원</strong>
+          <small>이번 기간에 쓴 돈</small>
+        </article>
+        <article class="summary-hero-card">
+          <span class="card-label">총예산</span>
+          <strong id="summary-budget-total">0원</strong>
+          <small>이번 기간 월 예산</small>
         </article>
       </div>
       <div class="budget-meter" aria-labelledby="budget-meter-label">
@@ -175,6 +170,18 @@
         <div class="meter-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="예산 사용률">
           <span id="budget-meter-fill" class="meter-fill"></span>
         </div>
+      </div>
+      <div class="summary-grid" aria-live="polite">
+        <article class="summary-card income-card">
+          <span class="card-label">수입 합계</span>
+          <strong id="summary-income">0원</strong>
+          <small>들어온 돈</small>
+        </article>
+        <article class="summary-card balance-card">
+          <span class="card-label">이번 달 수입 − 지출</span>
+          <strong id="summary-balance">0원</strong>
+          <small id="balance-help">수입 - 지출</small>
+        </article>
       </div>
       <div class="insight-grid" aria-label="이번 달 소비 인사이트" aria-live="polite">
         <article class="insight-card">
@@ -191,6 +198,15 @@
       <div class="category-breakdown" aria-labelledby="category-breakdown-title">
         <h3 id="category-breakdown-title">카테고리별 지출</h3>
         <div id="category-breakdown-list" class="category-breakdown-list"></div>
+      </div>
+      <div class="category-breakdown merchant-breakdown" aria-labelledby="merchant-breakdown-title">
+        <h3 id="merchant-breakdown-title">장소별 지출</h3>
+        <div id="merchant-breakdown-list" class="merchant-breakdown-list"></div>
+        <p id="merchant-coupang-summary" class="merchant-coupang-summary"></p>
+      </div>
+      <div class="category-breakdown yesterday-expenses" aria-labelledby="yesterday-expenses-title">
+        <h3 id="yesterday-expenses-title">어제 사용 내역</h3>
+        <div id="yesterday-expense-list" class="yesterday-expense-list"></div>
       </div>
     </section>
 

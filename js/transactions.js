@@ -468,6 +468,34 @@
     })).sort((a, b) => b.amount - a.amount || a.category.localeCompare(b.category, 'ko-KR'));
   }
 
+  function merchantKeyFor(tx) {
+    const memo = String(tx && tx.memo ? tx.memo : '').replace(/\s+/g, ' ').trim();
+    if (!memo) return '메모 없음';
+    if (memo.includes('쿠팡이츠')) return '쿠팡이츠';
+    if (memo.includes('쿠팡')) return '쿠팡';
+    return memo;
+  }
+
+  function merchantTotalsFor(transactions) {
+    const totals = new Map();
+    transactions
+      .filter((tx) => tx.type === 'expense')
+      .forEach((tx) => {
+        const place = merchantKeyFor(tx);
+        totals.set(place, (totals.get(place) || 0) + tx.amount);
+      });
+    return Array.from(totals, ([place, amount]) => ({ place, amount }))
+      .sort((a, b) => b.amount - a.amount || a.place.localeCompare(b.place, 'ko-KR'));
+  }
+
+  function merchantBreakdownFor(transactions) {
+    const totals = merchantTotalsFor(transactions);
+    if (totals.length <= 5) return totals;
+    const top = totals.slice(0, 5);
+    const restAmount = totals.slice(5).reduce((sum, item) => sum + item.amount, 0);
+    return [...top, { place: '기타', amount: restAmount }];
+  }
+
   function daysRemainingInMonth(month, today = new Date(), monthStartDay = 1) {
     if (!/^\d{4}-\d{2}$/.test(month)) return 0;
     const range = window.BudgetStorage.periodRangeForMonth(month, monthStartDay);
@@ -490,6 +518,17 @@
     const budgetRate = Number(monthlyBudget) > 0 ? Math.min(999, Math.round((expense / Number(monthlyBudget)) * 100)) : 0;
     const categoryBreakdown = categoryBreakdownFor(target, expense);
     const dailyAllowance = Math.max(0, Math.floor(budgetRemaining / daysRemainingInMonth(month, today, monthStartDay)));
+    const merchantTotals = merchantTotalsFor(target);
+    const coupangTotal = merchantTotals
+      .filter((item) => item.place === '쿠팡' || item.place === '쿠팡이츠')
+      .reduce((sum, item) => sum + item.amount, 0);
+    const coupangRate = expense > 0 ? Math.round((coupangTotal / expense) * 1000) / 10 : 0;
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
+    const yesterdayString = window.BudgetStorage.localDateString(yesterday);
+    const yesterdayExpenses = transactions
+      .filter((tx) => tx.type === 'expense' && tx.date === yesterdayString)
+      .map((tx) => ({ memo: tx.memo, amount: tx.amount, category: tx.category }));
     return {
       income,
       expense,
@@ -501,7 +540,11 @@
       count: target.length,
       categoryBreakdown,
       topExpenseCategory: categoryBreakdown[0] || null,
-      dailyAllowance
+      dailyAllowance,
+      merchantBreakdown: merchantBreakdownFor(target),
+      coupangTotal,
+      coupangRate,
+      yesterdayExpenses
     };
   }
 
@@ -678,6 +721,7 @@
     setMonthStartDay,
     filterTransactions,
     summarizeTransactionsByDate,
+    merchantBreakdownFor,
     summarize,
     hasSampleForMonth,
     createSampleState,

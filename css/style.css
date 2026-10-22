@@ -261,6 +261,55 @@ h2[id], h3[id] { scroll-margin-top: 6.5rem; }
   border-radius: 999px;
 }
 .category-budget-row.over .category-budget-bar { background: var(--expense); }
+.summary-hero { display: grid; gap: 0.75rem; grid-template-columns: 1fr; }
+.summary-hero-card {
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 1rem;
+  background: #fbfcff;
+  display: grid;
+  gap: 0.2rem;
+}
+.summary-hero-card strong { font-size: 1.45rem; word-break: keep-all; }
+.summary-hero-card small { color: var(--muted); }
+.summary-hero-main { background: var(--primary); border-color: var(--primary); }
+.summary-hero-main .card-label, .summary-hero-main small { color: #dbe4ff; }
+.summary-hero-main strong { color: #fff; font-size: 1.7rem; }
+.summary-hero-card.over strong, .summary-hero-card.over small { color: var(--warning); }
+.summary-hero-main.over { background: #fbfcff; }
+.summary-hero-main.over .card-label, .summary-hero-main.over small { color: var(--muted); }
+.summary-hero-main.over strong { color: var(--warning); }
+.summary-grid { margin-top: 1rem; }
+.merchant-breakdown-list, .yesterday-expense-list { display: grid; gap: 0.5rem; }
+.bar-row {
+  min-height: 48px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 0.7rem 0.85rem;
+  background: #fff;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+.bar-name { flex: 0 1 7.5rem; min-width: 0; overflow-wrap: anywhere; }
+.bar-track {
+  flex: 1 1 auto;
+  height: 10px;
+  border-radius: 999px;
+  background: #e9edf6;
+  overflow: hidden;
+}
+.bar-fill { display: block; height: 100%; min-width: 4px; border-radius: inherit; background: var(--primary); }
+.bar-amount { flex: 0 0 auto; white-space: nowrap; }
+.merchant-coupang-summary { margin: 0; font-weight: 800; color: var(--primary); }
+.merchant-coupang-summary:empty { display: none; }
+.yesterday-row {
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 0.7rem 0.85rem;
+  background: #fff;
+  overflow-wrap: anywhere;
+}
 .meter-heading { display: flex; justify-content: space-between; gap: 1rem; font-weight: 800; }
 .meter-track {
   height: 12px;
@@ -464,6 +513,7 @@ h2[id], h3[id] { scroll-margin-top: 6.5rem; }
 
 @media (min-width: 560px) {
   .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .summary-hero { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .insight-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .transaction-form { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .inline-form { grid-template-columns: minmax(0, 1fr) auto; align-items: end; }
