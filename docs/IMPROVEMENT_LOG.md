@@ -1,5 +1,12 @@
 # 개선 진단 및 반복 로그
 
+## 2026-10-23 · 운영 스키마 SQL에 테이블 GRANT 명시 (브랜치 fix/supabase-table-grants)
+
+- 2026-10-30부터 Supabase가 public 스키마 신규 테이블에 Data API 권한을 자동 부여하지 않으므로, docs/supabase-setup.sql의 budget_settings·transactions에 authenticated 대상 GRANT를 RLS 활성화 바로 위에 추가했다. GRANT는 재실행해도 안전하다. anon·service_role에는 권한을 주지 않았고, 기존 RLS 정책과 함수 권한은 건드리지 않았다.
+- AGENTS.md 개발 규칙에 "테이블 생성 SQL 안에 GRANT·RLS·정책을 함께 넣을 것" 규칙을 추가했다.
+- 나머지 supabase-*.sql도 점검했다: preview/preview-v2는 설정·거래 테이블 GRANT가 이미 있고 seed_metadata는 의도적으로 revoke된 상태, phone 계열은 revoke 후 필요한 select만 부여하는 방식이라 손대지 않았다.
+- 운영 DB에는 이 PR과 별개로 GRANT 두 줄만 SQL Editor에서 실행하면 된다 (기존 테이블에도 그대로 적용 가능).
+
 ## 2026-10-22 · 홈 요약을 브리핑 카드 레이아웃으로 개편 (브랜치 feature/home-card-layout)
 
 - 홈 '이번 달 요약'을 아침 브리핑 카드와 같은 구성으로 바꿨다. 맨 위에 잔액(예산 남은 금액, 강조)·사용(지출 합계)·총예산(월 예산) hero 3박스를 두고, 그 아래에 기존 예산 사용률 미터를 유지했다. 수입 합계와 '수입 − 지출' 카드는 지우지 않고 hero 아래 보조 카드 줄로 옮겼다.
