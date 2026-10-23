@@ -35,5 +35,5 @@ var budget_status_url = (function () {
   else if (savedStatus === '연결 설정 또는 이전 연결의 대기 알림을 확인해 주세요.') last = 'config_error';
   else if (savedStatus === '연결 시험 중') last = 'testing';
   var report = 'v=2&connection=' + connection + '&queue=' + queued + '&last=' + last + '&at=' + encodeURIComponent(at);
-  return 'https://beginner-budget.pages.dev/artifacts/tasker-guide/diagnose.html#' + report;
+  return 'https://ggbook.pages.dev/artifacts/tasker-guide/diagnose.html#' + report;
 })();

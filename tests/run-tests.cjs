@@ -2304,7 +2304,9 @@ async function testCloudRoutesEveryNonProductionOperationToPreviewV2() {
     { origin: 'null', protocol: 'file:', hostname: '', port: '', pathname: '/C:/budget/index.html' },
     { origin: '', protocol: '', hostname: '', port: '', pathname: '/' },
     { origin: 'https://abc123.beginner-budget.pages.dev', protocol: 'https:', hostname: 'abc123.beginner-budget.pages.dev', port: '', pathname: '/' },
-    { origin: 'https://beginner-budget.pages.dev', protocol: 'https:', hostname: 'beginner-budget.pages.dev', port: '', pathname: '/beginner-budget/' }
+    { origin: 'https://beginner-budget.pages.dev', protocol: 'https:', hostname: 'beginner-budget.pages.dev', port: '', pathname: '/beginner-budget/' },
+    { origin: 'https://abc123.ggbook.pages.dev', protocol: 'https:', hostname: 'abc123.ggbook.pages.dev', port: '', pathname: '/' },
+    { origin: 'https://ggbook.pages.dev', protocol: 'https:', hostname: 'ggbook.pages.dev', port: '', pathname: '/beginner-budget/' }
   ];
   const expectedEnvironment = {
     name: 'preview-v2',
@@ -2440,6 +2442,9 @@ async function testCloudRoutesEveryOperationByRuntimeEnvironment() {
     previewCase({ origin: 'https://abc123.beginner-budget.pages.dev', protocol: 'https:', hostname: 'abc123.beginner-budget.pages.dev', port: '', pathname: '/' }),
     previewCase({ origin: 'https://beginner-budget.pages.dev', protocol: 'https:', hostname: 'beginner-budget.pages.dev', port: '', pathname: '/beginner-budget/' }),
     previewCase({ origin: 'https://beginner-budget.pages.dev.evil.example', protocol: 'https:', hostname: 'beginner-budget.pages.dev.evil.example', port: '', pathname: '/' }),
+    previewCase({ origin: 'https://abc123.ggbook.pages.dev', protocol: 'https:', hostname: 'abc123.ggbook.pages.dev', port: '', pathname: '/' }),
+    previewCase({ origin: 'https://ggbook.pages.dev', protocol: 'https:', hostname: 'ggbook.pages.dev', port: '', pathname: '/beginner-budget/' }),
+    previewCase({ origin: 'https://ggbook.pages.dev.evil.example', protocol: 'https:', hostname: 'ggbook.pages.dev.evil.example', port: '', pathname: '/' }),
     {
       location: {
         origin: 'https://suho-j.github.io',
@@ -2473,6 +2478,34 @@ async function testCloudRoutesEveryOperationByRuntimeEnvironment() {
         origin: 'https://beginner-budget.pages.dev',
         protocol: 'https:',
         hostname: 'beginner-budget.pages.dev',
+        port: '',
+        pathname: '/index.html'
+      },
+      name: 'production',
+      isPreview: false,
+      settingsTable: 'budget_settings',
+      transactionsTable: 'transactions',
+      stateRpc: 'replace_budget_state'
+    },
+    {
+      location: {
+        origin: 'https://ggbook.pages.dev',
+        protocol: 'https:',
+        hostname: 'ggbook.pages.dev',
+        port: '',
+        pathname: '/'
+      },
+      name: 'production',
+      isPreview: false,
+      settingsTable: 'budget_settings',
+      transactionsTable: 'transactions',
+      stateRpc: 'replace_budget_state'
+    },
+    {
+      location: {
+        origin: 'https://ggbook.pages.dev',
+        protocol: 'https:',
+        hostname: 'ggbook.pages.dev',
         port: '',
         pathname: '/index.html'
       },
