@@ -10,7 +10,8 @@
   const runtimePathname = String(runtimeLocation.pathname || '/');
   const IS_PRODUCTION = (runtimeOrigin === 'https://suho-j.github.io'
       && runtimePathname === '/beginner-budget/')
-    || (runtimeOrigin === 'https://beginner-budget.pages.dev'
+    || ((runtimeOrigin === 'https://beginner-budget.pages.dev'
+        || runtimeOrigin === 'https://ggbook.pages.dev')
       && (runtimePathname === '/' || runtimePathname === '/index.html'));
   const IS_PREVIEW = !IS_PRODUCTION;
   const SETTINGS_TABLE = IS_PREVIEW ? 'preview_v2_budget_settings' : 'budget_settings';

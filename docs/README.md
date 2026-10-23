@@ -45,13 +45,13 @@ python -m http.server 8765 --bind 127.0.0.1
 
 ## 환경별 격리
 
-정확한 canonical origin `https://beginner-budget.pages.dev`와 pathname `/` 또는 `/index.html`가 모두 일치할 때만 운영 `budget_settings`, `transactions`, `replace_budget_state`를 사용합니다. 이전 운영 주소 `https://suho-j.github.io` + `/beginner-budget/`도 이전 기간 동안 운영으로 판정합니다. 프리뷰 배포 주소(`*.beginner-budget.pages.dev` 해시 서브도메인)를 포함한 그 외 HTTP·`file://`·로컬·LAN·스테이징·커스텀 호스트·잘못된 경로는 모두 V2 미리보기 대상으로 라우팅됩니다.
+정확한 canonical origin `https://ggbook.pages.dev`와 pathname `/` 또는 `/index.html`가 모두 일치할 때만 운영 `budget_settings`, `transactions`, `replace_budget_state`를 사용합니다. 이전 운영 주소 `https://beginner-budget.pages.dev`(같은 규칙)와 `https://suho-j.github.io` + `/beginner-budget/`도 이전 기간 동안 운영으로 판정합니다. 프리뷰 배포 주소(`*.ggbook.pages.dev`·`*.beginner-budget.pages.dev` 해시 서브도메인)를 포함한 그 외 HTTP·`file://`·로컬·LAN·스테이징·커스텀 호스트·잘못된 경로는 모두 V2 미리보기 대상으로 라우팅됩니다.
 
 각 행은 해당 버전의 배포 산출물 기준입니다. 현재 V2 소스를 V1 폴더에 덮어쓰지 않습니다.
 
 | 환경 | URL | settings | transactions | 전체 상태 RPC |
 | --- | --- | --- | --- | --- |
-| 운영 | `https://beginner-budget.pages.dev/` (이전 병행: `https://suho-j.github.io/beginner-budget/`) | `budget_settings` | `transactions` | `replace_budget_state` |
+| 운영 | `https://ggbook.pages.dev/` (이전 병행: `https://beginner-budget.pages.dev/`, `https://suho-j.github.io/beginner-budget/`) | `budget_settings` | `transactions` | `replace_budget_state` |
 | V1 미리보기 | `https://suho-j.github.io/beginner-budget-preview/v1/` | `preview_budget_settings` | `preview_transactions` | `replace_preview_budget_state` |
 | V2 미리보기 | `https://suho-j.github.io/beginner-budget-preview/v2/` | `preview_v2_budget_settings` | `preview_v2_transactions` | `replace_preview_v2_budget_state` |
 
