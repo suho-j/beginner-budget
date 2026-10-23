@@ -1,5 +1,13 @@
 # 개선 진단 및 반복 로그
 
+## 2026-10-23 · 운영 주소를 Cloudflare Pages로 이전 판정 (브랜치 fix/pages-dev-production)
+
+- 운영 배포가 Cloudflare Pages(https://beginner-budget.pages.dev, master 자동 배포)로 바뀌어, js/cloud.js의 운영 판정에 pages.dev를 추가했다. origin이 정확히 `https://beginner-budget.pages.dev`이고 pathname이 `/` 또는 `/index.html`일 때만 운영이며, 해시 서브도메인(`*.beginner-budget.pages.dev`) 등 프리뷰 배포는 계속 preview_v2로 간다. 기존 github.io 운영 조건은 이전 기간 동안 유지한다.
+- tasker/status-report.js·build-project.cjs의 diagnose 주소를 pages.dev로 바꾸고 빌드 스크립트로 artifacts/tasker-guide를 재생성했다. 가이드 템플릿의 '웹 가계부 열기' 링크와 README.txt의 가이드 주소도 같은 호스트로 맞췄다.
+- docs/README.md(환경별 격리 설명·운영 행)와 docs/TASKER_SETUP.md의 운영 주소를 pages.dev로 갱신했다. index.html의 cloud.js 캐시버스터를 20261023-pages-dev로 올렸다.
+- 검증: 환경 라우팅 테스트에 pages.dev 운영 2건(`/`, `/index.html`)·해시 서브도메인 preview·pages.dev 잘못된 경로 preview·유사 도메인 preview 케이스를 먼저 추가해 실패를 확인한 뒤 구현해 전체 95개 회귀가 통과했다.
+- 범위 밖(후속 단계): receive_phone_event anon 실행 권한·collect.mjs·자동화 크론 주소는 건드리지 않았다. 크론 주소 교체는 이 변경 배포 후 검증이 끝나면 별도로 한다.
+
 ## 2026-10-22 · 홈 요약을 브리핑 카드 레이아웃으로 개편 (브랜치 feature/home-card-layout)
 
 - 홈 '이번 달 요약'을 아침 브리핑 카드와 같은 구성으로 바꿨다. 맨 위에 잔액(예산 남은 금액, 강조)·사용(지출 합계)·총예산(월 예산) hero 3박스를 두고, 그 아래에 기존 예산 사용률 미터를 유지했다. 수입 합계와 '수입 − 지출' 카드는 지우지 않고 hero 아래 보조 카드 줄로 옮겼다.

@@ -15,7 +15,8 @@
   const PACKAGES = Object.freeze({
     kbank_notification: &apos;com.kbankwith.smartbank&apos;,
     eats_notification: &apos;com.coupang.mobile.eats&apos;,
-    eats_screen: &apos;com.coupang.mobile.eats&apos;
+    eats_screen: &apos;com.coupang.mobile.eats&apos;,
+    coupang_order: &apos;www.coupang.com&apos;
   });
 
   function redactText(text) {
@@ -193,7 +194,8 @@ if (global(&quot;BUDGETOUTBOX&quot;) !== before) performTask(&quot;BB 보내기&
   const PACKAGES = Object.freeze({
     kbank_notification: &apos;com.kbankwith.smartbank&apos;,
     eats_notification: &apos;com.coupang.mobile.eats&apos;,
-    eats_screen: &apos;com.coupang.mobile.eats&apos;
+    eats_screen: &apos;com.coupang.mobile.eats&apos;,
+    coupang_order: &apos;www.coupang.com&apos;
   });
 
   function redactText(text) {
@@ -371,7 +373,8 @@ if (global(&quot;BUDGETOUTBOX&quot;) !== before) performTask(&quot;BB 보내기&
   const PACKAGES = Object.freeze({
     kbank_notification: &apos;com.kbankwith.smartbank&apos;,
     eats_notification: &apos;com.coupang.mobile.eats&apos;,
-    eats_screen: &apos;com.coupang.mobile.eats&apos;
+    eats_screen: &apos;com.coupang.mobile.eats&apos;,
+    coupang_order: &apos;www.coupang.com&apos;
   });
 
   function redactText(text) {
