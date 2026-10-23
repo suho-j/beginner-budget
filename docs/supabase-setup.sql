@@ -65,6 +65,9 @@ before insert or update on public.budget_settings
 for each row
 execute function public.set_budget_settings_updated_at();
 
+grant select, insert, update on table public.budget_settings to authenticated;
+grant select, insert, update, delete on table public.transactions to authenticated;
+
 alter table public.budget_settings enable row level security;
 alter table public.transactions enable row level security;
 

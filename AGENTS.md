@@ -28,6 +28,7 @@
 ## 개발 규칙
 
 - 가입/빌드 없는 정적 앱을 유지하되, 데이터 저장은 Supabase Auth + RLS 기반 클라우드 저장을 사용한다.
+- public 스키마에 테이블을 만들 때는 같은 SQL 안에 GRANT(필요한 역할에만, 기본은 authenticated), RLS 활성화, 정책을 함께 넣을 것. identity/serial 컬럼을 쓰면 시퀀스 usage, select 권한도 줄 것.
 - 브라우저 `localStorage`에는 가계부 데이터를 저장하지 않는다.
 - 사용자 입력/가져오기 데이터는 항상 정규화·검증한다.
 - DOM 렌더링은 `textContent` 중심으로 유지해 XSS 위험을 낮춘다.
