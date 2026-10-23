@@ -11,7 +11,7 @@ const int = (index, value) => '<Int sr="arg' + index + '" val="' + value + '"/>'
 const bundle = index => '<Bundle sr="arg' + index + '"><Vals sr="val"/></Bundle>';
 const condition = (lhs, rhs) => '<ConditionList sr="if"><Condition sr="c0" ve="3"><lhs>'
   + esc(lhs) + '</lhs><op>2</op><rhs>' + esc(rhs) + '</rhs></Condition></ConditionList>';
-const statusPage = 'https://suho-j.github.io/beginner-budget/artifacts/tasker-guide/diagnose.html';
+const statusPage = 'https://beginner-budget.pages.dev/artifacts/tasker-guide/diagnose.html';
 
 function statusTask(id, name, source) {
   const fallback = statusPage + '#v=2&connection=script_error&queue=invalid&last=unknown&at=';

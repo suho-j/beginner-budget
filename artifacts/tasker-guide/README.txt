@@ -1,7 +1,7 @@
 갤럭시에서 Tasker 한 번에 가져오기
 
 1. 갤럭시에서 아래 설치 주소를 엽니다. 파일 이동은 필요 없습니다.
-   https://suho-j.github.io/beginner-budget/artifacts/tasker-guide/install.html
+   https://beginner-budget.pages.dev/artifacts/tasker-guide/install.html
 2. "Tasker로 한 번에 가져오기"를 누르고 프로젝트 추가를 허용합니다.
 3. 갤럭시에서 Tasker의 알림 접근 / 배터리 제한 없음을 허용합니다.
 4. 웹 가계부에서 연결 설정을 복사합니다.
@@ -18,14 +18,14 @@
 이체·플러스박스 이동·환불은 자동 지출로 더하지 않습니다.
 
 기존 설치에서 "BB 상태" 창이 안 뜨면:
-- https://suho-j.github.io/beginner-budget/artifacts/tasker-guide/diagnose.html
+- https://beginner-budget.pages.dev/artifacts/tasker-guide/diagnose.html
 - "연결 확인 작업 추가하기" → 가계부 연결 진단 프로젝트 추가
 - Tasker 작업 → "BB 연결 확인" → ▶ → 브라우저 결과 확인
 - 연결키를 다시 입력하지 않고 기존 프로필과 대기열을 그대로 둡니다.
 - ▶가 ■를 거쳐 ▶로 돌아오는 것만으로 성공을 판단하지 않습니다.
 
 연결 진단에서 오류 화면이 남거나 3번 패키지/앱이름에 % 경고가 보이면:
-- https://suho-j.github.io/beginner-budget/artifacts/tasker-guide/repair.html
+- https://beginner-budget.pages.dev/artifacts/tasker-guide/repair.html
 - 가계부 연결 수정 가져오기 → BB 연결 확인 / BB 보내기 덮어쓰기 허용
 - BB 연결 확인 → ▶ → "진단 수정판 2"와 세 항목 확인
 - 기존 프로필·연결키를 지우거나 BB 시작을 다시 실행하지 않습니다.

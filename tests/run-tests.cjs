@@ -2302,7 +2302,9 @@ async function testCloudRoutesEveryNonProductionOperationToPreviewV2() {
     { origin: 'https://budget-staging.internal', protocol: 'https:', hostname: 'budget-staging.internal', port: '', pathname: '/beginner-budget/' },
     { origin: 'https://budget.example.com', protocol: 'https:', hostname: 'budget.example.com', port: '', pathname: '/custom/' },
     { origin: 'null', protocol: 'file:', hostname: '', port: '', pathname: '/C:/budget/index.html' },
-    { origin: '', protocol: '', hostname: '', port: '', pathname: '/' }
+    { origin: '', protocol: '', hostname: '', port: '', pathname: '/' },
+    { origin: 'https://abc123.beginner-budget.pages.dev', protocol: 'https:', hostname: 'abc123.beginner-budget.pages.dev', port: '', pathname: '/' },
+    { origin: 'https://beginner-budget.pages.dev', protocol: 'https:', hostname: 'beginner-budget.pages.dev', port: '', pathname: '/beginner-budget/' }
   ];
   const expectedEnvironment = {
     name: 'preview-v2',
@@ -2435,6 +2437,9 @@ async function testCloudRoutesEveryOperationByRuntimeEnvironment() {
     previewCase({ hostname: 'suho-j.github.io', pathname: '/beginner-budget/v1/' }),
     previewCase({ hostname: 'suho-j.github.io', pathname: '/beginner-budget-preview' }),
     previewCase({ hostname: 'suho-j.github.io', pathname: '/beginner-budget-preview/v1/' }),
+    previewCase({ origin: 'https://abc123.beginner-budget.pages.dev', protocol: 'https:', hostname: 'abc123.beginner-budget.pages.dev', port: '', pathname: '/' }),
+    previewCase({ origin: 'https://beginner-budget.pages.dev', protocol: 'https:', hostname: 'beginner-budget.pages.dev', port: '', pathname: '/beginner-budget/' }),
+    previewCase({ origin: 'https://beginner-budget.pages.dev.evil.example', protocol: 'https:', hostname: 'beginner-budget.pages.dev.evil.example', port: '', pathname: '/' }),
     {
       location: {
         origin: 'https://suho-j.github.io',
@@ -2442,6 +2447,34 @@ async function testCloudRoutesEveryOperationByRuntimeEnvironment() {
         hostname: 'suho-j.github.io',
         port: '',
         pathname: '/beginner-budget/'
+      },
+      name: 'production',
+      isPreview: false,
+      settingsTable: 'budget_settings',
+      transactionsTable: 'transactions',
+      stateRpc: 'replace_budget_state'
+    },
+    {
+      location: {
+        origin: 'https://beginner-budget.pages.dev',
+        protocol: 'https:',
+        hostname: 'beginner-budget.pages.dev',
+        port: '',
+        pathname: '/'
+      },
+      name: 'production',
+      isPreview: false,
+      settingsTable: 'budget_settings',
+      transactionsTable: 'transactions',
+      stateRpc: 'replace_budget_state'
+    },
+    {
+      location: {
+        origin: 'https://beginner-budget.pages.dev',
+        protocol: 'https:',
+        hostname: 'beginner-budget.pages.dev',
+        port: '',
+        pathname: '/index.html'
       },
       name: 'production',
       isPreview: false,

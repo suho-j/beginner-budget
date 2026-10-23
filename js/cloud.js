@@ -8,8 +8,10 @@
   const runtimeLocation = window.location || {};
   const runtimeOrigin = String(runtimeLocation.origin || '').toLowerCase();
   const runtimePathname = String(runtimeLocation.pathname || '/');
-  const IS_PRODUCTION = runtimeOrigin === 'https://suho-j.github.io'
-    && runtimePathname === '/beginner-budget/';
+  const IS_PRODUCTION = (runtimeOrigin === 'https://suho-j.github.io'
+      && runtimePathname === '/beginner-budget/')
+    || (runtimeOrigin === 'https://beginner-budget.pages.dev'
+      && (runtimePathname === '/' || runtimePathname === '/index.html'));
   const IS_PREVIEW = !IS_PRODUCTION;
   const SETTINGS_TABLE = IS_PREVIEW ? 'preview_v2_budget_settings' : 'budget_settings';
   const TRANSACTIONS_TABLE = IS_PREVIEW ? 'preview_v2_transactions' : 'transactions';
