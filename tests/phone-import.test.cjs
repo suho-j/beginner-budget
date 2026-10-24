@@ -26,6 +26,17 @@ test('수신 전 잔액·계좌번호를 가리고 인증번호 알림을 거절
   assert.ok(event.text.includes('18,900원'));
   assert.throws(() => phone.normalizeEvent(sample({text:'인증번호 123456'})));
 });
+test('알림 본문이 중복돼 같은 잔액이 두 번 와도 잔액을 추출하고, 서로 다른 잔액이면 추출하지 않는다', () => {
+  const phone = require('../js/phone-import.js');
+  const text = '케이뱅크\n입금 9원\n모두 다 캐시백 | 생활통장(8515)\n잔액 1,807,969원';
+  const duplicated = phone.normalizeEvent(sample({text: text + '\n' + text + '\ntrue'}));
+  assert.equal(duplicated.balance_amount, 1807969);
+  assert.ok(!duplicated.text.includes('1,807,969'));
+  const conflicting = phone.normalizeEvent(sample({text: text + '\n잔액 1,800,000원'}));
+  assert.equal(conflicting.balance_amount, undefined);
+  assert.equal(phone.extractBalance('잔액 50,000원\n잔액 50,000원'), 50000);
+  assert.equal(phone.extractBalance('잔액 50,000원\n잔액 40,000원'), null);
+});
 test('다른 앱·빈 본문·잘못된 시각·큰 본문은 수신 대상이 아니다', () => {
   const phone = require('../js/phone-import.js');
   for (const patch of [

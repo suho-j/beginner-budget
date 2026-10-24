@@ -23,8 +23,13 @@
 
   function extractBalance(text) {
     const matches = [...text.matchAll(/잔액\s*[:：]?\s*(-?[\d,.]+)\s*원?/g)];
-    if (matches.length !== 1 || !/^-?(?:\d+|\d{1,3}(?:,\d{3})+)$/.test(matches[0][1])) return null;
-    const amount = Number(matches[0][1].replace(/,/g, ''));
+    const values = new Set();
+    for (const match of matches) {
+      if (!/^-?(?:\d+|\d{1,3}(?:,\d{3})+)$/.test(match[1])) return null;
+      values.add(Number(match[1].replace(/,/g, '')));
+    }
+    if (values.size !== 1) return null;
+    const amount = [...values][0];
     return Number.isInteger(amount) && Math.abs(amount) <= 2147483647 ? amount : null;
   }
 

@@ -1,5 +1,14 @@
 # 개선 진단 및 반복 로그
 
+## 2026-10-24 · 캐시백 알림 잔액 추출 실패 수정 (브랜치 fix/cashback-balance-extract)
+
+- 증상: '모두 다 캐시백' 입금 알림은 폰 푸시에 잔액이 있는데도 앱 원문이 '[잔액 숨김]'으로만 남고 잔액(balance_amount)이 저장되지 않았다. 결제 알림은 '출금가능액' 표기라 저장 본문에서 복구됐지만, '잔액' 표기 알림(캐시백·플러스박스)은 복구가 안 돼 잔액 체인 검증에서 빠졌다.
+- 원인: js/phone-import.js의 extractBalance가 '잔액' 매칭이 정확히 1개일 때만 추출했는데, Tasker 캡처 본문은 알림 문장이 중복돼 같은 잔액이 2번 들어온다. 중복이면 값이 같아도 null을 반환해 잔액이 누락됐다.
+- 수정: 매칭된 잔액들을 값 기준으로 중복 제거해 서로 다른 값이 1개일 때만 추출하도록 바꿨다. 값이 서로 다르면 기존처럼 추출하지 않는다. 저장 본문의 잔액 가리기(redactText)는 그대로 유지한다 — 잔액은 별도 balance_amount 필드로만 이동한다.
+- Tasker 산출물 재생성: tasker/build-project.cjs로 prj.xml 4종과 가이드 html을 다시 만들었다. 폰 적용은 사용자가 설치 페이지에서 프로젝트를 다시 가져와야 한다. 이미 저장된 과거 알림의 잔액은 복구할 수 없다.
+- 함께 정리: tasker-project 테스트의 진단 URL 기대값이 구 주소(suho-j.github.io)로 남아 있던 것을 현재 운영 주소(ggbook)로 맞췄다. 이 단언은 이번 수정 전에도 실패하던 상태였다.
+- 검증: 중복 본문 회귀 테스트를 먼저 실패시킨 뒤 수정. 전체 회귀 95개와 tasker·phone-import 스위트 30개가 모두 통과했다.
+
 ## 2026-10-23 · 운영 주소를 짧은 Pages 주소(ggbook)로 이전 판정 (브랜치 fix/ggbook-production)
 
 - 주소 단축을 위해 Cloudflare Pages 프로젝트를 새로 만들어 운영 주소를 https://ggbook.pages.dev 로 옮긴다. js/cloud.js의 운영 판정에 `https://ggbook.pages.dev` + `/`·`/index.html`를 canonical로 추가하고, 이전 주소(beginner-budget.pages.dev, github.io)는 이전 기간 동안 운영 판정을 유지한다. 해시 서브도메인은 계속 preview_v2.
