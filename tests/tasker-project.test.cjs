@@ -240,8 +240,8 @@ test('상태 팝업이 없어도 연결 상태를 비밀키 없이 읽을 수 �
   const before={...p.globals};
   p.run(buildProject().scripts.status);
   const url=new URL(p.context.budget_status_url);
-  assert.equal(url.origin,'https://suho-j.github.io');
-  assert.equal(url.pathname,'/beginner-budget/artifacts/tasker-guide/diagnose.html');
+  assert.equal(url.origin,'https://ggbook.pages.dev');
+  assert.equal(url.pathname,'/artifacts/tasker-guide/diagnose.html');
   assert.equal(url.search,'');
   const report=new URLSearchParams(url.hash.slice(1));
   assert.equal(report.get('connection'),'ready');
