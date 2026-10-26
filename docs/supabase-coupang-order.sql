@@ -120,11 +120,7 @@ begin
     and environment = v_device.environment and received_at > now() - interval '1 day') >= 1000 then
     raise exception 'daily capture limit reached' using errcode = '54000';
   end if;
-  v_text := regexp_replace(btrim(p_event->>'text'),
-    '(잔액|잔여한도|누적사용액)[[:space:]]*[:：]?[[:space:]]*-?[0-9,.]+[[:space:]]*원?', '[잔액 숨김]', 'g');
-  v_text := regexp_replace(v_text, '(계좌번호|카드번호)[[:space:]]*[:：]?[[:space:]]*[0-9* -]{8,}', '[번호 숨김]', 'g');
-  v_text := regexp_replace(v_text, '\m[0-9]{3,6}-[0-9]{2,6}-[0-9]{3,8}\M', '[번호 숨김]', 'g');
-  v_text := regexp_replace(v_text, '\m([0-9][ -]?){15}[0-9]\M', '[번호 숨김]', 'g');
+  v_text := btrim(p_event->>'text');
   insert into public.phone_inbox(user_id, environment, event_id, kind, package_name, captured_at, text, event_hash, balance_amount)
     values (v_device.user_id, v_device.environment, p_event->>'event_id', p_event->>'kind',
       p_event->>'package_name', v_captured, v_text, v_hash, (p_event->>'balance_amount')::integer);

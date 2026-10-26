@@ -100,8 +100,8 @@ const { PGlite } = require('../.tmp/phone-tests/node_modules/@electric-sql/pglit
     }
   }
   console.log('PASS: UI/server corpus excludes transfers, Plus Box, withdrawals and unknown notifications');
-  const masked = (await db.query("select text from public.phone_inbox where event_id = 'masked-1'")).rows[0].text;
-  assert.ok(!masked.includes('999,999') && !masked.includes('123-456-789012') && masked.includes('18,900'));
+  const stored = (await db.query("select text from public.phone_inbox where event_id = 'masked-1'")).rows[0].text;
+  assert.ok(stored.includes('999,999') && stored.includes('123-456-789012') && stored.includes('18,900'));
   const rotatedToken='c'.repeat(64);
   const rotatedHash=require('node:crypto').createHash('sha256').update(rotatedToken).digest('hex');
   const inboxBefore=(await db.query('select count(*)::int as count from public.phone_inbox')).rows[0].count;

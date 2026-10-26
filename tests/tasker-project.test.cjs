@@ -163,7 +163,7 @@ test('연결 수정 파일에 복구 작업이 포함되고 기존 시작·알�
   assert.ok(!repair.xml.includes('<nme>BB 시작</nme>'));
   assert.ok(!repair.xml.includes('<Profile '));
 });
-test('실제 시험 응답을 확인한 뒤 수집을 켜고 잔액을 가린다', () => {
+test('실제 시험 응답을 확인한 뒤 수집을 켜고 잔액을 그대로 보관한다', () => {
   const p = phone(); const project=buildProject(); p.run(project.scripts.setup);
   const id=JSON.parse(p.globals.BUDGETOUTBOX)[0].event_id;
   p.context.budget_ack='0';p.context.budget_event_id=id;
@@ -179,7 +179,7 @@ test('실제 시험 응답을 확인한 뒤 수집을 켜고 잔액을 가린다
   p.context.evtprm=['케이뱅크','카드 승인','[합성] 18,900원 잔액 50,000원'];
   p.run(project.scripts.bank);
   const queue=JSON.parse(p.globals.BUDGETOUTBOX);
-  assert.equal(queue.length,1);assert.ok(!queue[0].text.includes('50,000'));
+  assert.equal(queue.length,1);assert.ok(queue[0].text.includes('50,000'));
 });
 test('쿠팡이츠 이외의 화면과 사용자가 취소한 화면은 수집하지 않는다', () => {
   const project=buildProject();

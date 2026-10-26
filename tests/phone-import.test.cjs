@@ -18,12 +18,13 @@ const sample = (patch = {}) => ({
   package_name: 'com.kbankwith.smartbank', captured_at: '2026-10-16T01:30:00.000Z',
   text: '체크카드 승인\n쿠팡 주식회사 18,900원\n잔액 999,999원', ...patch
 });
-test('수신 전 잔액·계좌번호를 가리고 인증번호 알림을 거절한다', () => {
+test('수신 시 원문을 가리지 않고 그대로 보관하고 인증번호 알림은 거절한다', () => {
   const phone = require('../js/phone-import.js');
   const event = phone.normalizeEvent(sample({text: sample().text + '\n계좌번호: 123-456-789012'}));
-  assert.ok(!event.text.includes('999,999'));
-  assert.ok(!event.text.includes('123-456-789012'));
+  assert.ok(event.text.includes('999,999'));
+  assert.ok(event.text.includes('123-456-789012'));
   assert.ok(event.text.includes('18,900원'));
+  assert.equal(phone.redactText('잔액 999,999원'), '잔액 999,999원');
   assert.throws(() => phone.normalizeEvent(sample({text:'인증번호 123456'})));
 });
 test('알림 본문이 중복돼 같은 잔액이 두 번 와도 잔액을 추출하고, 서로 다른 잔액이면 추출하지 않는다', () => {
@@ -31,7 +32,7 @@ test('알림 본문이 중복돼 같은 잔액이 두 번 와도 잔액을 추�
   const text = '케이뱅크\n입금 9원\n모두 다 캐시백 | 생활통장(8515)\n잔액 1,807,969원';
   const duplicated = phone.normalizeEvent(sample({text: text + '\n' + text + '\ntrue'}));
   assert.equal(duplicated.balance_amount, 1807969);
-  assert.ok(!duplicated.text.includes('1,807,969'));
+  assert.ok(duplicated.text.includes('1,807,969'));
   const conflicting = phone.normalizeEvent(sample({text: text + '\n잔액 1,800,000원'}));
   assert.equal(conflicting.balance_amount, undefined);
   assert.equal(phone.extractBalance('잔액 50,000원\n잔액 50,000원'), 50000);
