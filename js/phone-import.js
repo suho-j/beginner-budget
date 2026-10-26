@@ -14,11 +14,9 @@
   });
 
   function redactText(text) {
-    return text
-      .replace(/(?:잔액|잔여한도|누적사용액)\s*[:：]?\s*-?[\d,.]+\s*원?/g, '[잔액 숨김]')
-      .replace(/(?:계좌번호|카드번호)\s*[:：]?\s*[\d* -]{8,}/g, '[번호 숨김]')
-      .replace(/\b\d{3,6}-\d{2,6}-\d{3,8}\b/g, '[번호 숨김]')
-      .replace(/\b(?:\d[ -]?){15}\d\b/g, '[번호 숨김]');
+    // 2026-10-26 사용자 지시로 개인정보 가리기를 중단했다. 원문을 그대로 보관한다.
+    // (호출부 호환을 위해 함수 자체는 남겨 둔다.)
+    return typeof text === 'string' ? text : String(text ?? '');
   }
 
   function extractBalance(text) {

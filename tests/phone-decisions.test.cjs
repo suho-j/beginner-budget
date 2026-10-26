@@ -6,7 +6,7 @@ const event=text=>({version:1,event_id:'decision-test',kind:'kbank_notification'
 test('잔액은 구조화해 보존하고 거래 금액과 구별하며 전송 재시도에서도 유지한다',()=>{
   const result=phone.normalizeEvent(event('출금 18,900원\n잔액 999,999원\n계좌번호 123-456-789012'));
   assert.equal(result.balance_amount,999999);
-  assert.ok(!result.text.includes('999,999')&&!result.text.includes('123-456-789012'));
+  assert.ok(result.text.includes('999,999')&&result.text.includes('123-456-789012'));
   assert.deepEqual(phone.normalizeEvent(result),result);
   const draft=review.draft(result);
   assert.equal(draft.amount,18900);assert.equal(draft.balanceAmount,999999);assert.equal(draft.quick,false);

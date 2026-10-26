@@ -1,5 +1,13 @@
 # 개선 진단 및 반복 로그
 
+## 2026-10-26 · 알림 원문 개인정보 가리기 중단 (브랜치 fix/remove-text-redaction)
+
+- 사용자 지시: 알림 원문의 개인정보 가리기(잔액·계좌/카드번호를 '[잔액 숨김]'·'[번호 숨김]'으로 바꾸는 처리)를 하지 않는다. 본인 가계부에서 원문을 그대로 보는 쪽을 택했다.
+- 폰/웹: js/phone-import.js의 redactText를 원문 그대로 반환하도록 바꾸고(호출부 호환 유지), tasker/capture.js의 쿠팡이츠 화면 가리기를 제거했다. js/phone-review.js 분류 초안은 잔액을 가리는 대신 파싱용 복사본에서 잔액 금액 표현만 빼도록 바꿔 메모·금액 해석은 기존과 같다. 잔액은 지금까지처럼 balance_amount로도 별도 저장된다.
+- 서버: receive_phone_event의 본문 가리기 regexp_replace 4줄을 세 SQL 파일(supabase-phone-import·supabase-phone-decisions·supabase-coupang-order)에서 제거했다. 운영 DB에는 supabase-phone-decisions.sql(최신 정의)을 다시 실행해야 반영된다.
+- 적용 조건: 폰은 Tasker 프로젝트 재가져오기, 웹은 이 변경 배포, 서버는 SQL 재실행이 모두 끝나야 새로 들어오는 알림부터 원문이 그대로 저장된다. 이미 저장된 과거 알림은 가려진 상태 그대로 남는다(원본 복구 불가).
+- 검증: phone-import 테스트를 '가리지 않음' 기준으로 갱신하고 전체 회귀와 Tasker·전화 스위트를 실행한다.
+
 ## 2026-10-24 · 캐시백 알림 잔액 추출 실패 수정 (브랜치 fix/cashback-balance-extract)
 
 - 증상: '모두 다 캐시백' 입금 알림은 폰 푸시에 잔액이 있는데도 앱 원문이 '[잔액 숨김]'으로만 남고 잔액(balance_amount)이 저장되지 않았다. 결제 알림은 '출금가능액' 표기라 저장 본문에서 복구됐지만, '잔액' 표기 알림(캐시백·플러스박스)은 복구가 안 돼 잔액 체인 검증에서 빠졌다.

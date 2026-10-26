@@ -51,7 +51,7 @@
     return {valid,list,memo:valid?[coupang?'쿠팡':'쿠팡이츠',...clean.slice(0,4)].join(' · ').slice(0,80):coupang?'쿠팡 주문':'쿠팡이츠 주문 화면'};
   }
   function draft(event){
-    const text=lines(phone.redactText(String(event.text||'')).replace(/출금가능액\s*[:：]?\s*-?[\d,.]+\s*원?/g,'[잔액 숨김]')).join('\n');
+    const text=lines(String(event.text||'').replace(/(?:잔액|잔여한도|누적사용액|출금가능액)\s*[:：]?\s*-?[\d,.]+\s*원?/g,'')).join('\n');
     const orderPlatform=event.kind==='coupang_order'?'coupang':event.kind==='eats_screen'?'eats':null;
     const isOrder=orderPlatform!==null,order=isOrder?orderInfo(text,orderPlatform):null;
     const parsed=readAmount(text,isOrder);

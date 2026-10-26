@@ -9,7 +9,6 @@
     text = screen.map(function (entry) {
       return entry && typeof entry.text === 'string' ? entry.text : '';
     }).filter(Boolean).join('\n');
-    text = BudgetPhoneImport.redactText(text);
     if (!text || !confirm('쿠팡이츠 주문 상세 화면이 맞나요? 주소·전화번호 등 보내지 않을 내용이 있으면 취소하세요.\n\n' + text)) {
       setLocal('budget_queued', '0');
       return;
