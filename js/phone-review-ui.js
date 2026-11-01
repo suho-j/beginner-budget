@@ -95,6 +95,7 @@
     if(!$('review-list'))return;
     const mainCount=rows.filter(r=>!model().draft(r).notice).length,noticeCount=rows.length-mainCount;
     $('review-count').textContent=String(mainCount);$('review-count').hidden=!mainCount;
+    if(window.BudgetNotifications&&typeof window.BudgetNotifications.setPending==='function')window.BudgetNotifications.setPending({total:rows.length,main:mainCount,notice:noticeCount});
     $('review-total').textContent=mainCount?'확인할 거래·주문 '+mainCount+'건':'거래·주문 정리 완료';
     for(const [key,label,count] of [['main','거래·주문',mainCount],['notice','안내',noticeCount]]){
       const b=$('review-filter-'+key);b.textContent=label+' '+count;b.setAttribute('aria-pressed',String(filter===key));

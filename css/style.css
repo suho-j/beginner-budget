@@ -790,3 +790,44 @@ body:has(#tab-review[aria-selected="true"]) .site-header .eyebrow { display:none
 
 .review-field-date input { font-size:.82rem; padding:.7rem .35rem; }
 .review-category-balance { grid-column:1 / -1; margin:0; font-size:.75rem; color:var(--muted); }
+
+/* 알림 (2026-11-01) */
+.header-actions { display:flex; gap:.5rem; align-items:start; }
+.header-notification {
+  position:relative; min-height:34px; min-width:42px;
+  border:1px solid rgba(255,255,255,.45); border-radius:999px;
+  padding:.4rem .6rem; background:rgba(255,255,255,.14); color:#fff; font-size:.95rem;
+}
+.header-notification:hover, .header-notification:focus-visible { background:rgba(255,255,255,.24); }
+.notification-badge {
+  position:absolute; top:-6px; right:-6px; min-width:1.3em; padding:0 .3em;
+  border-radius:999px; background:#ffdf5d; color:#5b4300; font-size:.72rem; font-weight:700; line-height:1.5;
+}
+.notification-badge[hidden] { display:none; }
+.notification-panel {
+  margin-top:1rem; border:1px solid var(--border); border-radius:16px;
+  background:#fff; padding:1rem; display:grid; gap:.6rem;
+}
+.notification-panel[hidden] { display:none; }
+.notification-panel-heading { display:flex; justify-content:space-between; align-items:center; gap:.75rem; }
+.notification-panel-heading h2 { margin:0; font-size:1.15rem; }
+.notification-list { list-style:none; margin:0; padding:0; display:grid; gap:.45rem; }
+.notification-item-button {
+  width:100%; display:flex; flex-wrap:wrap; gap:.3rem .6rem; align-items:baseline;
+  text-align:left; border:1px solid var(--border); border-radius:12px;
+  background:#fff; padding:.6rem .75rem; color:inherit; cursor:pointer;
+}
+.notification-item.is-unread .notification-item-button { background:#eef3ff; border-color:#b9cdf5; }
+.notification-item-button strong { font-size:.95rem; }
+.notification-detail { color:var(--muted); font-size:.85rem; }
+.notification-date { color:var(--muted); font-size:.8rem; margin-left:auto; }
+.notification-new {
+  background:#2457d6; color:#fff; border-radius:999px; padding:0 .45em;
+  font-size:.7rem; font-weight:700; line-height:1.6;
+}
+.notification-banner {
+  border:1px solid #b9cdf5; background:#eef3ff; color:#173c99;
+  border-radius:12px; padding:.6rem .9rem; font-weight:600;
+}
+.notification-banner[hidden] { display:none; }
+.daily-report .summary-grid { margin-bottom:.5rem; }

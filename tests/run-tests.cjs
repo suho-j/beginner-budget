@@ -7582,6 +7582,88 @@ async function testAppLogoutClearsPrivateStateAndFocusesLogin() {
   assert.ok(harness.elements.cloudPassword.focusCount > 0);
 }
 
+function loadNotificationsContext() {
+  const context = { window: {}, console: { ...console, warn() {}, error() {} } };
+  context.window.window = context.window;
+  vm.createContext(context);
+  for (const file of ['js/storage.js', 'js/transactions.js', 'js/notifications.js']) {
+    vm.runInContext(fs.readFileSync(path.join(__dirname, '..', file), 'utf8'), context, { filename: file });
+  }
+  return context.window;
+}
+
+function testNotificationsBuildsStableDedupedItems() {
+  const N = loadNotificationsContext().BudgetNotifications;
+  const tx = (id, date, type, category, amount, memo) => ({ id, date, type, category, amount, memo, source: 'user' });
+  const input = {
+    today: '2026-11-01',
+    pending: { total: 3, main: 2, notice: 1 },
+    transactions: [
+      tx('a', '2026-11-01', 'expense', '생활비', 11110, '쿠팡 주식회사'),
+      tx('a', '2026-11-01', 'expense', '생활비', 11110, '쿠팡 주식회사'),
+      tx('old', '2026-10-25', 'expense', '생활비', 5000, '오래된 지출')
+    ]
+  };
+  const items = N.buildNotifications(input);
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(items)), JSON.parse(JSON.stringify(N.buildNotifications(input))));
+  assert.strictEqual(items[0].id, 'report:2026-11-01');
+  assert.strictEqual(items[1].id, 'pending:3');
+  assert.strictEqual(items.filter((item) => item.id === 'tx:a').length, 1);
+  assert.strictEqual(items.some((item) => item.id === 'tx:old'), false);
+  assert.strictEqual(N.unreadCount(items, ['report:2026-11-01', 'pending:3', 'tx:a']), 0);
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(N.pruneSeenIds(['tx:a', 'tx:gone'], items))), ['tx:a']);
+  assert.strictEqual(N.detectNewTransactions(null, items).length, 0);
+  assert.strictEqual(N.detectNewTransactions(items, N.buildNotifications({
+    today: '2026-11-01', pending: { total: 3 },
+    transactions: [tx('b', '2026-11-01', 'expense', '배달비', 9000, '치킨')]
+  })).length, 1);
+}
+
+function testNotificationsDailyReportMatchesBriefingNumbers() {
+  const window = loadNotificationsContext();
+  const S = window.BudgetStorage;
+  const N = window.BudgetNotifications;
+  const tx = (id, date, type, category, amount, memo) => ({ id, date, type, category, amount, memo, source: 'user' });
+  const state = S.normalizeState({
+    monthlyBudget: 2000000,
+    monthStartDay: 19,
+    transactions: [
+      tx('t1', '2026-10-20', 'expense', '생활비', 500000, '쿠팡 주식회사'),
+      tx('t2', '2026-10-25', 'expense', '배달비', 30000, '쿠팡이츠'),
+      tx('t3', '2026-10-31', 'expense', '생활비', 16900, '더온정육'),
+      tx('t4', '2026-09-30', 'expense', '생활비', 999999, '이전 기간')
+    ]
+  });
+  const report = N.buildDailyReport(state, new Date(2026, 10, 1));
+  assert.strictEqual(report.periodStart, '2026-10-19');
+  assert.strictEqual(report.periodEnd, '2026-11-18');
+  assert.strictEqual(report.expense, 546900);
+  assert.strictEqual(report.budgetRemaining, 2000000 - 546900);
+  assert.strictEqual(report.usageRate, 27.3);
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(report.categories.map((c) => c.category))),
+    ['생활비', '배달비', '의류비', '비상금', '휴가비']);
+  assert.strictEqual(report.coupangTotal, 530000);
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(report.yesterdayExpenses.map((e) => e.memo))), ['더온정육']);
+}
+
+function testNotificationsMarkupAndWiring() {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+  for (const id of ['notification-button', 'notification-count', 'notification-panel', 'notification-list',
+    'notification-empty', 'notification-mark-all', 'notification-banner', 'daily-report-card',
+    'daily-report-expense', 'daily-report-remaining', 'daily-report-rate', 'daily-report-categories',
+    'daily-report-merchants', 'daily-report-coupang', 'daily-report-yesterday']) {
+    assert.ok(html.includes('id="' + id + '"'), id + ' 요소가 있어야 해요');
+  }
+  assert.ok(html.includes('js/notifications.js'), 'notifications.js 스크립트 태그');
+  assert.ok(html.includes('aria-controls="notification-panel"'));
+  const appSource = fs.readFileSync(path.join(__dirname, '..', 'js/app.js'), 'utf8');
+  assert.ok(appSource.includes('BudgetNotifications.update(state)'), 'app render가 알림을 갱신해야 해요');
+  const reviewSource = fs.readFileSync(path.join(__dirname, '..', 'js/phone-review-ui.js'), 'utf8');
+  assert.ok(reviewSource.includes('BudgetNotifications.setPending'), '분류 대기가 알림에 전달돼야 해요');
+  const notificationsSource = fs.readFileSync(path.join(__dirname, '..', 'js/notifications.js'), 'utf8');
+  assert.ok(notificationsSource.includes('beginner-budget.notification-seen.v1'), '읽음 상태 키');
+}
+
 const tests = [
   testStorageDefaultsAndIgnoresLocalStorage,
   testSaveDoesNotUseLocalStorage,
@@ -7677,7 +7759,10 @@ const tests = [
   testAppRecurringConfirmationSerializesAndPreservesFailureInput,
   testAppRecurringDuplicateReloadsWithoutUpsert,
   testAppRecurringLifecycleCoversImportResetSampleDownloadAndLogout,
-  testAppLogoutClearsPrivateStateAndFocusesLogin
+  testAppLogoutClearsPrivateStateAndFocusesLogin,
+  testNotificationsBuildsStableDedupedItems,
+  testNotificationsDailyReportMatchesBriefingNumbers,
+  testNotificationsMarkupAndWiring
 ];
 
 async function run() {

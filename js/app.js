@@ -168,6 +168,7 @@
 
   function render() {
     if (window.BudgetPhoneReviewUI) { window.BudgetPhoneReviewUI.setBudgetState(state); window.BudgetPhoneReviewUI.setTransactions(state.transactions); }
+    if (window.BudgetNotifications) window.BudgetNotifications.update(state);
     const filters = activeFilters();
     elements.monthInput.value = viewState.month;
     const selectedBudget = window.BudgetStorage.budgetForMonth(state, filters.month);
