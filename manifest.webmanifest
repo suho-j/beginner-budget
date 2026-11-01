@@ -1,0 +1,1 @@
+{"background_color":"#f6f7fb","description":"입문자용 정적 가계부","display":"standalone","icons":[{"purpose":"any","sizes":"192x192","src":"icons/icon-192.png","type":"image/png"},{"purpose":"any","sizes":"512x512","src":"icons/icon-512.png","type":"image/png"}],"lang":"ko","name":"처음 가계부","scope":".","short_name":"처음 가계부","start_url":".","theme_color":"#2457d6"}

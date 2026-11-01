@@ -1,5 +1,14 @@
 # 개선 진단 및 반복 로그
 
+## 2026-11-01 · 알림 2차 — 진짜 폰 푸시(Web Push) (브랜치 feature/web-push)
+
+- 범위: PR까지만. 머지·배포·크론 등록은 사용자 승인 후 별도 단계. 앱이 닫혀 있어도 도착하는 Web Push를 붙였다: PWA 매니페스트+서비스워커, 알림 패널의 폰 푸시 켜기/끄기, 구독 저장 테이블+발송자 RPC, VM 발송 스크립트(repo 밖 ~/workspace/push-sender/).
+- 서비스워커(sw.js): push 이벤트에서 알림 표시, notificationclick에서 앱 열기/포커스만 담당한다. fetch는 캐시하지 않고 네트워크로 그대로 통과시켜 배포 캐시 사고를 막는다. 매니페스트는 이름 '처음 가계부'·standalone·테마색 #2457d6(기존 CSS primary), 아이콘은 '처음' 글자 PNG 192/512를 단순 생성했다.
+- 구독 저장(docs/supabase-push-subscriptions.sql, 사용자가 SQL Editor에서 1회 실행·멱등): push_subscriptions(endpoint 유니크·p256dh·auth·user_id·user_agent·생성/수정 시각)에 RLS를 켜고 본인 행만 관리하는 정책과 authenticated GRANT(identity 시퀀스 usage·select 포함)를 같은 파일에 넣었다. 발송자 조회는 보안 정의자 RPC list_push_subscriptions가 담당한다 — 기기 토큰(receive_phone_event)과 같은 패턴으로, 발송 비밀값 원문을 받아 SHA-256 해시가 push_sender_keys의 저장 해시와 일치할 때만 구독 목록을 반환한다. 해시만 SQL 파일에 있고 원본은 VM 발송 스크립트의 .env에만 있다. anon에는 테이블 직접 조회 없이 두 RPC의 execute만 부여했다. 신규 알림 조회용 list_new_phone_events(워터마크 이후 production 행)도 같은 비밀값 검사로 함께 둔다.
+- 앱 UI(js/push.js): 알림 패널 하단에 상태 문구와 켜기/끄기 버튼. 켜기는 권한 요청 → pushManager.subscribe(userVisibleOnly, VAPID 공개키) → 로그인 세션으로 push_subscriptions에 endpoint 기준 upsert, 끄기는 구독 해지+행 삭제. 순수 부분(subscriptionToRow·urlBase64ToUint8Array·describePushState·isMissingTableError)은 BudgetPush로 분리해 테스트한다. VAPID 공개키는 클라이언트 상수(노출 무방), 개인키는 repo에 없다. 테이블이 없거나(SQL 미실행) 권한이 거부되면 짧은 안내 문구로 알린다.
+- 발송 스크립트(~/workspace/push-sender/, repo 밖): web-push 패키지로 발송한다. --send는 전체 구독 1회 발송, --check-new는 워터마크(state.json) 이후 phone_inbox 신규 행 중 의미 있는 건만 골라 보낸다. 선별·문구 변환은 순수 함수(push-message.mjs)로 분리했고 기준은 phone-review 분류를 보수적으로 따랐다: 카드 승인·캐시백/입금·쿠팡 주문처럼 금액이 확실한 거래성 알림만, 취소·환불·거절·연결시험·플러스박스/이체(내 돈 이동)·금액 없는 안내·화면 캡처는 제외. 만료 구독(404/410)은 삭제하지 않고 결과만 보고한다. dry-run은 발송·워터마크 전진 모두 하지 않는다.
+- 검증: TDD로 순수 로직 테스트를 먼저 실패시킨 뒤 구현했다(tests/push.test.cjs, push-sender/test/). node --check 전체 js 통과, node tests/run-tests.cjs 100개 통과(신규 2개 포함), CDP 헤드리스 크롬 스모크(tests/push-browser.cjs)로 매니페스트·SW 등록·푸시 버튼/상태 문구·360px·콘솔 에러 없음을 확인했다. 발송 스크립트는 RPC 호출이 Supabase에 닿는 것까지 확인했다(SQL 미실행 상태라 '함수 없음' 오류가 정상 반환됨). 실제 권한 팝업·실구독·실기기 수신은 헤드리스에서 완료할 수 없어, 배포+SQL 실행+폰 구독 뒤에 확인한다.
+
 ## 2026-11-01 · 앱 안 알림 1차 — 종 아이콘·알림 리스트·오늘의 리포트 카드 (브랜치 feature/in-app-notifications)
 
 - 사용자 요구: 새 사용이 생기면 앱에서 알리고, 아침 텔레그램 리포트와 같은 내용을 홈 첫 화면에서 한눈에 보고 싶다. 앱이 닫혀 있을 때 오는 진짜 폰 푸시(Web Push)는 2차 범위로 분리했다(이번 PR에 없음).

@@ -7664,6 +7664,65 @@ function testNotificationsMarkupAndWiring() {
   assert.ok(notificationsSource.includes('beginner-budget.notification-seen.v1'), '읽음 상태 키');
 }
 
+function loadPushContext() {
+  const context = { window: {}, console: { ...console, warn() {}, error() {} }, atob, btoa, URL };
+  context.window.window = context.window;
+  vm.createContext(context);
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'js/push.js'), 'utf8'), context, { filename: 'js/push.js' });
+  return context.window;
+}
+
+function testPushSubscriptionHelpers() {
+  const P = loadPushContext().BudgetPush;
+  assert.ok(P, 'BudgetPush 모듈이 있어야 해요');
+  const row = P.subscriptionToRow(
+    { endpoint: 'https://fcm.googleapis.com/fcm/send/x', keys: { p256dh: 'pk', auth: 'ak' } },
+    { userId: 'u1', userAgent: 'Android Chrome', now: '2026-11-01T00:00:00.000Z' });
+  assert.strictEqual(row.user_id, 'u1');
+  assert.strictEqual(row.endpoint, 'https://fcm.googleapis.com/fcm/send/x');
+  assert.strictEqual(row.p256dh, 'pk');
+  assert.strictEqual(row.auth, 'ak');
+  assert.strictEqual(row.updated_at, '2026-11-01T00:00:00.000Z');
+  assert.strictEqual(P.subscriptionToRow({ endpoint: 'https://x' }, { userId: 'u1' }), null);
+  assert.strictEqual(P.subscriptionToRow({ endpoint: 'https://x', keys: { p256dh: 'pk', auth: 'ak' } }, {}), null);
+  assert.strictEqual(P.describePushState({ supported: true, permission: 'granted', subscribed: true }).status, 'on');
+  assert.strictEqual(P.describePushState({ supported: true, permission: 'denied', subscribed: false }).status, 'denied');
+  assert.strictEqual(P.describePushState({ supported: false }).status, 'unsupported');
+  assert.strictEqual(P.isMissingTableError({ code: '42P01', message: 'relation does not exist' }), true);
+  assert.strictEqual(P.isMissingTableError({ code: '42501', message: 'permission denied' }), false);
+  assert.strictEqual(P.urlBase64ToUint8Array(P.VAPID_PUBLIC_KEY).length, 65, 'VAPID 공개키는 65바이트 P-256 키');
+}
+
+function testPushMarkupServiceWorkerAndSql() {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+  assert.ok(html.includes('rel="manifest"'), '매니페스트 link');
+  assert.ok(html.includes('manifest.webmanifest'), '매니페스트 경로');
+  assert.ok(html.includes('id="push-toggle"'), '푸시 토글 버튼');
+  assert.ok(html.includes('id="push-status"'), '푸시 상태 문구');
+  assert.ok(html.includes('js/push.js'), 'push.js 스크립트 태그');
+  const sw = fs.readFileSync(path.join(__dirname, '..', 'sw.js'), 'utf8');
+  assert.ok(sw.includes("addEventListener('push'"), 'sw push 핸들러');
+  assert.ok(sw.includes("addEventListener('notificationclick'"), 'sw notificationclick 핸들러');
+  assert.ok(!sw.includes('caches.open') && !sw.includes('cache.add'), 'sw는 캐시를 쓰지 않아야 해요');
+  const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'manifest.webmanifest'), 'utf8'));
+  assert.strictEqual(manifest.name, '처음 가계부');
+  assert.strictEqual(manifest.display, 'standalone');
+  assert.ok(manifest.icons.some((icon) => icon.sizes === '192x192'), '192 아이콘');
+  assert.ok(manifest.icons.some((icon) => icon.sizes === '512x512'), '512 아이콘');
+  const sql = fs.readFileSync(path.join(__dirname, '..', 'docs/supabase-push-subscriptions.sql'), 'utf8');
+  for (const needle of ['create table if not exists public.push_subscriptions',
+    'alter table public.push_subscriptions enable row level security',
+    'push_subscriptions_owner',
+    'grant usage, select on sequence public.push_subscriptions_id_seq to authenticated',
+    'grant execute on function public.list_push_subscriptions(text) to anon',
+    'list_new_phone_events', 'secret_hash']) {
+    assert.ok(sql.includes(needle), 'SQL에 있어야 해요: ' + needle);
+  }
+  assert.ok(/'[0-9a-f]{64}'/.test(sql), 'SQL에는 발송 비밀값의 해시만 들어간다');
+  const pushSource = fs.readFileSync(path.join(__dirname, '..', 'js/push.js'), 'utf8');
+  assert.ok(!/VAPID_PRIVATE|privateKey/.test(pushSource), '클라이언트 코드에 개인키가 있으면 안 돼요');
+}
+
 const tests = [
   testStorageDefaultsAndIgnoresLocalStorage,
   testSaveDoesNotUseLocalStorage,
@@ -7762,7 +7821,9 @@ const tests = [
   testAppLogoutClearsPrivateStateAndFocusesLogin,
   testNotificationsBuildsStableDedupedItems,
   testNotificationsDailyReportMatchesBriefingNumbers,
-  testNotificationsMarkupAndWiring
+  testNotificationsMarkupAndWiring,
+  testPushSubscriptionHelpers,
+  testPushMarkupServiceWorkerAndSql
 ];
 
 async function run() {

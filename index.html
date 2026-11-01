@@ -5,7 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>처음 가계부</title>
   <link rel="icon" href="data:,">
-  <link rel="stylesheet" href="css/style.css?v=20261101-notifications">
+  <meta name="theme-color" content="#2457d6">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="stylesheet" href="css/style.css?v=20261101-webpush">
 </head>
 <body id="top">
   <a class="skip-link" href="#main-content">본문으로 바로가기</a>
@@ -33,6 +35,10 @@
     </div>
     <p id="notification-empty" class="muted">새 알림이 없어요.</p>
     <ul id="notification-list" class="notification-list"></ul>
+    <div class="notification-push">
+      <p id="push-status" class="muted" role="status">폰 푸시 상태를 확인하고 있어요.</p>
+      <button id="push-toggle" type="button" class="secondary">폰 푸시 켜기</button>
+    </div>
   </section>
 
   <div class="app-sticky-chrome" role="region" aria-label="가계부 상태와 주요 메뉴">
@@ -527,6 +533,7 @@
   <script src="js/cashflow-schedule.js?v=20261022"></script>
   <script src="js/cashflow-ui.js?v=20261022-schedule"></script>
   <script src="js/notifications.js?v=20261101-notifications"></script>
+  <script src="js/push.js?v=20261101-webpush"></script>
   <script src="js/app.js?v=20261101-notifications"></script>
 </body>
 </html>
