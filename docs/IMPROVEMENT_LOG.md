@@ -1,5 +1,16 @@
 # 개선 진단 및 반복 로그
 
+## 2026-11-01 · 앱 안 알림 1차 — 종 아이콘·알림 리스트·오늘의 리포트 카드 (브랜치 feature/in-app-notifications)
+
+- 사용자 요구: 새 사용이 생기면 앱에서 알리고, 아침 텔레그램 리포트와 같은 내용을 홈 첫 화면에서 한눈에 보고 싶다. 앱이 닫혀 있을 때 오는 진짜 폰 푸시(Web Push)는 2차 범위로 분리했다(이번 PR에 없음).
+- 알림 종: .site-header 오른쪽 위(로그아웃 옆)에 종 버튼 + 안 읽은 개수 배지를 뒀다. 누르면 알림 패널이 열리고 최신순 리스트, 빈 상태 문구, '모두 읽음', Esc 닫기·항목 클릭 시 관련 탭(분류/내역/홈 리포트 카드) 이동을 제공한다. 모든 DOM은 textContent로만 만든다.
+- 알림 항목은 전부 클라이언트에서 기존 데이터로 다시 계산한다(신규 백엔드·테이블 없음). 순수 로직은 js/notifications.js의 buildNotifications/buildDailyReport로 분리했다: (1) 최근 7일 거래 알림(상호·금액·카테고리·날짜, 최대 20건), (2) 분류 대기 N건 알림 — phone-review-ui의 render가 이미 계산하는 main/notice 개수를 BudgetNotifications.setPending으로 전달하는 한 줄 훅만 추가했다, (3) 오늘 날짜 기준 아침 리포트 알림 1건. id는 거래 id/날짜/대기 건수 기반으로 안정적으로 부여해 재로드해도 같은 알림이 새로 생기지 않고, 입력 기준 중복 제거를 한다.
+- 읽음 상태 저장 방식 결정: repo 규칙은 "브라우저 localStorage에는 가계부 데이터를 저장하지 않는다"이다. 알림 자체는 매번 클라우드 데이터에서 재계산하고, localStorage에는 읽은 알림의 id 목록(UI 상태)만 저장한다 — 금액·메모·날짜 같은 가계부 내용은 저장하지 않으며, 현재 목록에 없는 id는 pruneSeenIds로 버려 크기를 유지한다. 첫 실행에서는 거래 목록이 처음 채워진 시점의 기존 거래를 기준선으로 읽음 처리해, 기능 배포 직후 과거 거래가 전부 새 알림으로 폭증하지 않게 했다(로그인 전 빈 상태에서는 기준선 확정을 미룬다).
+- 앱이 열려 있을 때 배너: 60초 간격으로 document.hidden이면 건너뛰고 phone-review 새로고침(BudgetPhoneReviewUI.open)을 재사용해 분류 대기를 갱신한다. 거래는 기존 'budget:phone-recorded' → 클라우드 재로드 → app render 경로로 들어오며, notifications.update가 이전 스냅샷과 비교해 새 거래 id나 분류 대기 증가가 있을 때만 aria-live 배너로 한 번 알린다.
+- 홈 '오늘의 리포트' 카드: 홈 상단에 카드 1개를 추가했다. 숫자는 매일 07:50 텔레그램 브리핑과 같아야 하므로 기존 BudgetTransactions.summarize(기간 필터·카테고리·장소 상위 5+기타·쿠팡/쿠팡이츠 분리·쿠팡 전체와 비중·어제 내역)를 재사용하고, 브리핑 기준에 맞춰 사용률은 소수 1자리로, 카테고리는 지출 카테고리 전체(0원 포함, 큰 순)로 확장했다. 기간은 조회 월이 아니라 오늘 기준 현재 예산 기간(월 시작일 적용)이다.
+- 배선은 최소 침습으로 했다: app.js render()에 BudgetNotifications.update(state) 한 줄, phone-review-ui render()에 setPending 한 줄. index.html 캐시버스터는 css·phone-review-ui·app을 20261101-notifications로 올리고 notifications.js를 같은 버전으로 추가했다.
+- 검증: 순수 로직 테스트를 먼저 실패시킨 뒤 구현했다(tests/notifications.test.cjs). node --check 전체 js 통과, node tests/run-tests.cjs 98개 통과(신규 3개 포함), CDP 헤드리스 크롬 스모크(tests/notifications-browser.cjs)로 로그인 없는 범위에서 종 버튼·패널 열기·모두 읽음·seen id만 저장됨·리포트 카드 기간 표시·360px 가로 넘침 없음·콘솔 에러 없음을 확인했다. 로그인 상태의 실제 데이터 스모크는 자격증명이 필요한 범위라 이번 작업에서 하지 못했다.
+
 ## 2026-10-26 · 알림 원문 개인정보 가리기 중단 (브랜치 fix/remove-text-redaction)
 
 - 사용자 지시: 알림 원문의 개인정보 가리기(잔액·계좌/카드번호를 '[잔액 숨김]'·'[번호 숨김]'으로 바꾸는 처리)를 하지 않는다. 본인 가계부에서 원문을 그대로 보는 쪽을 택했다.

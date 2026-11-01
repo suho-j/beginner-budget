@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>처음 가계부</title>
   <link rel="icon" href="data:,">
-  <link rel="stylesheet" href="css/style.css?v=cashflow-20261022">
+  <link rel="stylesheet" href="css/style.css?v=20261101-notifications">
 </head>
 <body id="top">
   <a class="skip-link" href="#main-content">본문으로 바로가기</a>
@@ -16,9 +16,24 @@
         <h1>처음 가계부</h1>
         <p class="lead">가입 없이 오늘의 수입과 지출을 기록하고, 이번 달 돈 흐름을 한눈에 확인하세요.</p>
       </div>
-      <button id="cloud-logout-button" type="button" class="header-logout" hidden>로그아웃</button>
+      <div class="header-actions">
+        <button id="notification-button" type="button" class="header-notification" aria-label="알림" aria-haspopup="true" aria-expanded="false" aria-controls="notification-panel">
+          <span aria-hidden="true">🔔</span>
+          <span id="notification-count" class="notification-badge" hidden>0</span>
+        </button>
+        <button id="cloud-logout-button" type="button" class="header-logout" hidden>로그아웃</button>
+      </div>
     </div>
   </header>
+
+  <section id="notification-panel" class="container notification-panel" aria-labelledby="notification-title" hidden>
+    <div class="notification-panel-heading">
+      <h2 id="notification-title">알림</h2>
+      <button id="notification-mark-all" type="button" class="secondary">모두 읽음</button>
+    </div>
+    <p id="notification-empty" class="muted">새 알림이 없어요.</p>
+    <ul id="notification-list" class="notification-list"></ul>
+  </section>
 
   <div class="app-sticky-chrome" role="region" aria-label="가계부 상태와 주요 메뉴">
     <div id="preview-data-warning" class="preview-data-warning" role="status" hidden>
@@ -46,6 +61,7 @@
   </section>
 
   <p id="global-message" class="container message global-message" role="status" aria-live="polite" aria-atomic="true"></p>
+  <p id="notification-banner" class="container message notification-banner" role="status" aria-live="polite" hidden></p>
 
   <main id="main-content" class="container layout" tabindex="-1">
     <section id="panel-cashflow" class="tab-panel" role="tabpanel" aria-labelledby="tab-cashflow" hidden>
@@ -132,6 +148,37 @@
       <button id="cloud-upload-button" type="button" class="visually-hidden" data-cloud-write hidden>클라우드에 저장</button>
       <button id="cloud-download-button" type="button" class="secondary" hidden>클라우드에서 불러오기</button>
       <p id="cloud-message" class="message" role="status" aria-live="polite"></p>
+    </section>
+
+    <section id="daily-report-card" class="panel daily-report" aria-labelledby="daily-report-title" tabindex="-1">
+      <div class="section-heading section-heading-spread">
+        <h2 id="daily-report-title">오늘의 리포트</h2>
+        <p id="daily-report-period" class="hint">기간을 불러오고 있어요.</p>
+      </div>
+      <div class="summary-grid" aria-live="polite">
+        <article class="summary-card expense-card">
+          <span class="card-label">이번 기간 사용</span>
+          <strong id="daily-report-expense">0원</strong>
+        </article>
+        <article class="summary-card budget-card">
+          <span class="card-label">예산 잔액</span>
+          <strong id="daily-report-remaining">0원</strong>
+          <small id="daily-report-rate">사용률 0%</small>
+        </article>
+      </div>
+      <div class="category-breakdown" aria-labelledby="daily-report-categories-title">
+        <h3 id="daily-report-categories-title">카테고리별 지출</h3>
+        <div id="daily-report-categories" class="category-breakdown-list"></div>
+      </div>
+      <div class="category-breakdown merchant-breakdown" aria-labelledby="daily-report-merchants-title">
+        <h3 id="daily-report-merchants-title">장소별 지출</h3>
+        <div id="daily-report-merchants" class="merchant-breakdown-list"></div>
+        <p id="daily-report-coupang" class="merchant-coupang-summary"></p>
+      </div>
+      <div class="category-breakdown yesterday-expenses" aria-labelledby="daily-report-yesterday-title">
+        <h3 id="daily-report-yesterday-title">어제 사용 내역</h3>
+        <div id="daily-report-yesterday" class="yesterday-expense-list"></div>
+      </div>
     </section>
 
     <section class="account-overview panel" aria-labelledby="account-overview-title">
@@ -476,9 +523,10 @@
   <script src="js/phone-import.js?v=20261026-noredact"></script>
   <script src="js/phone-sync.js?v=20261021-review-deck"></script>
   <script src="js/phone-review.js?v=20261026-noredact"></script>
-  <script src="js/phone-review-ui.js?v=20261021-review-deck"></script>
+  <script src="js/phone-review-ui.js?v=20261101-notifications"></script>
   <script src="js/cashflow-schedule.js?v=20261022"></script>
   <script src="js/cashflow-ui.js?v=20261022-schedule"></script>
-  <script src="js/app.js?v=20261021-review-deck"></script>
+  <script src="js/notifications.js?v=20261101-notifications"></script>
+  <script src="js/app.js?v=20261101-notifications"></script>
 </body>
 </html>
