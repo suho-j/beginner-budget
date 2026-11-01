@@ -107,15 +107,28 @@
       && window && 'PushManager' in window && 'Notification' in window);
   }
 
+  // 푸시 컨트롤은 알림 패널 상단과 설정 탭 두 곳에 있다. 모두 같은 상태를 그린다.
+  function pushControls() {
+    if (typeof document.querySelectorAll !== 'function') return [];
+    return Array.from(document.querySelectorAll('[data-push-control]'))
+      .map((root) => ({
+        status: root.querySelector('[data-push-status]'),
+        button: root.querySelector('[data-push-toggle]')
+      }))
+      .filter((control) => control.status && control.button);
+  }
+
   function render(messageOverride) {
-    const status = $('push-status');
-    const button = $('push-toggle');
-    if (!status || !button) return;
+    const controls = pushControls();
+    if (!controls.length) return;
     const described = describePushState(lastState);
-    status.textContent = typeof messageOverride === 'string' && messageOverride
+    const message = typeof messageOverride === 'string' && messageOverride
       ? messageOverride : described.message;
-    button.textContent = described.buttonLabel;
-    button.disabled = busy || described.buttonDisabled;
+    for (const control of controls) {
+      control.status.textContent = message;
+      control.button.textContent = described.buttonLabel;
+      control.button.disabled = busy || described.buttonDisabled;
+    }
   }
 
   async function readState() {
@@ -200,17 +213,19 @@
   }
 
   function init() {
-    const button = $('push-toggle');
-    if (!button) return;
+    const controls = pushControls();
+    if (!controls.length) return;
     if (isSupported()) {
       // 푸시 수신용 서비스워커 등록. 캐시는 하지 않는다(sw.js는 네트워크 기본).
       navigatorRef.serviceWorker.register('sw.js').catch(() => {});
     }
-    button.addEventListener('click', () => {
-      if (busy) return;
-      if (lastState.subscribed) disable();
-      else enable();
-    });
+    for (const control of controls) {
+      control.button.addEventListener('click', () => {
+        if (busy) return;
+        if (lastState.subscribed) disable();
+        else enable();
+      });
+    }
     const bell = $('notification-button');
     if (bell) bell.addEventListener('click', () => { refresh(); });
     refresh();
