@@ -830,4 +830,9 @@ body:has(#tab-review[aria-selected="true"]) .site-header .eyebrow { display:none
   border-radius:12px; padding:.6rem .9rem; font-weight:600;
 }
 .notification-banner[hidden] { display:none; }
+.notification-push {
+  border-top:1px solid var(--border); padding-top:.6rem;
+  display:flex; flex-wrap:wrap; gap:.4rem .75rem; align-items:center; justify-content:space-between;
+}
+.notification-push p { margin:0; flex:1 1 12rem; }
 .daily-report .summary-grid { margin-bottom:.5rem; }
