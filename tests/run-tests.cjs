@@ -7697,8 +7697,19 @@ function testPushMarkupServiceWorkerAndSql() {
   const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
   assert.ok(html.includes('rel="manifest"'), '매니페스트 link');
   assert.ok(html.includes('manifest.webmanifest'), '매니페스트 경로');
-  assert.ok(html.includes('id="push-toggle"'), '푸시 토글 버튼');
-  assert.ok(html.includes('id="push-status"'), '푸시 상태 문구');
+  const count = (needle) => html.split(needle).length - 1;
+  assert.strictEqual(count('data-push-control'), 2, '푸시 컨트롤은 알림 패널·설정 탭 두 곳');
+  assert.strictEqual(count('data-push-toggle'), 2, '푸시 토글 버튼 두 곳');
+  assert.strictEqual(count('data-push-status'), 2, '푸시 상태 문구 두 곳');
+  assert.ok(!html.includes('id="push-toggle"') && !html.includes('id="push-status"'), '푸시 요소에 중복 id를 쓰지 않아요');
+  const panelStart = html.indexOf('id="notification-panel"');
+  const panelControl = html.indexOf('data-push-control', panelStart);
+  const panelList = html.indexOf('id="notification-list"', panelStart);
+  assert.ok(panelStart >= 0 && panelControl > panelStart && panelControl < panelList,
+    '알림 패널에서는 푸시 컨트롤이 알림 목록보다 위에 있어요');
+  const settingsStart = html.indexOf('id="panel-settings"');
+  assert.ok(settingsStart >= 0 && html.indexOf('data-push-control', settingsStart) > settingsStart,
+    '설정 탭에도 푸시 컨트롤이 있어요');
   assert.ok(html.includes('js/push.js'), 'push.js 스크립트 태그');
   const sw = fs.readFileSync(path.join(__dirname, '..', 'sw.js'), 'utf8');
   assert.ok(sw.includes("addEventListener('push'"), 'sw push 핸들러');
@@ -7721,6 +7732,7 @@ function testPushMarkupServiceWorkerAndSql() {
   assert.ok(/'[0-9a-f]{64}'/.test(sql), 'SQL에는 발송 비밀값의 해시만 들어간다');
   const pushSource = fs.readFileSync(path.join(__dirname, '..', 'js/push.js'), 'utf8');
   assert.ok(!/VAPID_PRIVATE|privateKey/.test(pushSource), '클라이언트 코드에 개인키가 있으면 안 돼요');
+  assert.ok(pushSource.includes("querySelectorAll('[data-push-control]')"), '푸시 UI는 모든 컨트롤 인스턴스를 함께 렌더링해요');
 }
 
 const tests = [

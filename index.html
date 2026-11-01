@@ -7,7 +7,7 @@
   <link rel="icon" href="data:,">
   <meta name="theme-color" content="#2457d6">
   <link rel="manifest" href="manifest.webmanifest">
-  <link rel="stylesheet" href="css/style.css?v=20261101-webpush">
+  <link rel="stylesheet" href="css/style.css?v=20261102-pushplace">
 </head>
 <body id="top">
   <a class="skip-link" href="#main-content">본문으로 바로가기</a>
@@ -33,12 +33,12 @@
       <h2 id="notification-title">알림</h2>
       <button id="notification-mark-all" type="button" class="secondary">모두 읽음</button>
     </div>
+    <div class="notification-push" data-push-control>
+      <p class="muted" role="status" data-push-status>폰 푸시 상태를 확인하고 있어요.</p>
+      <button type="button" class="secondary" data-push-toggle>폰 푸시 켜기</button>
+    </div>
     <p id="notification-empty" class="muted">새 알림이 없어요.</p>
     <ul id="notification-list" class="notification-list"></ul>
-    <div class="notification-push">
-      <p id="push-status" class="muted" role="status">폰 푸시 상태를 확인하고 있어요.</p>
-      <button id="push-toggle" type="button" class="secondary">폰 푸시 켜기</button>
-    </div>
   </section>
 
   <div class="app-sticky-chrome" role="region" aria-label="가계부 상태와 주요 메뉴">
@@ -454,6 +454,18 @@
       <div id="phone-inbox"></div>
     </section>
 
+    <section class="panel" aria-labelledby="push-settings-title">
+      <div class="section-heading section-heading-spread">
+        <h2 id="push-settings-title">폰 푸시 알림</h2>
+        <a class="back-to-top" href="#top">위로 ↑</a>
+      </div>
+      <p class="hint">앱이 닫혀 있어도 새 사용이 생기면 이 기기로 푸시 알림을 보내요.</p>
+      <div class="notification-push" data-push-control>
+        <p class="muted" role="status" data-push-status>폰 푸시 상태를 확인하고 있어요.</p>
+        <button type="button" class="secondary" data-push-toggle>폰 푸시 켜기</button>
+      </div>
+    </section>
+
     <section class="panel" aria-labelledby="tools-title">
       <div class="section-heading section-heading-spread">
         <h2 id="tools-title">보기와 데이터 도구</h2>
@@ -533,7 +545,7 @@
   <script src="js/cashflow-schedule.js?v=20261022"></script>
   <script src="js/cashflow-ui.js?v=20261022-schedule"></script>
   <script src="js/notifications.js?v=20261101-notifications"></script>
-  <script src="js/push.js?v=20261101-webpush"></script>
+  <script src="js/push.js?v=20261102-pushplace"></script>
   <script src="js/app.js?v=20261101-notifications"></script>
 </body>
 </html>

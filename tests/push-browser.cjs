@@ -130,17 +130,48 @@ async function waitFor(fn, timeoutMs, label) {
       "navigator.serviceWorker.getRegistration().then((r) => new URL(r.active ? r.active.scriptURL : r.installing.scriptURL).pathname)"
     ), '/sw.js');
 
-    // 알림 패널 안 푸시 영역: 상태 문구와 버튼
+    // 푸시 컨트롤은 알림 패널 상단과 설정 탭, 두 곳에 있다
+    assert.equal(await evaluate("document.querySelectorAll('[data-push-control]').length"), 2);
+    assert.equal(await evaluate("!!document.querySelector('#notification-panel [data-push-toggle]')"), true);
+    assert.equal(await evaluate("!!document.querySelector('#panel-settings [data-push-toggle]')"), true);
+    // 알림 패널에서는 목록보다 위에 있다
+    assert.equal(await evaluate(
+      "(document.getElementById('notification-list').compareDocumentPosition("
+      + "document.querySelector('#notification-panel [data-push-control]'))"
+      + " & Node.DOCUMENT_POSITION_PRECEDING) !== 0"
+    ), true, '패널 푸시 컨트롤은 알림 목록보다 위에 있어야 해요');
+
+    // 알림 패널을 열면 상태 문구가 채워진다
     await evaluate("document.getElementById('notification-button').click()");
     assert.equal(await evaluate("document.getElementById('notification-panel').hidden"), false);
-    assert.equal(await evaluate("!!document.getElementById('push-toggle')"), true);
     const statusText = await waitFor(async () => {
-      const text = await evaluate("document.getElementById('push-status').textContent");
+      const text = await evaluate("document.querySelector('#notification-panel [data-push-status]').textContent");
       return text && !text.includes('확인하고 있어요') ? text : null;
     }, 15000, 'push status text');
     assert.match(statusText, /폰 푸시/, '상태 문구가 채워져야 해요: ' + statusText);
-    assert.match(await evaluate("document.getElementById('push-toggle').textContent"), /폰 푸시/);
     assert.equal(await evaluate("(async () => Boolean((await navigator.serviceWorker.getRegistration()).pushManager))()"), true);
+
+    // 설정 탭에서도 보이고, 두 인스턴스의 표시가 항상 같다(동기화)
+    await evaluate("document.getElementById('tab-settings').click()");
+    assert.equal(await evaluate("document.getElementById('panel-settings').hidden"), false);
+    const readInstances = "() => [...document.querySelectorAll('[data-push-control]')].map((root) => ({"
+      + " status: root.querySelector('[data-push-status]').textContent,"
+      + " label: root.querySelector('[data-push-toggle]').textContent,"
+      + " disabled: root.querySelector('[data-push-toggle]').disabled }))";
+    const sameInstances = (list) => list.length === 2
+      && list.every((item) => item.status === list[0].status && item.label === list[0].label
+        && item.disabled === list[0].disabled && !item.status.includes('확인하고 있어요'));
+    assert.equal(await evaluate(`(${readInstances})().length`), 2);
+    assert.ok(sameInstances(await evaluate(`(${readInstances})()`)), '두 인스턴스 표시가 같아야 해요');
+    // 한쪽 버튼을 눌러도(가능한 경우) 다른 쪽 표시가 함께 갱신된다
+    if (await evaluate("!document.querySelector('#panel-settings [data-push-toggle]').disabled")) {
+      await evaluate("document.querySelector('#panel-settings [data-push-toggle]').click()");
+      const synced = await waitFor(async () => {
+        const list = await evaluate(`(${readInstances})()`);
+        return sameInstances(list) ? list : null;
+      }, 15000, 'push instances sync after click').catch(() => null);
+      assert.ok(synced, '클릭 뒤에도 두 인스턴스 표시가 같아야 해요');
+    }
 
     // 모바일 360px에서 가로 넘침 없음
     await send('Emulation.setDeviceMetricsOverride', { width: 360, height: 800, deviceScaleFactor: 1, mobile: true });
